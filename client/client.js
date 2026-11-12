@@ -74,6 +74,27 @@ window.__ModuleLoader__.load({
                 viewPlugins: '插件',
                 viewSkills: '技能',
                 viewMcp: 'MCP · {n}',
+                viewAgent: '模式 · {n}',
+                agentNew: '新建模式',
+                agentNewTitle: '新建 Agent 模式',
+                agentHint: '模式是 profile 的 cordis.patch.yml 里的一条声明行：新行不改动任何既有模式，保存后由 HMR 生效。',
+                agentId: '标识（小写字母、数字、- 和 _）',
+                agentName: '显示名',
+                agentDesc: '说明（可选）',
+                agentPlugins: '{n} 个插件',
+                agentDefault: '默认',
+                agentBroken: '加载失败',
+                agentMissing: '未加载',
+                agentCreate: '创建',
+                agentCreated: '模式「{name}」已就绪',
+                agentDeleted: '已删除 {name}',
+                agentDelete: '删除',
+                agentDeleteTitle: '删除 Agent 模式',
+                agentDeleteBody: '将从 profile 的 cordis.patch.yml 里删掉模式「{name}」这一条声明，文件其余部分不动。',
+                agentEmpty: '还没有可编辑的模式声明。',
+                agentRegistryOff: '宿主没有暴露 agentPresets 服务，只能读文件里已有的声明。',
+                agentBuiltin: '内置',
+                agentBuiltinHint: '这个模式由 bundle 层声明，没有可在 profile 里改的行。',
                 pillMcp: '{n} 个 MCP',
                 mcpBadge: 'MCP',
                 mcpEdit: '编辑配置',
@@ -226,6 +247,27 @@ window.__ModuleLoader__.load({
                 viewPlugins: 'Plugins',
                 viewSkills: 'Skills',
                 viewMcp: 'MCP · {n}',
+                viewAgent: 'Presets · {n}',
+                agentNew: 'New preset',
+                agentNewTitle: 'New agent preset',
+                agentHint: 'A preset is one declaration row in the profile cordis.patch.yml. A new row leaves every existing preset untouched, and HMR applies it.',
+                agentId: 'Id (lowercase letters, digits, - and _)',
+                agentName: 'Display name',
+                agentDesc: 'Description (optional)',
+                agentPlugins: '{n} plugins',
+                agentDefault: 'default',
+                agentBroken: 'broken',
+                agentMissing: 'not loaded',
+                agentCreate: 'Create',
+                agentCreated: 'Preset "{name}" is ready',
+                agentDeleted: 'Deleted {name}',
+                agentDelete: 'Delete',
+                agentDeleteTitle: 'Delete agent preset',
+                agentDeleteBody: 'Removes the "{name}" declaration from the profile cordis.patch.yml; the rest of the file stays as it is.',
+                agentEmpty: 'No preset declarations to edit yet.',
+                agentRegistryOff: 'The host exposes no agentPresets service, so only declarations already in the file can be read.',
+                agentBuiltin: 'built-in',
+                agentBuiltinHint: 'This preset is declared by a bundle, so there is no profile row to edit.',
                 pillMcp: '{n} MCP',
                 mcpBadge: 'MCP',
                 mcpEdit: 'Edit config',
@@ -654,6 +696,21 @@ window.__ModuleLoader__.load({
             }, [refresh, flash]);
 
             const groups = data === null ? [] : data.groups;
+        const [agentInfo, setAgentInfo] = useState(null);
+        const [agentError, setAgentError] = useState(null);
+        const loadAgents = useCallback(async () => {
+            try {
+                const result = await runOp("presets.list", {});
+                setAgentInfo(result);
+                setAgentError(null);
+            }
+            catch (failure) {
+                setAgentError(failure.message);
+            }
+        }, []);
+        useEffect(() => {
+            if (view === "agent" && agentInfo === null && agentError === null) void loadAgents();
+        }, [view, agentInfo, agentError, loadAgents]);
         const [dragId, setDragId] = useState(null);
         const [dropAt, setDropAt] = useState(null);
         const [railWidth, setRailWidth] = useState(() => {
@@ -1000,6 +1057,13 @@ window.__ModuleLoader__.load({
                 view === "mcp"
                     ? h(Button, { onClick: () => setDialog({ kind: "mcpEdit", row: null }), disabled: busy }, t("mcpCreate"))
                     : null,
+                view === "agent"
+                    ? h(Button, {
+                        onClick: () => setDialog({ kind: "agentNew" }),
+                        disabled: busy,
+                        title: t("agentHint"),
+                    }, t("agentNew"))
+                    : null,
                 view === "mcp" && (data?.panelDeny ?? []).length > 0
                     ? h(Button, {
                         onClick: () => { void act("tool.import", {}, result => flash(fmt(t, "toolsImported", { n: result.added }))); },
@@ -1021,7 +1085,7 @@ window.__ModuleLoader__.load({
             const tabs = h("div", {
                 style: { display: "flex", gap: 4, padding: "0 16px 10px", alignItems: "center" },
             },
-            [["all", t("viewAll")], ["plugin", t("viewPlugins")], ["skill", t("viewSkills")], ["mcp", fmt(t, "viewMcp", { n: counts.mcp[0] })]].map(([key, label]) => h("button", {
+            [["all", t("viewAll")], ["plugin", t("viewPlugins")], ["skill", t("viewSkills")], ["mcp", fmt(t, "viewMcp", { n: counts.mcp[0] })], ["agent", fmt(t, "viewAgent", { n: agentInfo === null ? 0 : agentInfo.rows.length })]].map(([key, label]) => h("button", {
                 key,
                 type: "button",
                 onClick: () => {
@@ -1138,11 +1202,52 @@ window.__ModuleLoader__.load({
                     h(Button, { small: true, onClick: () => { void openAuto(); }, disabled: busy || data === null }, t("railEmptyAction")))
                 : null);
 
+            const agentCard = row => h("div", {
+                key: row.rowId,
+                style: {
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    padding: "9px 12px",
+                    borderRadius: 9,
+                    border: `1px solid ${T.borderSoft}`,
+                    background: T.card,
+                    marginBottom: 7,
+                },
+            },
+            h("div", { style: { flex: 1, minWidth: 0 } },
+                h("div", { style: { display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" } },
+                    h("span", { style: { fontSize: 13, fontWeight: 600 } }, row.name === "" ? row.id : row.name),
+                    row.id === agentInfo.defaultId ? h(Badge, { tone: "warn" }, t("agentDefault")) : null,
+                    row.broken !== null ? h(Badge, { tone: "danger", title: row.broken }, t("agentBroken")) : null,
+                    row.loaded !== true ? h(Badge, { tone: "plain" }, t("agentMissing")) : null,
+                    row.editable === false ? h(Badge, { tone: "plain" }, t("agentBuiltin")) : null,
+                    h("code", { style: { fontSize: 11.5, color: T.text3 } }, row.id),
+                    row.plugins === null ? null : h("span", { style: { fontSize: 11.5, color: T.text3 } }, fmt(t, "agentPlugins", { n: row.plugins }))),
+                row.description === "" ? null : h("div", { style: { marginTop: 3, fontSize: 12, color: T.text3 } }, row.description)),
+            h(ActionChip, {
+                label: t("agentDelete"),
+                tone: "danger",
+                disabled: busy || row.editable === false,
+                title: row.editable === false ? t("agentBuiltinHint") : undefined,
+                onClick: () => setDialog({ kind: "agentDelete", row }),
+            }));
+
+            const agentList = agentError !== null
+                ? h("div", { style: emptyStyle }, agentError)
+                : agentInfo === null
+                    ? h("div", { style: emptyStyle }, t("loading"))
+                    : agentInfo.rows.length === 0
+                        ? h("div", { style: emptyStyle }, t("agentEmpty"))
+                        : agentInfo.rows.map(agentCard);
+
             const list = h("div", { style: { flex: 1, minWidth: 0, display: "flex", flexDirection: "column" } },
                 h("div", { style: { flex: 1, overflow: "auto", padding: "10px 12px 12px" } },
                     data === null
                         ? h("div", { style: emptyStyle }, error === null ? t("loading") : error)
-                        : rows.length === 0
+                        : view === "agent"
+                            ? agentList
+                            : rows.length === 0
                             ? h("div", { style: emptyStyle }, groupId === null ? t("empty") : t("emptyGroup"))
                             : rows.map(row => h(Row, {
                                 key: memberKey(row.kind, row.id),
@@ -1256,6 +1361,10 @@ window.__ModuleLoader__.load({
                 groups,
                 data,
                 onClose: () => setDialog(null),
+                onAgentsChanged: () => {
+                    setAgentInfo(null);
+                    setAgentError(null);
+                },
                 onSaveMcp: async (id, config) => {
                     if (id === null) await act("mcp.create", { config }, () => flash(t("mcpSaved")));
                     else await act("mcp.save", { id, config }, () => flash(t("mcpSaved")));
@@ -1999,8 +2108,13 @@ window.__ModuleLoader__.load({
             });
         }
 
-        function DialogHost({ dialog, t, busy, groups, data, onClose, onSaveMcp, onDeleteMcp, onSaveTool, onProbe, act, flash, onImportMarket, onApplyAuto, onSaveGroup, onSavePreset, onApplyPreset, onApplyPresetNow, onRunGroupToggle }) {
+        function DialogHost({ dialog, t, busy, groups, data, onClose, onAgentsChanged, onSaveMcp, onDeleteMcp, onSaveTool, onProbe, act, flash, onImportMarket, onApplyAuto, onSaveGroup, onSavePreset, onApplyPreset, onApplyPresetNow, onRunGroupToggle }) {
             const [name, setName] = useState(dialog.kind === "rename" ? dialog.group.name : "");
+            const [agentId, setAgentId] = useState("");
+            const [agentName, setAgentName] = useState("");
+            const [agentDesc, setAgentDesc] = useState("");
+            const [agentError, setAgentError] = useState(null);
+            const agentIdOk = /^[a-z0-9][a-z0-9_-]{0,31}$/.test(agentId);
             const foot = (children) => children;
             const mcpIds = new Set((data === null ? [] : data.plugins).filter(row => row.mcp === true).map(row => row.id));
             const mcpInPreset = (preset) => (preset?.enabled?.plugin ?? []).filter(id => mcpIds.has(id)).length;
@@ -2077,6 +2191,70 @@ window.__ModuleLoader__.load({
                         }, t("applyNow")),
                     ]),
                 });
+            }
+
+            if (dialog.kind === "agentNew") {
+                const submit = async () => {
+                    setAgentError(null);
+                    try {
+                        await act("presets.create", { id: agentId, name: agentName, description: agentDesc }, result => {
+                            flash(fmt(t, "agentCreated", { name: result.name === "" ? result.id : result.name }));
+                        });
+                        onAgentsChanged();
+                        onClose();
+                    }
+                    catch (failure) {
+                        setAgentError(failure.message);
+                    }
+                };
+                return h(Dialog, {
+                    title: t("agentNewTitle"),
+                    hint: t("agentHint"),
+                    width: 520,
+                    onClose,
+                    footer: foot([
+                        h(Button, { key: "c", onClick: onClose }, t("cancel")),
+                        h(Button, {
+                            key: "s",
+                            tone: "primary",
+                            disabled: !agentIdOk || busy,
+                            onClick: () => { void submit(); },
+                        }, t("agentCreate")),
+                    ]),
+                },
+                h("div", { style: { display: "flex", flexDirection: "column", gap: 9 } },
+                    h("label", { style: { fontSize: 12, color: T.text2 } }, t("agentId")),
+                    h(Input, { value: agentId, onChange: setAgentId, placeholder: "writing", autoFocus: true, grow: true }),
+                    !agentIdOk && agentId !== "" ? h("div", { style: { fontSize: 11.5, color: T.danger } }, t("agentId")) : null,
+                    h("label", { style: { fontSize: 12, color: T.text2 } }, t("agentName")),
+                    h(Input, { value: agentName, onChange: setAgentName, placeholder: agentId, grow: true }),
+                    h("label", { style: { fontSize: 12, color: T.text2 } }, t("agentDesc")),
+                    h(Input, { value: agentDesc, onChange: setAgentDesc, grow: true }),
+                    agentError === null ? null : h("div", { style: { fontSize: 12, color: T.danger, lineHeight: 1.5 } }, agentError)));
+            }
+
+            if (dialog.kind === "agentDelete") {
+                return h(Dialog, {
+                    title: t("agentDeleteTitle"),
+                    hint: fmt(t, "agentDeleteBody", { name: dialog.row.name === "" ? dialog.row.id : dialog.row.name }),
+                    width: 460,
+                    onClose,
+                    footer: foot([
+                        h(Button, { key: "c", onClick: onClose }, t("cancel")),
+                        h(Button, {
+                            key: "d",
+                            tone: "danger",
+                            disabled: busy,
+                            onClick: () => {
+                                void act("presets.delete", { id: dialog.row.id }, () => flash(fmt(t, "agentDeleted", { name: dialog.row.id }))).then(() => {
+                                    // The registry drops the record only after the patch reloads.
+                                    setTimeout(onAgentsChanged, 1200);
+                                    onClose();
+                                });
+                            },
+                        }, t("agentDelete")),
+                    ]),
+                }, h("code", { style: { fontSize: 12, color: T.text3 } }, dialog.row.rowId));
             }
 
             if (dialog.kind === "newGroup") {

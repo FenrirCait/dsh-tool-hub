@@ -61,6 +61,24 @@ dsh plugin install ./dsh-tool-hub
 
 写入是原子的（临时文件 + rename），保存中途崩掉不会留下半截状态。
 
+## Agent 模式
+
+**模式** 视图列的是 `agentPresets` 注册表知道的东西：内置的 `standard` / `ptc` / `minimal` / `cordis`，
+加上 profile `cordis.patch.yml` 里每一条声明行。预设**不是目录**——DSH 0.2.x 起已经没有代码读
+`~/.dsh/.agent-presets/<id>/` 了；单位是这一行：
+
+```yaml
+- insert:
+    - id: preset-writing
+      name: '@deepseek-ai/dsh-agent-preset'
+      config: { id: writing, name: "写作", order: 12, plugins: [] }
+```
+
+新建时只追加这一段，文件其余部分逐字节不动。写进去不算完：会向注册表 `resolve` 这个 id 复核，
+记录缺失或被标成 `broken` 就把这一行回滚并说明原因（`register()` 允许「成功但 broken」，只信写入
+会留下一个组不起来的空壳）。删除拒绝当前默认模式，并且等注册表真的丢掉记录才报成功。每次写入都会
+在 `~/.dsh/backups/` 留一份带时间戳的副本。
+
 ## 不做什么
 
 - **MCP 只管宿主 MCP client 那三种形态**（stdio / sse / http）；服务器进程内部自己的事仍归它自己。

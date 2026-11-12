@@ -9,6 +9,7 @@ import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { parsePresetRows } from '../lib/presets.js'
 
 const home = join(tmpdir(), `tool-hub-smoke-${Date.now()}`)
 process.env.DSH_HOME = home
@@ -54,6 +55,19 @@ const patchText = [
   '        env: {}',
   '        cwd: ""',
   '      disabled: true',
+  '- id: agent-preset-registry',
+  '  name: "@deepseek-ai/dsh-agent-preset-registry"',
+  '  config:',
+  '    default: fixture-default',
+  '    selectedDefault: fixture-default',
+  '- insert:',
+  '    - id: preset-fixture-default',
+  "      name: '@deepseek-ai/dsh-agent-preset'",
+  '      config:',
+  '        id: fixture-default',
+  '        name: "Fixture default"',
+  '        order: 5',
+  '        plugins: []',
   '- id: keep-me',
   '  name: some-other-plugin',
   '',
@@ -111,6 +125,23 @@ const ctx = {
     }
     if (name === 'pluginManager') return fakeManager
     if (name === 'profileContext') return { dir: profileDir }
+    // The registry reloads the patch through HMR; reading the file back is the closest the fixture
+    // can get to that, and it is what makes "created but broken" observable.
+    if (name === 'agentPresets') {
+      return {
+        async list() {
+          const text = await readFile(join(profileDir, 'cordis.patch.yml'), 'utf8')
+          return parsePresetRows(text).map(row => ({ id: row.id, ...(row.name === '' ? {} : { name: row.name }), order: row.order ?? 100 }))
+        },
+        async resolve(id) {
+          const text = await readFile(join(profileDir, 'cordis.patch.yml'), 'utf8')
+          const row = parsePresetRows(text).find(entry => entry.id === id)
+          if (row === undefined) throw new Error(`Unknown agent preset: ${id}`)
+          if (id.startsWith('broken')) return { id, broken: 'row 1 names no plugin' }
+          return { id }
+        },
+      }
+    }
     if (name === 'tools') return { view: () => ({ knownNames: mcpTools, restrictableNames: mcpTools }) }
     if (name === 'agents') return { list: () => [] }
     return undefined
@@ -363,6 +394,31 @@ check('wrong method refused', wrongMethod.status === 405)
 // ── 10. bad op ─────────────────────────────────────────────────────────────
 r = await op('nope', {})
 check('unknown op answers an error', r.ok === false && r.error.code === 'bad-op', JSON.stringify(r.error))
+
+// ── 10. agent presets ─────────────────────────────────────────────────────
+const patch0 = await readFile(join(profileDir, 'cordis.patch.yml'), 'utf8')
+r = await op('presets.list', {})
+check('presets listed', r.ok === true && r.data.rows.some(row => row.id === 'fixture-default'), JSON.stringify(r.error))
+check('preset default known', r.data.defaultId === 'fixture-default', JSON.stringify(r.data))
+check('registry seen', r.data.registry === true)
+r = await op('presets.create', { id: 'probe-one', name: 'Probe one', description: 'written by the smoke test', order: 42 })
+check('preset created', r.ok === true && r.data.ok === true && r.data.verified === true, JSON.stringify(r))
+const patch1 = await readFile(join(profileDir, 'cordis.patch.yml'), 'utf8')
+check('preset row appended', patch1.includes('id: preset-probe-one') && patch1.includes('plugins: []'), patch1.slice(-220))
+check('preset file kept its tail row', patch1.includes('- id: keep-me'))
+check('preset backup written', typeof r.data.backup === 'string' && (await stat(r.data.backup)).size > 0, String(r.data.backup))
+check('preset listed after create', (await op('presets.list', {})).data.rows.some(row => row.id === 'probe-one'))
+check('preset duplicate refused', (await op('presets.create', { id: 'probe-one' })).ok === false)
+check('preset bad id refused', (await op('presets.create', { id: 'Bad Id' })).ok === false)
+r = await op('presets.create', { id: 'broken-one' })
+check('broken preset rolled back', r.ok === false && r.error.code === 'preset-broken', JSON.stringify(r.error))
+check('broken preset left no row', !(await readFile(join(profileDir, 'cordis.patch.yml'), 'utf8')).includes('id: preset-broken-one'))
+check('default preset cannot be deleted', (await op('presets.delete', { id: 'fixture-default' })).ok === false)
+r = await op('presets.delete', { id: 'probe-one' })
+check('preset deleted', r.ok === true && r.data.ok === true, JSON.stringify(r))
+check('preset row gone', !(await readFile(join(profileDir, 'cordis.patch.yml'), 'utf8')).includes('id: preset-probe-one'))
+check('preset delete kept the rest', (await op('presets.list', {})).data.rows.some(row => row.id === 'fixture-default'))
+void patch0
 
 server.close()
 const failed = results.filter(row => row.ok !== true)

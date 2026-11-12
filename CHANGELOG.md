@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.8.0
+
+- Agent presets are now first-class in the panel: a **Presets** view lists every preset the registry knows,
+  including the built-in ones, and a new preset is written as one declaration row in the profile
+  `cordis.patch.yml` — nothing else in the file is touched, and HMR applies it without a restart.
+- Creating a preset verifies itself: the row is written, the registry is asked to resolve the id, and the row
+  is rolled back if the record is missing or marked broken. `register()` is allowed to succeed with a broken
+  record, so believing the write alone would leave a preset that composes nothing.
+- Deleting refuses the current default preset and waits for the registry to actually drop the record before
+  reporting success. Every write leaves a timestamped copy in `~/.dsh/backups/`.
+- Built-in presets (`standard`, `ptc`, `minimal`, `cordis`) are listed read-only, because their rows live in
+  the bundle layer rather than the profile.
+
 ## 1.6.9
 
 - The Enable / Disable chips on a group stay on one line and inside their border at any rail width, and the

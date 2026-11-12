@@ -80,6 +80,25 @@ Everything the panel writes about *groups and presets* lives in one file:
 
 Writes are atomic (temp file + rename), so a crash mid-save cannot leave a half-written state.
 
+## Agent presets
+
+The **Presets** view lists what the `agentPresets` registry knows: the built-ins (`standard`, `ptc`,
+`minimal`, `cordis`) plus every declaration row in the profile `cordis.patch.yml`. A preset is not a
+folder — since DSH 0.2.x nothing reads `~/.dsh/.agent-presets/<id>/` any more; the unit is the row:
+
+```yaml
+- insert:
+    - id: preset-writing
+      name: '@deepseek-ai/dsh-agent-preset'
+      config: { id: writing, name: "Writing", order: 12, plugins: [] }
+```
+
+Creating one appends exactly that block and leaves the rest of the file byte-for-byte alone. The write is
+verified rather than assumed: the registry is asked to resolve the id, and a missing or `broken` record
+rolls the row back and reports why. Deleting refuses the current default preset and waits until the
+registry really drops the record before saying it worked. Every write leaves a timestamped copy in
+`~/.dsh/backups/`.
+
 ## What it does not do
 
 - **MCP servers** are supported for the STDIO / SSE / HTTP shape the host's own MCP client uses.
