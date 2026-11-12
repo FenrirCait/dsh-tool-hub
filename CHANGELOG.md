@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.2.0
+## 1.2.1
 
 - **Per-tool switches for MCP servers.** Each server row now opens a tool list: unchecked tools are
   masked out of the model-visible tool table for every session of this install, not merely blocked
