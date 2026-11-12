@@ -73,6 +73,26 @@ window.__ModuleLoader__.load({
                 viewAll: '全部',
                 viewPlugins: '插件',
                 viewSkills: '技能',
+                viewMcp: 'MCP · {n}',
+                pillMcp: '{n} 个 MCP',
+                mcpBadge: 'MCP',
+                mcpEdit: '编辑配置',
+                mcpEditTitle: 'MCP 服务器配置',
+                mcpEditHint: '改的是 profile 的 cordis.patch.yml，只重写这一条的 config，保存后由 HMR 热加载。',
+                mcpName: '服务器名',
+                mcpTransport: '传输方式',
+                mcpCommand: '启动命令',
+                mcpArgs: '参数（每行一个）',
+                mcpEnv: '环境变量（每行 KEY=VALUE）',
+                mcpCwd: '工作目录',
+                mcpUrl: '地址 URL',
+                mcpTimeout: '调用超时（毫秒）',
+                mcpFailFast: '启动失败即报错',
+                mcpSave: '保存',
+                mcpSaved: '已写入，等待热加载…',
+                mcpNoConfig: '这一条不在 profile patch 里，配置不能在面板里改。',
+                mcpInvalidNumber: '超时要是数字',
+                mcpBadEnv: '这一行不是 KEY=VALUE：{line}',
                 groups: '分组',
                 newGroup: '新建分组',
                 search: '搜索名称或模块名',
@@ -151,6 +171,26 @@ window.__ModuleLoader__.load({
                 viewAll: 'All',
                 viewPlugins: 'Plugins',
                 viewSkills: 'Skills',
+                viewMcp: 'MCP · {n}',
+                pillMcp: '{n} MCP',
+                mcpBadge: 'MCP',
+                mcpEdit: 'Edit config',
+                mcpEditTitle: 'MCP server config',
+                mcpEditHint: 'Edits this row in the profile cordis.patch.yml — only its config block is rewritten, and HMR applies it.',
+                mcpName: 'Server name',
+                mcpTransport: 'Transport',
+                mcpCommand: 'Command',
+                mcpArgs: 'Arguments (one per line)',
+                mcpEnv: 'Environment (KEY=VALUE per line)',
+                mcpCwd: 'Working directory',
+                mcpUrl: 'URL',
+                mcpTimeout: 'Call timeout (ms)',
+                mcpFailFast: 'Fail when startup fails',
+                mcpSave: 'Save',
+                mcpSaved: 'Written, waiting for the reload…',
+                mcpNoConfig: 'This row is not in the profile patch, so its config cannot be edited here.',
+                mcpInvalidNumber: 'The timeout has to be a number.',
+                mcpBadEnv: 'This line is not KEY=VALUE: {line}',
                 groups: 'Groups',
                 newGroup: 'New group',
                 search: 'Search name or module',
@@ -362,7 +402,7 @@ window.__ModuleLoader__.load({
             }, children);
         }
 
-        function Input({ value, onChange, placeholder, onEnter, autoFocus }) {
+        function Input({ value, onChange, placeholder, onEnter, autoFocus, grow }) {
             return h("input", {
                 value,
                 autoFocus: autoFocus === true,
@@ -373,6 +413,8 @@ window.__ModuleLoader__.load({
                 },
                 style: {
                     height: 30,
+                    width: grow === true ? "100%" : undefined,
+                    boxSizing: "border-box",
                     padding: "0 10px",
                     borderRadius: 8,
                     border: `1px solid ${T.border}`,
@@ -510,18 +552,20 @@ window.__ModuleLoader__.load({
 
             const rows = useMemo(() => {
                 const wanted = `${query}`.trim().toLowerCase();
+                const isMcp = row => row.mcp === true;
                 const match = (row) => {
                     if (wanted !== "") {
-                        const haystack = `${row.name} ${row.moduleName || ""} ${row.description || ""}`.toLowerCase();
+                        const haystack = `${row.name} ${row.moduleName || ""} ${row.description || ""} ${row.serverName || ""}`.toLowerCase();
                         if (!haystack.includes(wanted)) return false;
                     }
-                    if (view === "plugin" && row.kind !== "plugin") return false;
+                    if (view === "plugin" && (row.kind !== "plugin" || isMcp(row))) return false;
+                    if (view === "mcp" && !isMcp(row)) return false;
                     if (view === "skill" && row.kind !== "skill") return false;
                     return true;
                 };
                 let combined = [];
                 if (view !== "skill") combined = combined.concat(plugins);
-                if (view !== "plugin") combined = combined.concat(skills);
+                if (view !== "plugin" && view !== "mcp") combined = combined.concat(skills);
                 combined = combined.filter(match);
                 if (groupId !== null) {
                     const set = groupMembers.get(groupId);
@@ -549,8 +593,13 @@ window.__ModuleLoader__.load({
             }, [plugins, skills, query, view, groupId, groupMembers]);
 
             const counts = useMemo(() => {
-                const value = { plugin: [0, 0], skill: [0, 0] };
+                const value = { plugin: [0, 0], skill: [0, 0], mcp: [0, 0] };
                 for (const row of plugins) {
+                    if (row.mcp === true) {
+                        value.mcp[0] += 1;
+                        if (row.enabled) value.mcp[1] += 1;
+                        continue;
+                    }
                     value.plugin[0] += 1;
                     if (row.enabled) value.plugin[1] += 1;
                 }
@@ -560,6 +609,11 @@ window.__ModuleLoader__.load({
                 }
                 return value;
             }, [plugins, skills]);
+
+            const maxGroupSize = useMemo(
+                () => groups.reduce((top, group) => Math.max(top, group.members.length), 1),
+                [groups],
+            );
 
             const toggleRow = (kind, id, enabled) => act("toggle", { kind, id, enabled }, (result) => {
                 if (result && result.ok === false) flash(result.message || "failed");
@@ -633,7 +687,8 @@ window.__ModuleLoader__.load({
                         : [
                             h(Badge, { key: "on", tone: "success" }, fmt(t, "pillOn", { n: counts.plugin[1] + counts.skill[1] })),
                             h(Badge, { key: "skills", tone: "warn" }, fmt(t, "pillSkills", { n: counts.skill[0] })),
-                            h(Badge, { key: "all", tone: "plain" }, fmt(t, "pillAll", { n: counts.plugin[0] + counts.skill[0] })),
+                            h(Badge, { key: "mcp", tone: "plain" }, fmt(t, "pillMcp", { n: counts.mcp[0] })),
+                            h(Badge, { key: "all", tone: "plain" }, fmt(t, "pillAll", { n: counts.plugin[0] + counts.skill[0] + counts.mcp[0] })),
                         ])),
             h("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" } },
                 h(Button, { onClick: openAuto, disabled: busy, title: t("autoHint") }, t("auto")),
@@ -643,7 +698,7 @@ window.__ModuleLoader__.load({
             const tabs = h("div", {
                 style: { display: "flex", gap: 4, padding: "0 16px 10px", alignItems: "center" },
             },
-            [["all", t("viewAll")], ["plugin", t("viewPlugins")], ["skill", t("viewSkills")]].map(([key, label]) => h("button", {
+            [["all", t("viewAll")], ["plugin", t("viewPlugins")], ["skill", t("viewSkills")], ["mcp", fmt(t, "viewMcp", { n: counts.mcp[0] })]].map(([key, label]) => h("button", {
                 key,
                 type: "button",
                 onClick: () => {
@@ -725,7 +780,8 @@ window.__ModuleLoader__.load({
             groups.map((group, index) => h(GroupRow, {
                 key: group.id,
                 group,
-                    accent: accentPalette[index % accentPalette.length],
+                accent: accentPalette[index % accentPalette.length],
+                accentDepth: Math.round((0.34 + 0.66 * Math.sqrt(group.members.length / maxGroupSize)) * 100),
                 t,
                 active: groupId === group.id,
                 onSelect: () => {
@@ -773,6 +829,7 @@ window.__ModuleLoader__.load({
                                     setPicked(next);
                                 },
                                 onToggle: enabled => toggleRow(row.kind, row.id, enabled),
+                                onEdit: (target) => setDialog({ kind: "mcpEdit", row: target }),
                                 busy,
                             }))));
 
@@ -857,6 +914,10 @@ window.__ModuleLoader__.load({
                 groups,
                 data,
                 onClose: () => setDialog(null),
+                onSaveMcp: async (id, config) => {
+                    await act("mcp.save", { id, config }, () => flash(t("mcpSaved")));
+                    setDialog(null);
+                },
                 act,
                 flash,
                 onApplyAuto: async () => {
@@ -990,7 +1051,7 @@ window.__ModuleLoader__.load({
 
         const accentPalette = [T.brand, T.success, T.warn, T.danger];
 
-        function GroupRow({ group, t, accent, active, onSelect, onEnable, onRename, onDelete }) {
+        function GroupRow({ group, t, accent, accentDepth, active, onSelect, onEnable, onRename, onDelete }) {
             const [hover, setHover] = useState(false);
             const count = group.members.length;
             return h("div", {
@@ -1051,17 +1112,23 @@ window.__ModuleLoader__.load({
                     color: T.text,
                 },
             }, group.name),
-            group.auto === true ? h("span", {
-                title: t("autoTag"),
-                style: { width: 6, height: 6, borderRadius: 3, background: accent ?? T.brand, flex: "0 0 auto" },
-            }) : null,
+            h("span", {
+                title: group.auto === true ? t("autoTag") : group.name,
+                style: {
+                    width: 7,
+                    height: 7,
+                    borderRadius: 4,
+                    background: tint(accent ?? T.brand, accentDepth ?? 100),
+                    flex: "0 0 auto",
+                },
+            }),
             group.stale > 0 ? h("span", { title: fmt(t, "stale", { n: group.stale }), style: { color: T.warn, fontSize: 11, fontWeight: 700 } }, "!") : null,
             h("span", {
                 style: {
                     minWidth: 22,
                     padding: "1px 6px",
                     borderRadius: 999,
-                    background: groupTint.countBg,
+                    background: tint(accent ?? T.brand, Math.round((accentDepth ?? 40) * 0.16)),
                     color: T.text2,
                     fontSize: 11,
                     fontWeight: 600,
@@ -1078,7 +1145,7 @@ window.__ModuleLoader__.load({
         }
 
 
-        function Row({ row, t, picked, onPick, onToggle, busy }) {
+        function Row({ row, t, picked, onPick, onToggle, busy, onEdit }) {
             const [hover, setHover] = useState(false);
             const readOnly = row.manageable === false;
             const selfEntry = row.self === true;
@@ -1135,7 +1202,9 @@ window.__ModuleLoader__.load({
                     },
                     title: row.kind === "plugin" ? row.moduleName : row.name,
                 }, row.name),
-                h(Badge, { tone: row.kind === "plugin" ? "brand" : "warn" }, row.kind === "plugin" ? t("kindPlugin") : t("kindSkill")),
+                row.mcp === true
+                    ? h(Badge, { tone: "brand", title: row.mcpPatchId || "" }, t("mcpBadge"))
+                    : h(Badge, { tone: row.kind === "plugin" ? "brand" : "warn" }, row.kind === "plugin" ? t("kindPlugin") : t("kindSkill")),
                 row.official === true ? h(Badge, { tone: "success", title: t("officialHint") }, t("officialBadge")) : null,
                 row.dupeLabel === "" ? null : h("span", {
                     title: row.kind === "plugin" ? row.moduleName : row.name,
@@ -1144,7 +1213,9 @@ window.__ModuleLoader__.load({
                 readOnly ? h(Badge, { tone: "warn", title: row.readOnlyReason }, t("readonly")) : null,
                 selfEntry ? h(Badge, { tone: "brand", title: t("selfHint") }, t("selfBadge")) : null,
                 row.phase === "failed" ? h(Badge, { tone: "danger" }, "failed") : null),
-                row.description === "" ? null : h("div", {
+                row.mcp === true
+                    ? h("div", { style: { marginTop: 1, fontSize: 11.5, color: T.text3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: [row.transport, row.command || row.url].filter(Boolean).join(" · ") }, [row.transport, row.command || row.url].filter(Boolean).join(" · "))
+                    : row.description === "" ? null : h("div", {
                     style: {
                         marginTop: 1,
                         fontSize: 11.5,
@@ -1155,6 +1226,9 @@ window.__ModuleLoader__.load({
                     },
                     title: row.description,
                 }, row.description)),
+            row.mcp === true && row.mcpEditable === true
+                ? h(Button, { small: true, onClick: () => onEdit(row), disabled: busy, title: t("mcpEditHint") }, t("mcpEdit"))
+                : null,
             h("span", {
                 style: {
                     flex: "0 0 auto",
@@ -1166,16 +1240,160 @@ window.__ModuleLoader__.load({
             }, row.enabled ? t("enabled") : t("disabled")),
             h(Switch, {
                 checked: row.enabled,
-                disabled: busy || readOnly || selfEntry,
+                disabled: busy || readOnly || selfEntry || String(row.id).startsWith("patch:"),
                 label: row.name,
                 onChange: enabled => onToggle(enabled),
             }));
         }
 
         // ── dialogs ────────────────────────────────────────────────────────
-        function DialogHost({ dialog, t, busy, groups, data, onClose, act, flash, onApplyAuto, onSaveGroup, onSavePreset, onApplyPreset, onApplyPresetNow, onRunGroupToggle }) {
+
+        const fieldRowStyle = { display: "flex", alignItems: "center", gap: 10, marginBottom: 9 };
+        const fieldLabelStyle = { width: 116, flex: "0 0 auto", fontSize: 12, color: T.text3 };
+        const areaStyle = {
+            width: "100%",
+            minHeight: 92,
+            padding: "7px 9px",
+            borderRadius: 8,
+            border: `1px solid ${T.border}`,
+            background: T.base,
+            color: T.text,
+            fontSize: 12,
+            lineHeight: 1.5,
+            resize: "vertical",
+            outline: "none",
+            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+            boxSizing: "border-box",
+        };
+
+        function linesOf(text) {
+            return `${text}`.split("\n").map(line => line.trim()).filter(line => line !== "");
+        }
+
+        function McpEditDialog({ row, t, busy, onClose, onSave }) {
+            const config = row.config !== null && typeof row.config === "object" ? row.config : {};
+            const [serverName, setServerName] = useState(typeof config.serverName === "string" ? config.serverName : row.name);
+            const [transport, setTransport] = useState(typeof config.transport === "string" ? config.transport : "stdio");
+            const [command, setCommand] = useState(typeof config.command === "string" ? config.command : "");
+            const [args, setArgs] = useState(Array.isArray(config.args) ? config.args.join("\n") : "");
+            const [cwd, setCwd] = useState(typeof config.cwd === "string" ? config.cwd : "");
+            const [env, setEnv] = useState(
+                config.env !== null && typeof config.env === "object" && !Array.isArray(config.env)
+                    ? Object.entries(config.env).map(([key, value]) => `${key}=${value}`).join("\n")
+                    : "",
+            );
+            const [url, setUrl] = useState(typeof config.url === "string" ? config.url : "");
+            const [timeout, setTimeoutValue] = useState(typeof config.toolCallTimeoutMs === "number" ? String(config.toolCallTimeoutMs) : "");
+            const [failFast, setFailFast] = useState(config.failOnStartupError === true);
+            const [error, setError] = useState(null);
+
+            const submit = () => {
+                const next = {};
+                if (serverName.trim() === "") next.serverName = null;
+                else next.serverName = serverName.trim();
+                next.transport = transport;
+                if (command.trim() === "") next.command = null;
+                else next.command = command.trim();
+                const argLines = linesOf(args);
+                next.args = argLines.length === 0 ? null : argLines;
+                next.cwd = cwd.trim() === "" ? "" : cwd.trim();
+                if (url.trim() === "") next.url = null;
+                else next.url = url.trim();
+                const envLines = linesOf(env);
+                const envObject = {};
+                for (const line of envLines) {
+                    const cut = line.indexOf("=");
+                    if (cut <= 0) {
+                        setError(fmt(t, "mcpBadEnv", { line }));
+                        return;
+                    }
+                    envObject[line.slice(0, cut).trim()] = line.slice(cut + 1).trim();
+                }
+                next.env = envLines.length === 0 ? {} : envObject;
+                if (timeout.trim() === "") next.toolCallTimeoutMs = null;
+                else if (!/^\d+$/.test(timeout.trim())) {
+                    setError(t("mcpInvalidNumber"));
+                    return;
+                }
+                else next.toolCallTimeoutMs = Number(timeout.trim());
+                next.failOnStartupError = failFast;
+                onSave(row.mcpPatchId, next);
+            };
+
+            return h(Dialog, {
+                title: t("mcpEditTitle"),
+                hint: t("mcpEditHint"),
+                width: 560,
+                onClose,
+                footer: [
+                    h(Button, { key: "c", onClick: onClose }, t("cancel")),
+                    h(Button, { key: "s", tone: "primary", disabled: busy, onClick: submit }, t("mcpSave")),
+                ],
+            },
+            h("div", null,
+                h("div", { style: fieldRowStyle },
+                    h("span", { style: fieldLabelStyle }, t("mcpName")),
+                    h(Input, { value: serverName, onChange: setServerName, grow: true })),
+                h("div", { style: fieldRowStyle },
+                    h("span", { style: fieldLabelStyle }, t("mcpTransport")),
+                    h("div", { style: { display: "flex", gap: 6 } },
+                        ["stdio", "sse", "http"].map(kind => h("button", {
+                            key: kind,
+                            type: "button",
+                            onClick: () => setTransport(kind),
+                            style: {
+                                height: 26,
+                                padding: "0 11px",
+                                borderRadius: 7,
+                                border: `1px solid ${transport === kind ? tint(T.brand, 34) : T.border}`,
+                                background: transport === kind ? tint(T.brand, 12) : "transparent",
+                                color: transport === kind ? T.brand : T.text2,
+                                fontSize: 12,
+                                cursor: "pointer",
+                                fontFamily: "inherit",
+                            },
+                        }, kind)))),
+                h("div", { style: fieldRowStyle },
+                    h("span", { style: fieldLabelStyle }, t("mcpCommand")),
+                    h(Input, { value: command, onChange: setCommand, grow: true })),
+                h("div", { style: { marginBottom: 9 } },
+                    h("div", { style: { fontSize: 12, color: T.text3, marginBottom: 4 } }, t("mcpArgs")),
+                    h("textarea", {
+                        value: args,
+                        onChange: event => setArgs(event.target.value),
+                        spellCheck: false,
+                        style: areaStyle,
+                    })),
+                h("div", { style: { marginBottom: 9 } },
+                    h("div", { style: { fontSize: 12, color: T.text3, marginBottom: 4 } }, t("mcpEnv")),
+                    h("textarea", {
+                        value: env,
+                        onChange: event => setEnv(event.target.value),
+                        spellCheck: false,
+                        style: areaStyle,
+                    })),
+                h("div", { style: fieldRowStyle },
+                    h("span", { style: fieldLabelStyle }, t("mcpUrl")),
+                    h(Input, { value: url, onChange: setUrl, grow: true })),
+                h("div", { style: fieldRowStyle },
+                    h("span", { style: fieldLabelStyle }, t("mcpCwd")),
+                    h(Input, { value: cwd, onChange: setCwd, grow: true })),
+                h("div", { style: fieldRowStyle },
+                    h("span", { style: fieldLabelStyle }, t("mcpTimeout")),
+                    h(Input, { value: timeout, onChange: setTimeoutValue, grow: true })),
+                h("div", { style: fieldRowStyle },
+                    h("span", { style: fieldLabelStyle }, t("mcpFailFast")),
+                    h(Switch, { checked: failFast, label: t("mcpFailFast"), onChange: setFailFast })),
+                error === null ? null : h("div", { style: { marginTop: 4, fontSize: 12, color: T.danger } }, error)));
+        }
+
+        function DialogHost({ dialog, t, busy, groups, data, onClose, onSaveMcp, act, flash, onApplyAuto, onSaveGroup, onSavePreset, onApplyPreset, onApplyPresetNow, onRunGroupToggle }) {
             const [name, setName] = useState(dialog.kind === "rename" ? dialog.group.name : "");
             const foot = (children) => children;
+
+            if (dialog.kind === "mcpEdit") {
+                return h(McpEditDialog, { row: dialog.row, t, busy, onClose, onSave: onSaveMcp });
+            }
 
             if (dialog.kind === "confirmGroup") {
                 return h(Dialog, {
@@ -1316,7 +1534,6 @@ window.__ModuleLoader__.load({
                 return h(Dialog, {
                     title: t("autoTitle"),
                     hint: t("autoHint"),
-                    width: 560,
                     onClose,
                     footer: foot([
                         h(Button, { key: "c", onClick: onClose }, t("cancel")),
@@ -1343,7 +1560,6 @@ window.__ModuleLoader__.load({
                 return h(Dialog, {
                     title: t("presetTitle"),
                     hint: t("presetHint"),
-                    width: 560,
                     onClose,
                     footer: foot([
                         h(Button, { key: "c", onClick: onClose }, t("close")),

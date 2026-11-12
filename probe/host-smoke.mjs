@@ -27,6 +27,29 @@ await writeFile(join(skillsRoot, 'beta', 'SKILL.md.disabled'), '---\nname: beta-
 await mkdir(join(skillsRoot, 'nested', 'gamma'), { recursive: true })
 await writeFile(join(skillsRoot, 'nested', 'gamma', 'SKILL.md'), '---\nname: gamma-skill\ndescription: nested fixture skill\n---\n\nbody\n')
 
+// ── fixture: profile patch with one MCP server ─────────────────────────────
+const profileDir = join(home, 'profile')
+await mkdir(profileDir, { recursive: true })
+const patchText = [
+  '# fixture profile patch',
+  '- insert:',
+  '    - id: panel-mcp-fixture',
+  '      name: "@deepseek-ai/dsh-mcp-client"',
+  '      config:',
+  '        serverName: fixture',
+  '        transport: stdio',
+  '        command: C:\\Program Files\\nodejs\\node.exe',
+  '        args:',
+  '          - C:\\tools\\server.js',
+  '        env: {}',
+  '        cwd: ""',
+  '      disabled: true',
+  '- id: keep-me',
+  '  name: some-other-plugin',
+  '',
+].join('\n')
+await writeFile(join(profileDir, 'cordis.patch.yml'), patchText)
+
 // ── fixture: plugin manager ────────────────────────────────────────────────
 const enabled = new Set(['@deepseek-ai/dsh-session', 'billion-context', 'ui-theme'])
 const fakePlugins = [
@@ -36,6 +59,7 @@ const fakePlugins = [
   { entryId: 'e4', moduleName: 'dsh-market', meta: { title: '插件市场' }, fiberPhase: 'pending' },
   { entryId: 'e5', moduleName: 'dsh-tool-hub', meta: { title: '工具总控台' }, fiberPhase: 'active' },
   { entryId: 'e6', moduleName: 'plugin-manager', meta: { title: 'Plugin Manager' }, fiberPhase: 'active', readOnlyReason: 'management-required' },
+  { entryId: 'e7', moduleName: '@deepseek-ai/dsh-mcp-client', patchId: 'panel-mcp-fixture', fiberPhase: null },
 ]
 const fakeManager = {
   async listPlugins() {
@@ -64,6 +88,7 @@ const ctx = {
       }
     }
     if (name === 'pluginManager') return fakeManager
+    if (name === 'profileContext') return { dir: profileDir }
     return undefined
   },
   inject(_deps, callback) {
@@ -107,7 +132,10 @@ const op = async (name, payload) => {
 // ── 1. snapshot ────────────────────────────────────────────────────────────
 let snap = await get('/tool-hub/api/snapshot')
 check('snapshot ok', snap.ok === true, snap.error?.message ?? '')
-check('plugins listed', snap.data.plugins.length === 6, `got ${snap.data.plugins.length}`)
+check('plugins listed', snap.data.plugins.length === 7, `got ${snap.data.plugins.length}`)
+check('mcp row named by server', snap.data.plugins.find(row => row.id === 'e7')?.name === 'fixture', JSON.stringify(snap.data.plugins.find(row => row.id === 'e7')))
+check('mcp row editable', snap.data.plugins.find(row => row.id === 'e7')?.mcpEditable === true)
+check('mcp patch path exposed', snap.data.paths.patch === join(profileDir, 'cordis.patch.yml'), snap.data.paths.patch)
 check('read-only flagged', snap.data.plugins.find(row => row.moduleName === 'plugin-manager').manageable === false)
 check('official flagged', snap.data.plugins.find(row => row.id === 'e1')?.official === true, JSON.stringify(snap.data.plugins.find(row => row.id === 'e1')))
 check('third-party not official', snap.data.plugins.find(row => row.id === 'e2')?.official === false, JSON.stringify(snap.data.plugins.find(row => row.id === 'e2')))
@@ -123,6 +151,22 @@ check('skill file renamed on', betaOn)
 r = await op('toggle', { kind: 'skill', id: 'user|alpha', enabled: false })
 const alphaOff = await stat(join(skillsRoot, 'alpha', 'SKILL.md.disabled')).then(() => true, () => false)
 check('skill file renamed off', r.ok === true && alphaOff)
+
+// ── 2b. mcp config edit ───────────────────────────────────────────────────
+const patchFile = join(profileDir, 'cordis.patch.yml')
+const before = await readFile(patchFile, 'utf8')
+r = await op('mcp.save', { id: 'panel-mcp-fixture', config: { serverName: 'renamed', args: ['C:\\a b\\index.js', '--flag'], env: { FOO: 'bar' }, unknownKey: 'dropped' } })
+check('mcp save accepted', r.ok === true && r.data.ok === true, JSON.stringify(r))
+const after = await readFile(patchFile, 'utf8')
+check('mcp row rewritten', after.includes('serverName: renamed') && after.includes('--flag') && after.includes('FOO: bar'))
+check('mcp unknown key dropped', !after.includes('unknownKey'))
+check('mcp disabled flag survives', after.includes('      disabled: true'), after.slice(-260))
+check('mcp neighbours untouched', after.includes('- id: keep-me') && after.includes('name: some-other-plugin') && after.startsWith('# fixture profile patch'))
+check('mcp other rows untouched', (after.match(/dsh-mcp-client/g) ?? []).length === 1)
+check('mcp save refuses unknown id', (await op('mcp.save', { id: 'nope', config: {} })).ok === false)
+check('mcp save refuses garbage config', (await op('mcp.save', { id: 'panel-mcp-fixture', config: 5 })).ok === false)
+const restored = await readFile(patchFile, 'utf8')
+check('mcp refused writes leave file alone', restored === after, 'file changed after a refused write')
 
 // ── 3. plugin toggle + read-only refusal ───────────────────────────────────
 r = await op('toggle', { kind: 'plugin', id: 'e4', enabled: true })

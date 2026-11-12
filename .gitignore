@@ -3,3 +3,4 @@ node_modules/
 probe/*.log
 probe/*.log.err
 *.tgz
+probe/*-preview.yml

@@ -47,6 +47,10 @@ the plugin hot-loads.
   only the previous automatic groups; hand-made groups are left alone.
 - **Presets**: save the current set, then apply it later. `Apply` switches on what the preset lists
   and off what it does not; `Only switch on` never turns anything off. Big changes ask first.
+- **MCP servers** get their own view: name, transport and command per row, the same switch as every
+  other entry, and an edit dialog for that server's `config:` block in the profile's
+  `cordis.patch.yml`. Only that entry's bytes are rewritten — the rest of the file is untouched —
+  and the host's HMR watcher reloads it on save.
 
 Everything the panel writes about *groups and presets* lives in one file:
 
@@ -58,8 +62,8 @@ Writes are atomic (temp file + rename), so a crash mid-save cannot leave a half-
 
 ## What it does not do
 
-- **MCP servers** are not listed yet. They are edited through their own config block and are the next
-  thing this plugin takes on.
+- **MCP servers** are supported for the STDIO / SSE / HTTP shape the host's own MCP client uses.
+  Anything a server keeps inside its own process is still that server's business.
 - **Skills outside the user roots** (`~/.dsh/skills`, `~/.agents/skills`) are not scanned. Project
   level `.dsh/skills` folders belong to a workspace, not to an installation, and switching them here
   would be misleading.

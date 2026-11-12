@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.4.3
+
+- The MCP server dialog gives its fields the full dialog width: a Windows start command or a long
+  argument list was being clipped to a few characters, and the args / env boxes now fit three lines
+  before they scroll.
+
+## 0.4.1
+
+- Saving an MCP server no longer drops the entry's `disabled:` line. The rewrite ends where the next
+  key of the same entry begins, not at the next non-blank line, so turning a server off stays off.
+
+## 0.4.0
+
+- MCP servers are part of the panel. They show up as their own view with the server name, transport
+  and command, they switch on and off through the same loader mechanism as any other entry, and the
+  config dialog edits the `config:` block of that entry in the profile's `cordis.patch.yml` — only
+  that entry's bytes are rewritten, everything else in the file stays exactly as it was, and the
+  host's own HMR watcher picks the change up on save.
+- Auto grouping leaves MCP entries alone: a server is not a feature to sort, it is a connection you
+  turn on when you need it.
+
 ## 0.3.6
 
 - The whole panel carries colour instead of reading grey-on-grey: the header shows its counts as
