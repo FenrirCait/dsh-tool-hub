@@ -292,7 +292,7 @@ check('bulk disables three', r.ok === true && r.data.changed === 3, JSON.stringi
 r = await op('auto.preview', {})
 const plan = r.data.plan
 check('auto preview buckets', plan.length >= 2, plan.map(entry => `${entry.name}:${entry.members.length}`).join(', '))
-check('auto preview splits roles', plan.some(entry => entry.role === 'base') && plan.some(entry => entry.role === 'task'), plan.map(entry => `${entry.role}:${entry.name}:${entry.members.length}`).join(', '))
+check('auto preview splits roles', plan.some(entry => entry.role === 'official') && plan.some(entry => entry.role === 'base'), plan.map(entry => `${entry.role}:${entry.name}:${entry.members.length}`).join(', '))
 check('auto preview tags every bucket', plan.every(entry => Array.isArray(entry.tags) && entry.tags.length > 0))
 r = await op('auto.apply', {})
 check('auto applied', r.ok === true && r.data.groups >= 2, JSON.stringify({ groups: r.data?.groups, members: r.data?.members }))
@@ -301,7 +301,7 @@ check('auto groups in snapshot', snap.data.groups.length >= 2 && snap.data.group
 
 // ── 6. group toggle ────────────────────────────────────────────────────────
 const foundation = snap.data.groups.find(group => group.role === 'base')
-check('auto groups carry role', snap.data.groups.every(group => group.role === 'base' || group.role === 'task' || group.role === 'skill'), snap.data.groups.map(group => `${group.name}:${group.role}`).join(', '))
+check('auto groups carry role', snap.data.groups.every(group => group.role === 'official' || group.role === 'base' || group.role === 'rest'), snap.data.groups.map(group => `${group.name}:${group.role}`).join(', '))
 const reordered = await op('group.reorder', { order: [...snap.data.groups].reverse().map(group => group.id) })
 check('reorder persists', reordered.ok === true && reordered.data.order[0] === snap.data.groups[snap.data.groups.length - 1].id, JSON.stringify(reordered.data?.order))
 r = await op('group.toggle', { id: foundation.id, enabled: true })

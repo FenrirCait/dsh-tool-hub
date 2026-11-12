@@ -42,15 +42,17 @@ the plugin hot-loads.
   `SKILL.md` ↔ `SKILL.md.disabled`.
 - **Groups**: create, rename, delete, add the current selection, and flip a whole group on or off.
   Groups over 20 members ask first.
-- **Auto grouping**: one button proposes groups from two axes — role first (always-on layer vs per-task
-  vs skills), then topic (context, interface, models, tools, sessions, integrations, media, research,
-  development, …) — previewed before anything is written, with the role badged on every row. Topics with
-  one or two rows fold into that role's catch-all, so the rail stays short and reads biggest-first.
-  Applying it replaces only the previous automatic groups; hand-made groups are left alone.
-- **A rail you can shape**: the role appears as a section header, each group carries the tags that
-  decided its bucket, the divider between rail and list drags from 180 to 460px (double-click resets,
-  the width survives reloads), and dragging a group shows a line where it will land before you drop it
-  (the order is written to state.json).
+- **Auto grouping**: one button proposes exactly three buckets — **official** (ships with the client),
+  **always-on base** (third-party rows that read like a layer: context, memory, market, sidebar,
+  runtime…), and **unsorted** (everything else, skills included) — previewed before anything is
+  written. Topic words stay visible as chips on each group; they inform, they do not decide. Applying it
+  replaces only the previous automatic groups (including leftovers from older taxonomies); hand-made
+  groups are left alone.
+- **A rail you can shape**: the role appears as a section header, each group carries its topic chips,
+  the divider between rail and list drags from 180 to 460px (double-click resets, the width survives
+  reloads), dragging a group shows a line where it will land, and ↑ / ↓ move a group inside its section
+  without a pointer. The rail honours the stored order, so a move sticks. Inside a group the list sorts
+  switched-on first, then plugins → MCP servers → skills, then by name.
 - **Presets**: save the current set, then apply it later. `Apply` switches on what the preset lists
   and off what it does not; `Only switch on` never turns anything off. Big changes ask first.- **MCP servers** get their own view: name, transport and command per row, the same switch as every
   other entry, and an edit dialog for that server's `config:` block in the profile's

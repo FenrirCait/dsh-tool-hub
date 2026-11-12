@@ -141,6 +141,8 @@ window.__ModuleLoader__.load({
                 toggleGroupOn: '整组启用',
                 toggleGroupOff: '整组禁用',
                 rename: '改名',
+            moveUp: '上移',
+            moveDown: '下移',
                 remove: '删除',
                 removeConfirm: '删除分组「{name}」？成员本身不会被开关。',
                 readonly: '宿主托管',
@@ -178,7 +180,9 @@ window.__ModuleLoader__.load({
                 autoApply: '应用到分组',
                 autoEmpty: '没有可自动分组的条目',
                 resizeRail: '拖动调整左栏宽度，双击复位',
-            roleBase: '常开底座',
+            roleOfficial: '官方',
+            roleBase: '通用底座',
+            roleRest: '未排序',
             toggleBaseOff: '这是常开底座，关掉可能连累整条链（会先确认）',
             roleTask: '专项任务',
             roleSkill: '技能',
@@ -289,6 +293,8 @@ window.__ModuleLoader__.load({
                 toggleGroupOn: 'Enable all',
                 toggleGroupOff: 'Disable all',
                 rename: 'Rename',
+            moveUp: 'Move up',
+            moveDown: 'Move down',
                 remove: 'Delete',
                 removeConfirm: 'Delete the group “{name}”? Its members keep their own state.',
                 readonly: 'Host-managed',
@@ -326,7 +332,9 @@ window.__ModuleLoader__.load({
                 autoApply: 'Apply to groups',
                 autoEmpty: 'Nothing to auto group',
                 resizeRail: 'Drag to resize the rail, double-click to reset',
-            roleBase: 'ALWAYS ON',
+            roleOfficial: 'OFFICIAL',
+            roleBase: 'BASE LAYER',
+            roleRest: 'UNSORTED',
             toggleBaseOff: 'This is the always-on layer; switching it off can break the chain (asks first)',
             roleTask: 'PER TASK',
             roleSkill: 'SKILLS',
@@ -365,6 +373,17 @@ window.__ModuleLoader__.load({
             if (typeof raw !== 'string') return key;
             if (vars === undefined) return raw;
             return raw.replace(/\{(\w+)\}/g, (whole, name) => (Object.prototype.hasOwnProperty.call(vars, name) ? String(vars[name]) : whole));
+        }
+
+        // Section labels for a group's role. Old state files may still say task/skill; those groups
+        // are migrated to "rest" on load, but the label stays readable if one slips through.
+        function roleLabel(t, role) {
+            const key = role === "official" ? "roleOfficial"
+                : role === "base" ? "roleBase"
+                    : role === "task" ? "roleTask"
+                        : role === "skill" ? "roleSkill"
+                            : "roleRest";
+            return t(key);
         }
 
         // ── host calls ─────────────────────────────────────────────────────
@@ -674,65 +693,115 @@ window.__ModuleLoader__.load({
             window.addEventListener("pointerup", finish);
         };
         const roleSections = [
+            { role: "official", key: "roleOfficial" },
             { role: "base", key: "roleBase" },
-            { role: "task", key: "roleTask" },
-            { role: "skill", key: "roleSkill" },
+            { role: "rest", key: "roleRest" },
         ];
-        // Display order is weight, not the order rows happened to be written in: a rail that reads
-        // biggest-first stays readable even when the stored order predates the last grouping change.
+        // Display order is the stored order. Sorting the rail by weight here would silently undo
+        // every drag (the drop writes an order the list then ignores), so the host orders a fresh
+        // automatic plan instead and this view honours it.
         const sections = roleSections
             .map(section => ({
                 ...section,
-                list: groups
-                    .filter(group => group.role === section.role)
-                    .sort((left, right) => (right.members.length - left.members.length) || left.name.localeCompare(right.name, "zh")),
+                list: groups.filter(group => group.role === section.role),
             }))
             .filter(section => section.list.length > 0);
-        const loose = groups.filter(group => group.role !== "base" && group.role !== "task" && group.role !== "skill");
-        // Dropping a row moves it in front of the row it was dropped on, across sections too:
-        // the order array is the whole rail, so a drag is one op and one write.
+        const loose = groups.filter(group => group.role !== "official" && group.role !== "base" && group.role !== "rest");
+        // The order array has to be the order on screen, or the move is computed against a list the
+        // user cannot see; flatten the rail first, then move inside that array.
+        const railIds = () => [
+            ...sections.flatMap(section => section.list.map(group => group.id)),
+            ...loose.map(group => group.id),
+        ];
+        // Dropping a row moves it in front of the row it was dropped on. A group belongs to a role
+        // section, so a move within the section is meaningful; a drop from one section onto another
+        // would be written and then ignored by the renderer, which is the "nothing happened" bug, so
+        // it is refused instead of silently lost.
         const reorderGroups = (fromId, toId, after) => {
             if (fromId === "" || fromId === toId) return;
-            const ids = groups.map(group => group.id);
+            const fromGroup = groups.find(group => group.id === fromId);
+            const toGroup = groups.find(group => group.id === toId);
+            if (fromGroup === undefined || toGroup === undefined) return;
+            if ((fromGroup.role ?? null) !== (toGroup.role ?? null)) return;
+            const ids = railIds();
             const from = ids.indexOf(fromId);
-            const target = ids.indexOf(toId);
-            if (from < 0 || target < 0) return;
+            if (from < 0 || ids.indexOf(toId) < 0) return;
             const moved = ids.splice(from, 1)[0];
             // Re-read the target index: removing the dragged row shifts everything after it.
             const to = ids.indexOf(toId) + (after === true ? 1 : 0);
             ids.splice(to, 0, moved);
             void act("group.reorder", { order: ids });
         };
+        // Move a group one slot up or down inside the rail. Dragging is a pointer gesture that a
+        // re-render can cancel halfway; these two buttons are the keyboard-reachable path to the
+        // same write, and they make the persisted order visible without a drag.
+        const moveGroup = (id, delta) => {
+            const group = groups.find(entry => entry.id === id);
+            if (group === undefined) return;
+            // Same-section neighbours only: the section a group belongs to is part of its identity,
+            // so "move up" past the section header would land in an order the renderer re-sorts away.
+            const siblings = groups.filter(entry => (entry.role ?? null) === (group.role ?? null)).map(entry => entry.id);
+            const at = siblings.indexOf(id);
+            const next = at + delta;
+            if (at < 0 || next < 0 || next >= siblings.length) return;
+            const ids = railIds();
+            const slot = ids.indexOf(id);
+            const neighbour = ids.indexOf(siblings[next]);
+            if (slot < 0 || neighbour < 0) return;
+            const [moved] = ids.splice(slot, 1);
+            ids.splice(neighbour + (delta > 0 ? 1 : 0), 0, moved);
+            void act("group.reorder", { order: ids });
+        };
+        // The insertion line is drawn by writing to the DOM node directly. Keeping it in React state
+        // re-rendered the row on every dragover, which is what made drops land nowhere.
+        let dropLine = null;
+        const clearDropLine = () => {
+            if (dropLine === null) return;
+            dropLine.style.borderTop = "2px solid transparent";
+            dropLine.style.borderBottom = "2px solid transparent";
+            dropLine = null;
+        };
+        const markDropLine = (node, after) => {
+            if (dropLine !== null && dropLine !== node) clearDropLine();
+            dropLine = node;
+            node.style.borderTop = after === true ? "2px solid transparent" : `2px solid ${T.brand}`;
+            node.style.borderBottom = after === true ? `2px solid ${T.brand}` : "2px solid transparent";
+        };
         const groupRow = group => h("div", {
             key: group.id,
             draggable: true,
+            "data-group-id": group.id,
             onDragStart: event => {
                 setDragId(group.id);
                 try { event.dataTransfer.setData("text/plain", group.id); }
                 catch { /* some engines refuse to write during a drag */ }
             },
-            onDragEnd: () => setDragId(null),
+            onDragEnd: () => {
+                setDragId(null);
+                clearDropLine();
+            },
             onDragOver: event => {
                 event.preventDefault();
                 const rect = event.currentTarget.getBoundingClientRect();
-                const after = event.clientY > rect.top + rect.height / 2;
-                if (dropAt === null || dropAt.id !== group.id || dropAt.after !== after) setDropAt({ id: group.id, after });
+                markDropLine(event.currentTarget, event.clientY > rect.top + rect.height / 2);
             },
             onDragLeave: event => {
                 if (event.currentTarget.contains(event.relatedTarget)) return;
-                if (dropAt !== null && dropAt.id === group.id) setDropAt(null);
+                if (dropLine === event.currentTarget) clearDropLine();
             },
             onDrop: event => {
                 event.preventDefault();
-                const after = dropAt !== null && dropAt.id === group.id ? dropAt.after : false;
-                reorderGroups(dragId ?? event.dataTransfer.getData("text/plain") ?? "", group.id, after);
+                const rect = event.currentTarget.getBoundingClientRect();
+                const after = event.clientY > rect.top + rect.height / 2;
+                const fromId = dragId ?? event.dataTransfer.getData("text/plain") ?? "";
+                clearDropLine();
+                reorderGroups(fromId, group.id, after);
                 setDragId(null);
-                setDropAt(null);
             },
             style: {
                 opacity: dragId === group.id ? 0.4 : 1,
-                borderTop: dropAt !== null && dropAt.id === group.id && dropAt.after === false ? `2px solid ${T.brand}` : "2px solid transparent",
-                borderBottom: dropAt !== null && dropAt.id === group.id && dropAt.after === true ? `2px solid ${T.brand}` : "2px solid transparent",
+                borderTop: "2px solid transparent",
+                borderBottom: "2px solid transparent",
             },
         }, h(GroupRow, {
             group,
@@ -747,6 +816,8 @@ window.__ModuleLoader__.load({
             onEnable: value => enableAllInGroup(group, value),
             onRename: () => setDialog({ kind: "rename", group }),
             onDelete: () => setDialog({ kind: "deleteGroup", group }),
+            onMoveUp: () => moveGroup(group.id, -1),
+            onMoveDown: () => moveGroup(group.id, 1),
         }));
             const plugins = data === null ? [] : data.plugins;
             const skills = data === null ? [] : data.skills;
@@ -784,8 +855,13 @@ window.__ModuleLoader__.load({
                     const set = groupMembers.get(groupId);
                     if (set !== undefined) combined = combined.filter(row => set.has(memberKey(row.kind, row.id)));
                 }
+                // Inside a group the useful order is "what is on first, then by what kind of thing
+                // it is": plugins, then MCP servers, then skills, each alphabetically. Sorting by
+                // module name alone buries the switches you actually came to flip.
+                const kindRank = row => (row.mcp === true ? 1 : row.kind === "plugin" ? 0 : 2);
                 combined.sort((a, b) => {
-                    if (a.kind !== b.kind) return a.kind === "plugin" ? -1 : 1;
+                    if (a.enabled !== b.enabled) return a.enabled ? -1 : 1;
+                    if (kindRank(a) !== kindRank(b)) return kindRank(a) - kindRank(b);
                     return `${a.name}`.localeCompare(`${b.name}`);
                 });
                 // One module can be mounted by several loader rows. Without a
@@ -1356,7 +1432,7 @@ window.__ModuleLoader__.load({
             return { accent: T.danger, accentDepth: 95 };
         }
 
-        function GroupRow({ group, t, accent, accentDepth, active, onSelect, onEnable, onRename, onDelete }) {
+        function GroupRow({ group, t, accent, accentDepth, active, onSelect, onEnable, onRename, onDelete, onMoveUp, onMoveDown }) {
             const [hover, setHover] = useState(false);
             const count = group.members.length;
             return h("div", {
@@ -1464,6 +1540,8 @@ window.__ModuleLoader__.load({
                     onClick: () => onEnable(false),
                 }),
                 h("div", { style: { flex: 1 } }),
+                h(MiniIcon, { label: "↑", title: t("moveUp"), onClick: onMoveUp }),
+                h(MiniIcon, { label: "↓", title: t("moveDown"), onClick: onMoveDown }),
                 h(MiniIcon, { label: "✎", title: t("rename"), onClick: onRename }),
                 h(MiniIcon, { label: "✕", title: t("remove"), onClick: onDelete, danger: true })));
         }
@@ -2109,9 +2187,9 @@ window.__ModuleLoader__.load({
                     },
                 },
                 h("span", { style: { flex: "0 0 auto" } }, h(Badge, {
-                    tone: entry.role === "base" ? "danger" : (entry.role === "task" ? "brand" : "warn"),
-                    title: entry.role === "base" ? t("roleBase") : (entry.role === "task" ? t("roleTask") : t("roleSkill")),
-                }, entry.role === "base" ? t("roleBase") : (entry.role === "task" ? t("roleTask") : t("roleSkill")))),
+                    tone: entry.role === "official" ? "warn" : (entry.role === "base" ? "danger" : "brand"),
+                    title: roleLabel(t, entry.role),
+                }, roleLabel(t, entry.role))),
                 h("span", { style: { flex: 1 } }, entry.name),
                 h("span", { style: { fontSize: 11.5, color: T.text3 } }, fmt(t, "membersCount", { n: entry.members.length })))));
             }

@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.6.8
+
+- Auto grouping now makes three buckets and stops guessing: **official** (anything that ships with the
+  client), **always-on base** (third-party rows whose text reads like a layer: context, memory, market,
+  sidebar, runtime…), and **unsorted** — everything else, skills included. Topic words are still shown as
+  chips on each group, but they no longer decide the group.
+- Inside a group the list sorts by what you came to do: switched-on first, then plugins, MCP servers and
+  skills, then by name.
+- Dragging a group works again. The rail now renders the stored order (it used to re-sort by size, so a
+  drop was written and then ignored), and the insertion line is painted straight onto the row instead of
+  going through React state, which cancelled the drag mid-gesture.
+- Each group also has ↑ / ↓ buttons that move it inside its section — same write, reachable without a
+  pointer.
+- Applying auto grouping drops leftover automatic groups from the old taxonomy instead of leaving them in
+  the rail next to the new ones.
+
 ## 1.6.6
 
 - Fewer, heavier buckets: a topic with one or two rows is folded into that role's catch-all instead of
