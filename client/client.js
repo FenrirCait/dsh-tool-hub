@@ -172,6 +172,8 @@ window.__ModuleLoader__.load({
                 confirmGroupBody: '将对「{name}」的 {n} 项执行「{action}」。已经写下的状态可以再改回来。',
                 confirmPresetTitle: '确认应用预设',
                 confirmPresetBody: '将开启 {on} 项、关闭 {off} 项。',
+                confirmPresetMcp: '其中 MCP 服务器：开启 {on} 个、关闭 {off} 个。',
+                presetMcpCount: '含 MCP {n} 个',
                 applyNow: '执行',
         };
         const en = {
@@ -284,6 +286,8 @@ window.__ModuleLoader__.load({
                 confirmGroupBody: 'This will {action} all {n} items in “{name}”. Anything written here can be switched back.',
                 confirmPresetTitle: 'Confirm preset',
                 confirmPresetBody: 'This turns on {on} and turns off {off}.',
+                confirmPresetMcp: 'Of those, MCP servers: {on} on, {off} off.',
+                presetMcpCount: '{n} of them MCP',
                 applyNow: 'Apply',
         };
 
@@ -976,13 +980,21 @@ window.__ModuleLoader__.load({
                     ]);
                     let on = 0;
                     let off = 0;
+                    let mcpOn = 0;
+                    let mcpOff = 0;
                     for (const row of data === null ? [] : [...data.plugins, ...data.skills]) {
                         const wanted = want.has(`${row.kind}:${row.id}`);
-                        if (wanted && row.enabled !== true) on += 1;
-                        if (!wanted && row.enabled === true && row.manageable !== false) off += 1;
+                        if (wanted && row.enabled !== true) {
+                            on += 1;
+                            if (row.mcp === true) mcpOn += 1;
+                        }
+                        if (!wanted && row.enabled === true && row.manageable !== false) {
+                            off += 1;
+                            if (row.mcp === true) mcpOff += 1;
+                        }
                     }
                     if (on + off > 10) {
-                        setDialog({ kind: "confirmPreset", name, mode, on, off });
+                        setDialog({ kind: "confirmPreset", name, mode, on, off, mcpOn, mcpOff });
                         return;
                     }
                     void runPresetApply(name, mode);
@@ -1515,6 +1527,8 @@ window.__ModuleLoader__.load({
         function DialogHost({ dialog, t, busy, groups, data, onClose, onSaveMcp, onDeleteMcp, act, flash, onApplyAuto, onSaveGroup, onSavePreset, onApplyPreset, onApplyPresetNow, onRunGroupToggle }) {
             const [name, setName] = useState(dialog.kind === "rename" ? dialog.group.name : "");
             const foot = (children) => children;
+            const mcpIds = new Set((data === null ? [] : data.plugins).filter(row => row.mcp === true).map(row => row.id));
+            const mcpInPreset = (preset) => (preset?.enabled?.plugin ?? []).filter(id => mcpIds.has(id)).length;
 
             if (dialog.kind === "mcpEdit") {
                 return h(McpEditDialog, { row: dialog.row, t, busy, onClose, onSave: onSaveMcp });
@@ -1560,9 +1574,12 @@ window.__ModuleLoader__.load({
             }
 
             if (dialog.kind === "confirmPreset") {
+                const mcpLines = (dialog.mcpOn ?? 0) + (dialog.mcpOff ?? 0) === 0
+                    ? ""
+                    : " " + fmt(t, "confirmPresetMcp", { on: dialog.mcpOn ?? 0, off: dialog.mcpOff ?? 0 });
                 return h(Dialog, {
                     title: t("confirmPresetTitle"),
-                    hint: fmt(t, "confirmPresetBody", { on: dialog.on, off: dialog.off }),
+                    hint: fmt(t, "confirmPresetBody", { on: dialog.on, off: dialog.off }) + mcpLines,
                     onClose,
                     footer: foot([
                         h(Button, { key: "c", onClick: onClose }, t("cancel")),
@@ -1732,7 +1749,8 @@ window.__ModuleLoader__.load({
                     h("div", { style: { flex: 1, minWidth: 0 } },
                         h("div", { style: { fontWeight: 550 } }, preset.name),
                         h("div", { style: { fontSize: 11, color: T.text3 } },
-                            fmt(t, "membersCount", { n: preset.enabled.plugin.length + preset.enabled.skill.length }))),
+                            fmt(t, "membersCount", { n: preset.enabled.plugin.length + preset.enabled.skill.length })
+                            + (mcpInPreset(preset) === 0 ? "" : " · " + fmt(t, "presetMcpCount", { n: mcpInPreset(preset) })))),
                     h(Button, { small: true, disabled: busy, onClick: () => onApplyPreset(preset.name, "exact") }, t("presetApply")),
                     h(Button, { small: true, disabled: busy, onClick: () => onApplyPreset(preset.name, "only-enable") }, t("presetOnlyOn")),
                     h(Button, {

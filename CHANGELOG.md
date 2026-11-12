@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.0
+
+- **Presets cover MCP servers, and say so.** A preset already stored every enabled entry, MCP
+  servers included; now the preset row shows how many of its entries are MCP servers, and the
+  confirmation before a big apply spells out how many servers it will start and stop.
+- Applying a preset still leaves the panel itself alone, and still never touches entries the host
+  manages.
+
 ## 1.0.0
 
 First stable release: plugins, skills and MCP servers in one panel.
