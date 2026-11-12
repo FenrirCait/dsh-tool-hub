@@ -99,6 +99,13 @@ rolls the row back and reports why. Deleting refuses the current default preset 
 registry really drops the record before saying it worked. Every write leaves a timestamped copy in
 `~/.dsh/backups/`.
 
+**Choosing what a preset declares.** A preset's `plugins` list is the set of entries it adds on top of the
+host — not a list of ids to switch on. Press **Choose contents** on a preset you own, tick the plugins and
+MCP servers it should declare, and the row is rewritten in place: entries that were already there keep
+their original lines (config, `!!js` expressions, comments), new ones are added, unchecked ones are
+dropped. Rows the host itself provides are listed but cannot be ticked — a preset that tried to declare
+the agent loop or the tool registry would collide with the host's own entry of the same name.
+
 ## What it does not do
 
 - **MCP servers** are supported for the STDIO / SSE / HTTP shape the host's own MCP client uses.

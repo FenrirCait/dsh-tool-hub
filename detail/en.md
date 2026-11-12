@@ -59,6 +59,15 @@ A preset stores the set you have switched on. Applying one has two modes:
 
 Changes over 10 rows ask first.
 
+## Agent presets
+
+**Modes** are a different thing: they decide which entries a new session is assembled from, and the unit is a
+declaration row in the profile `cordis.patch.yml`, not a folder. You can create one, delete one, or press
+**Choose contents** to tick the plugins and MCP servers it should declare. The write touches only that row's
+`plugins` list; entries that were already there keep their original config and comments. Rows the host itself
+provides are listed but cannot be ticked — a preset declaring a host entry of the same name would collide. Each
+write is backed up to `~/.dsh/backups/` and verified against the registry, rolling back on failure.
+
 ## Where state lives
 
 ```

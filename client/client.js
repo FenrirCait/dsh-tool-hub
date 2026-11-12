@@ -95,6 +95,13 @@ window.__ModuleLoader__.load({
                 agentRegistryOff: '宿主没有暴露 agentPresets 服务，只能读文件里已有的声明。',
                 agentBuiltin: '内置',
                 agentBuiltinHint: '这个模式由 bundle 层声明，没有可在 profile 里改的行。',
+                agentContent: '选择内容',
+                agentContentHint: '挑这个模式要带哪些插件与 MCP 服务器。',
+                agentContentTitle: '模式内容',
+                agentContentHint2: '勾选「{name}」要声明的条目，写进它在 profile 里的 plugins 列表。',
+                agentContentCount: '已选 {n} 项',
+                agentContentSaved: '已保存 {n} 项',
+                agentCoreBadge: '宿主必需',
                 pillMcp: '{n} 个 MCP',
                 mcpBadge: 'MCP',
                 mcpEdit: '编辑配置',
@@ -268,6 +275,13 @@ window.__ModuleLoader__.load({
                 agentRegistryOff: 'The host exposes no agentPresets service, so only declarations already in the file can be read.',
                 agentBuiltin: 'built-in',
                 agentBuiltinHint: 'This preset is declared by a bundle, so there is no profile row to edit.',
+                agentContent: 'Contents',
+                agentContentHint: 'Pick which plugins and MCP servers this preset declares.',
+                agentContentTitle: 'Preset contents',
+                agentContentHint2: 'Checked entries go into the plugins list of "{name}" in the profile patch.',
+                agentContentCount: '{n} selected',
+                agentContentSaved: 'Saved {n} entries',
+                agentCoreBadge: 'runtime',
                 pillMcp: '{n} MCP',
                 mcpBadge: 'MCP',
                 mcpEdit: 'Edit config',
@@ -1013,6 +1027,21 @@ window.__ModuleLoader__.load({
 
             const openPresets = () => setDialog({ kind: "presets" });
 
+            /** Load what a preset could contain, then open the checklist on top of it. */
+            const openPresetContent = async (row) => {
+                setBusy(true);
+                try {
+                    const result = await runOp("presets.inventory", {});
+                    setDialog({ kind: "agentContent", row, inventory: result.rows });
+                }
+                catch (failure) {
+                    flash(failure.message);
+                }
+                finally {
+                    setBusy(false);
+                }
+            };
+
             const runGroupToggle = async (group, enabled) => {
                 await act("group.toggle", { id: group.id, enabled }, (result) => {
                     const failed = result.results.filter(row => row.ok !== true).length;
@@ -1232,6 +1261,13 @@ window.__ModuleLoader__.load({
                     row.plugins === null ? null : h("span", { style: { fontSize: 11.5, color: T.text3 } }, fmt(t, "agentPlugins", { n: row.plugins }))),
                 row.description === "" ? null : h("div", { style: { marginTop: 3, fontSize: 12, color: T.text3 } }, row.description)),
             h(ActionChip, {
+                label: t("agentContent"),
+                tone: "brand",
+                disabled: busy || row.editable === false,
+                title: row.editable === false ? t("agentBuiltinHint") : t("agentContentHint"),
+                onClick: () => { void openPresetContent(row); },
+            }),
+            h(ActionChip, {
                 label: t("agentDelete"),
                 tone: "danger",
                 disabled: busy || row.editable === false,
@@ -1368,6 +1404,14 @@ window.__ModuleLoader__.load({
                 data,
                 onClose: () => setDialog(null),
                 onAgentsChanged: () => {
+                    setAgentInfo(null);
+                    setAgentError(null);
+                },
+                onSavePresetContent: async (row, names) => {
+                    await act("presets.edit", { id: row.id, plugins: names }, (result) => {
+                        flash(fmt(t, "agentContentSaved", { n: result.plugins.length }));
+                    });
+                    setDialog(null);
                     setAgentInfo(null);
                     setAgentError(null);
                 },
@@ -1823,7 +1867,97 @@ window.__ModuleLoader__.load({
             return out;
         }
 
-        function McpEditDialog({ row, t, busy, onClose, onSave, onProbe }) {
+        /**
+ * What goes into a preset.
+ *
+ * A preset declares its own entries, so this is a list of modules, not a list of switches:
+ * picking `@deepseek-ai/dsh-tool-fs` writes `- id: tool-fs / name: '@deepseek-ai/dsh-tool-fs'`
+ * into that preset's `plugins:` block. Rows the runtime owns stay visible but disabled —
+ * hiding them would make the list look incomplete rather than bounded.
+ */
+function AgentContentDialog({ row, inventory, t, busy, onClose, onSave }) {
+    const presetName = row.name === "" ? row.id : row.name;
+    const initial = new Set(((row.items ?? []).map(item => item.name)).filter(name => typeof name === "string" && name !== ""));
+    const [checked, setChecked] = useState(initial);
+    const [filter, setFilter] = useState("");
+    const needle = filter.trim().toLowerCase();
+    const visible = needle === ""
+        ? inventory
+        : inventory.filter(entry => entry.moduleName.toLowerCase().includes(needle) || entry.title.toLowerCase().includes(needle));
+    const selectable = visible.filter(entry => entry.selectable === true);
+    const chosenCount = inventory.filter(entry => entry.selectable === true && checked.has(entry.moduleName)).length;
+    const toggle = (moduleName) => {
+        const next = new Set(checked);
+        if (next.has(moduleName)) next.delete(moduleName);
+        else next.add(moduleName);
+        setChecked(next);
+    };
+    return h(Dialog, {
+        title: t("agentContentTitle"),
+        hint: fmt(t, "agentContentHint2", { name: presetName }),
+        width: 620,
+        onClose,
+        footer: [
+            h(Button, { key: "c", onClick: onClose }, t("cancel")),
+            h(Button, {
+                key: "s",
+                tone: "primary",
+                disabled: busy,
+                onClick: () => onSave(inventory.filter(entry => entry.selectable === true && checked.has(entry.moduleName)).map(entry => entry.moduleName)),
+            }, t("save")),
+        ],
+    },
+    h("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 8 } },
+        h(Input, { grow: true, value: filter, onChange: setFilter, placeholder: t("toolsSearch") }),
+        h(Button, {
+            small: true,
+            disabled: busy || selectable.length === 0,
+            onClick: () => {
+                const next = new Set(checked);
+                for (const entry of selectable) next.add(entry.moduleName);
+                setChecked(next);
+            },
+        }, t("toolsAll")),
+        h(Button, {
+            small: true,
+            disabled: busy || selectable.length === 0,
+            onClick: () => {
+                const next = new Set(checked);
+                for (const entry of selectable) next.delete(entry.moduleName);
+                setChecked(next);
+            },
+        }, t("toolsNone"))),
+    h("div", { style: { maxHeight: 360, overflow: "auto", border: `1px solid ${T.borderSoft}`, borderRadius: 8 } },
+        visible.length === 0
+            ? h("div", { style: { padding: "14px 12px", fontSize: 12, color: T.text3 } }, t("toolsEmpty"))
+            : visible.map(entry => h("div", {
+                key: entry.moduleName,
+                style: {
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 9,
+                    padding: "7px 10px",
+                    borderTop: `1px solid ${T.borderSoft}`,
+                },
+            },
+            h("input", {
+                type: "checkbox",
+                checked: entry.selectable === true && checked.has(entry.moduleName),
+                disabled: busy || entry.selectable !== true,
+                onChange: () => toggle(entry.moduleName),
+                style: { accentColor: T.brand, cursor: entry.selectable === true ? "pointer" : "default" },
+            }),
+            h("div", { style: { flex: 1, minWidth: 0 } },
+                h("div", { style: { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" } },
+                    h("span", { style: { fontSize: 12.5, fontWeight: 550 } }, entry.title),
+                    h(Badge, { tone: entry.kind === "mcp" ? "brand" : "plain" }, entry.kind === "mcp" ? t("mcpBadge") : t("kindPlugin")),
+                    entry.official === true ? h(Badge, { tone: "success" }, t("officialBadge")) : null,
+                    entry.selectable !== true ? h(Badge, { tone: "warn", title: entry.reason ?? undefined }, t("agentCoreBadge")) : null),
+                h("code", { style: { fontSize: 11, color: T.text3 } }, entry.moduleName))))),
+    h("div", { style: { marginTop: 7, fontSize: 11.5, color: T.text3 } }, fmt(t, "agentContentCount", { n: chosenCount })));
+}
+
+function McpEditDialog({ row, t, busy, onClose, onSave, onProbe }) {
             const creating = row === null || row === undefined;
             const config = !creating && row.config !== null && typeof row.config === "object" ? row.config : {};
             const reconnect = config.reconnect !== null && typeof config.reconnect === "object" ? config.reconnect : {};
@@ -2114,7 +2248,7 @@ window.__ModuleLoader__.load({
             });
         }
 
-        function DialogHost({ dialog, t, busy, groups, data, onClose, onAgentsChanged, onSaveMcp, onDeleteMcp, onSaveTool, onProbe, act, flash, onImportMarket, onApplyAuto, onSaveGroup, onSavePreset, onApplyPreset, onApplyPresetNow, onRunGroupToggle }) {
+        function DialogHost({ dialog, t, busy, groups, data, onClose, onAgentsChanged, onSavePresetContent, onSaveMcp, onDeleteMcp, onSaveTool, onProbe, act, flash, onImportMarket, onApplyAuto, onSaveGroup, onSavePreset, onApplyPreset, onApplyPresetNow, onRunGroupToggle }) {
             const [name, setName] = useState(dialog.kind === "rename" ? dialog.group.name : "");
             const [agentId, setAgentId] = useState("");
             const [agentName, setAgentName] = useState("");
@@ -2204,7 +2338,7 @@ window.__ModuleLoader__.load({
                     setAgentError(null);
                     try {
                         await act("presets.create", { id: agentId, name: agentName, description: agentDesc }, result => {
-                            flash(fmt(t, "agentCreated", { name: result.name === "" ? result.id : result.name }));
+                            flash(fmt(t, "agentCreated", { name: result.name || result.id }));
                         });
                         onAgentsChanged();
                         onClose();
@@ -2261,6 +2395,17 @@ window.__ModuleLoader__.load({
                         }, t("agentDelete")),
                     ]),
                 }, h("code", { style: { fontSize: 12, color: T.text3 } }, dialog.row.rowId));
+            }
+
+            if (dialog.kind === "agentContent") {
+                return h(AgentContentDialog, {
+                    row: dialog.row,
+                    inventory: dialog.inventory,
+                    t,
+                    busy,
+                    onClose,
+                    onSave: names => onSavePresetContent(dialog.row, names),
+                });
             }
 
             if (dialog.kind === "newGroup") {

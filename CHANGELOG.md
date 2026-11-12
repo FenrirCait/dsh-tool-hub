@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.9.2
+
+- Preset contents are now editable from the panel: **Choose contents** lists every plugin and MCP server the installation runs, ticks what the preset declares, and rewrites only that row's `plugins` list. Entries that were already declared keep their original lines, so hand-written config and `!!js` expressions survive.
+- Host-provided rows are listed but not selectable, and an unknown module name is refused rather than written.
+- Fixed the contents dialog crashing the whole panel when it opened.
+
 ## 1.8.2
 
 - Fixed the Modes view piling up: preset cards from an earlier visit stayed on screen, and they survived a switch back to All. Cards now use stable keys, each view renders in its own keyed container, and leaving the view drops the cached list.
