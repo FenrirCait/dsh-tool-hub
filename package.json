@@ -41,8 +41,5 @@
     "README.zh.md",
     "LICENSE"
   ],
-  "license": "MIT",
-  "peerDependencies": {
-    "@deepseek-ai/cordis": ">=4.0.0-0 <5.0.0-0"
-  }
+  "license": "MIT"
 }
