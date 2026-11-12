@@ -67,3 +67,7 @@ TOOL_HUB_SKILL_ROOTS=<dir>/skills;<dir>/skills2   # Windows 用分号分隔
 - 只扫用户级技能目录，工作区里的 `.dsh/skills` 不属于「这套安装」，不在这里开关
 - SSE 传输的服务器不能在面板里测试连接（stdio 与 streamable HTTP 可以）
 - 没有终端界面，面板是 Web / Desktop 扩展
+
+## 导入 dshmarket 分组
+
+`dshmarket` 的分组存在 `<profile>/.dsh-market/state.json`。该文件有分组时，顶栏会出现导入按钮：面板把每个包名映射到它安装出来的 loader 行，再整组复制过来。这里已有同名的分组会被跳过而不是合并，所以重复导入不会产生重复项，也不会打乱你中途改过的分组；未安装的包按组列出并跳过，该文件本身只读不写。

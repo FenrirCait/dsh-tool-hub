@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.4.0
+
+- **Groups can be imported from dshmarket.** `dshmarket` keeps its groups in
+  `<profile>/.dsh-market/state.json`, as a name-to-package list. The import button in the header
+  (only shown when that file actually has groups) copies them in, mapping each package name to the
+  loader rows it corresponds to. A group whose name is already used here is skipped, never merged,
+  so importing twice does not duplicate or reshuffle groups you edited in between. The file is read
+  and never written.
+- Packages listed in a dshmarket group but not installed here are reported per group instead of
+  being silently dropped; the group is still imported with the members that do exist.
+
 ## 1.3.1
 
 - **A preset now replays its tool masks in one press.** Applying a preset used to compute the mask

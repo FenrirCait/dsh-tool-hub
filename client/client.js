@@ -161,6 +161,14 @@ window.__ModuleLoader__.load({
                 presetEmpty: '还没有预设',
                 presetApplied: '已应用 {n}/{total} 项变更',
             presetDeferred: '已换上预设；相关服务器的工具注册后会自动补上屏蔽',
+            marketImport: '导入 dshmarket 分组（{n}）',
+            marketImportTitle: '导入 dshmarket 分组',
+            marketImportHint: '只读 dshmarket 的 state.json，把它的分组复制进来；同名分组会跳过。',
+            marketImportConfirm: '导入',
+            marketImportDone: '已导入 {n} 个分组',
+            marketImportRow: '{members} 个插件 / {packages} 个包',
+            marketImportMissing: '有 {n} 个包未安装，已跳过',
+            marketNoGroups: '没有可导入的分组',
                 presetOnlyOn: '只开启，不关闭',
                 auto: '自动分组',
                 autoTitle: '自动分组预览',
@@ -293,6 +301,14 @@ window.__ModuleLoader__.load({
                 presetEmpty: 'No presets yet',
                 presetApplied: 'Applied {n}/{total} changes',
             presetDeferred: 'Preset applied; masks for its servers land once their tools register',
+            marketImport: 'Import dshmarket groups ({n})',
+            marketImportTitle: 'Import dshmarket groups',
+            marketImportHint: 'Reads dshmarket state.json and copies its groups here; groups with a name you already use are skipped.',
+            marketImportConfirm: 'Import',
+            marketImportDone: 'Imported {n} groups',
+            marketImportRow: '{members} plugins / {packages} packages',
+            marketImportMissing: '{n} packages are not installed and were skipped',
+            marketNoGroups: 'Nothing to import',
                 presetOnlyOn: 'Only switch on',
                 auto: 'Auto group',
                 autoTitle: 'Auto group preview',
@@ -783,6 +799,13 @@ window.__ModuleLoader__.load({
                     }, fmt(t, "toolsImport", { n: data.panelDeny.length }))
                     : null,
                 h(Button, { onClick: openAuto, disabled: busy, title: t("autoHint") }, t("auto")),
+                data?.market?.available === true
+                    ? h(Button, {
+                        onClick: () => setDialog({ kind: "marketImport", groups: data.market.groups }),
+                        disabled: busy,
+                        title: t("marketImportHint"),
+                    }, fmt(t, "marketImport", { n: data.market.groups.length }))
+                    : null,
                 h(Button, { onClick: openPresets, disabled: busy }, t("preset")),
                 h(Button, { onClick: refresh, disabled: busy }, t("reload"))));
 
@@ -1030,6 +1053,9 @@ window.__ModuleLoader__.load({
                 },
                 act,
                 flash,
+                onImportMarket: async () => {
+                    await act("market.import", {}, (result) => flash(fmt(t, "marketImportDone", { n: result.imported })));
+                },
                 onApplyAuto: async () => {
                     await act("auto.apply", {}, (result) => flash(fmt(t, "autoDone", { n: result.groups })));
                     setDialog(null);
@@ -1716,7 +1742,7 @@ window.__ModuleLoader__.load({
             });
         }
 
-        function DialogHost({ dialog, t, busy, groups, data, onClose, onSaveMcp, onDeleteMcp, onSaveTool, onProbe, act, flash, onApplyAuto, onSaveGroup, onSavePreset, onApplyPreset, onApplyPresetNow, onRunGroupToggle }) {
+        function DialogHost({ dialog, t, busy, groups, data, onClose, onSaveMcp, onDeleteMcp, onSaveTool, onProbe, act, flash, onImportMarket, onApplyAuto, onSaveGroup, onSavePreset, onApplyPreset, onApplyPresetNow, onRunGroupToggle }) {
             const [name, setName] = useState(dialog.kind === "rename" ? dialog.group.name : "");
             const foot = (children) => children;
             const mcpIds = new Set((data === null ? [] : data.plugins).filter(row => row.mcp === true).map(row => row.id));
@@ -1915,6 +1941,47 @@ window.__ModuleLoader__.load({
                 },
                 h("span", { style: { flex: 1 } }, entry.name),
                 h("span", { style: { fontSize: 11.5, color: T.text3 } }, fmt(t, "membersCount", { n: entry.members.length })))));
+            }
+
+            if (dialog.kind === "marketImport") {
+                const groups = Array.isArray(dialog.groups) ? dialog.groups : [];
+                return h(Dialog, {
+                    title: t("marketImportTitle"),
+                    hint: t("marketImportHint"),
+                    width: 520,
+                    onClose,
+                    footer: foot([
+                        h(Button, { key: "c", onClick: onClose }, t("cancel")),
+                        h(Button, {
+                            key: "i",
+                            tone: "primary",
+                            disabled: busy || groups.length === 0,
+                            onClick: () => {
+                                onImportMarket();
+                                onClose();
+                            },
+                        }, t("marketImportConfirm")),
+                    ]),
+                }, groups.length === 0
+                    ? h("div", { style: { padding: "8px 2px", fontSize: 12, color: T.text3 } }, t("marketNoGroups"))
+                    : h("div", null, groups.map(entry => h("div", {
+                        key: entry.name,
+                        style: {
+                            display: "flex",
+                            alignItems: "baseline",
+                            gap: 10,
+                            padding: "7px 4px",
+                            borderBottom: `1px solid ${T.borderSoft}`,
+                        },
+                    },
+                    h("div", { style: { flex: 1, minWidth: 0 } },
+                        h("div", { style: { fontSize: 13, fontWeight: 600 } }, entry.name),
+                        entry.missing.length === 0
+                            ? null
+                            : h("div", { style: { marginTop: 2, fontSize: 11, color: T.warn } },
+                                fmt(t, "marketImportMissing", { n: entry.missing.length }) + " · " + entry.missing.join(", "))),
+                    h("div", { style: { fontSize: 11.5, color: T.text3, whiteSpace: "nowrap" } },
+                        fmt(t, "marketImportRow", { members: entry.members, packages: entry.packages }))))));
             }
 
             if (dialog.kind === "presets") {

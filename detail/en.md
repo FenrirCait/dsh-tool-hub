@@ -80,3 +80,7 @@ TOOL_HUB_SKILL_ROOTS=<dir>/skills:<dir>/skills2   # semicolon on Windows
   the installation, and is not switched from here
 - A server on SSE cannot be tested from the panel (stdio and streamable HTTP can)
 - No terminal UI; the panel is a Web / Desktop extension
+
+## Importing dshmarket groups
+
+`dshmarket` stores its groups in `<profile>/.dsh-market/state.json`. When that file has groups, the header shows an import button: the panel maps each package name to the loader rows it installed and copies the groups in. A group whose name is already used here is skipped rather than merged, so a second import never duplicates or reshuffles anything you edited in between. Uninstalled packages are listed per group and skipped; the file itself is only read.

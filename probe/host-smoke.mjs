@@ -59,6 +59,17 @@ const patchText = [
 ].join('\n')
 await writeFile(join(profileDir, 'cordis.patch.yml'), patchText)
 
+// ── fixture: dshmarket groups (their own file, must stay untouched) ────────
+await mkdir(join(profileDir, '.dsh-market'), { recursive: true })
+const marketText = `${JSON.stringify({
+  groups: {
+    'fixture-group': ['@deepseek-ai/dsh-session', 'not-installed-pkg'],
+    'taken-group': ['ui-theme'],
+  },
+  groupOrder: ['fixture-group', 'taken-group'],
+}, null, 2)}\n`
+await writeFile(join(profileDir, '.dsh-market', 'state.json'), marketText)
+
 // ── fixture: plugin manager ────────────────────────────────────────────────
 const enabled = new Set(['@deepseek-ai/dsh-session', 'billion-context', 'ui-theme'])
 const fakePlugins = [
@@ -301,6 +312,20 @@ snap = await get('/tool-hub/api/snapshot')
 check('preset restored state', snap.data.plugins.find(row => row.id === 'e2').enabled === true)
 r = await op('preset.apply', { name: 'smoke', mode: 'only-enable' })
 check('only-enable mode is a no-op here', r.ok === true && r.data.requested === 0, JSON.stringify(r.data?.requested))
+
+// ── 8b. dshmarket import ───────────────────────────────────────────────────
+const marketSnap = await op('snapshot', {})
+const marketInfo = marketSnap.data.market
+check('market groups exposed', marketInfo.available === true && marketInfo.groups.length === 2, JSON.stringify({ available: marketInfo.available, groups: marketInfo.groups?.map(g => g.name) }))
+check('market maps packages to rows', marketInfo.groups[0].members === 1 && marketInfo.groups[0].missing.length === 1, JSON.stringify(marketInfo.groups[0]))
+r = await op('market.import', {})
+check('market import copies groups', r.ok === true && r.data.imported === 2 && r.data.missing === 1, JSON.stringify({ imported: r.data?.imported, missing: r.data?.missing, skipped: r.data?.skipped }))
+const marketGroups = (await op('snapshot', {})).data.groups.filter(group => group.auto !== true).map(group => group.name)
+check('imported groups visible', marketGroups.includes('fixture-group') && marketGroups.includes('taken-group'), marketGroups.join(','))
+check('imported members point at rows', (await op('snapshot', {})).data.groups.some(group => group.name === 'fixture-group' && group.members.some(member => member.id === 'e1')))
+r = await op('market.import', {})
+check('second import is a no-op', r.ok === true && r.data.imported === 0 && r.data.skipped.length === 2, JSON.stringify(r.data?.skipped))
+check('market file untouched', (await readFile(join(profileDir, '.dsh-market', 'state.json'), 'utf8')) === marketText)
 
 // ── 8. state file ──────────────────────────────────────────────────────────
 const raw = JSON.parse(await readFile(join(home, 'tool-hub', 'state.json'), 'utf8'))

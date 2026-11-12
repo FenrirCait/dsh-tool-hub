@@ -46,13 +46,23 @@ the plugin hot-loads.
   research / dev / integrations / skills), previewed before anything is written. Applying it replaces
   only the previous automatic groups; hand-made groups are left alone.
 - **Presets**: save the current set, then apply it later. `Apply` switches on what the preset lists
-  and off what it does not; `Only switch on` never turns anything off. Big changes ask first.
-- **MCP servers** get their own view: name, transport and command per row, the same switch as every
+  and off what it does not; `Only switch on` never turns anything off. Big changes ask first.- **MCP servers** get their own view: name, transport and command per row, the same switch as every
   other entry, and an edit dialog for that server's `config:` block in the profile's
   `cordis.patch.yml`. Only that entry's bytes are rewritten — the rest of the file is untouched —
   and the host's HMR watcher reloads it on save. A **Test** button in that dialog starts the server
   as currently typed (saved or not), runs initialize + 	ools/list, reports the tool count and how
   long it took, then kills the process — nothing is registered and nothing is written.
+
+- **Tool-level masking for MCP servers.** Every MCP row has a **Tools** button listing that
+  server's tools; unchecking one removes it from what the model can see in *every* session of this
+  installation, not just from the UI. The host only supports this through a scoped tool restriction,
+  so the panel mounts a tiny per-agent plugin that calls `tools.restrict`/`undo` — and it re-applies
+  only when the usable set actually changes, because a restriction that re-fires on every
+  `tools/change` drives the host into a loop. The deny list lives in the panel's own state, never in
+  the MCP server's `config:`; if another panel also denies tools, both layers apply (the union wins).
+- **Import groups from dshmarket.** If `<profile>/.dsh-market/state.json` has groups, a header
+  button copies them in, mapping package names to the rows they installed. Same-name groups are
+  skipped, never merged; uninstalled packages are reported per group. That file is only read.
 
 Everything the panel writes about *groups and presets* lives in one file:
 

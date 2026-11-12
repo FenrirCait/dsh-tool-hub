@@ -1,6 +1,6 @@
 {
   "name": "dsh-tool-hub",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "description": "One panel to list, group, and switch on or off the plugins, skills and MCP servers an installation runs, with saved presets and rule-based auto grouping.",
   "keywords": [
     "dsh",
