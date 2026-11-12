@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.8.2
+
+- Fixed the Modes view piling up: preset cards from an earlier visit stayed on screen, and they survived a switch back to All. Cards now use stable keys, each view renders in its own keyed container, and leaving the view drops the cached list.
+
 ## 1.8.1
 
 - A chip that cannot be pressed (the delete button on a built-in preset) now looks inert instead of red: no tinted fill, no tinted border, and the label sits in the quiet text colour.

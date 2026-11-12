@@ -711,6 +711,12 @@ window.__ModuleLoader__.load({
         useEffect(() => {
             if (view === "agent" && agentInfo === null && agentError === null) void loadAgents();
         }, [view, agentInfo, agentError, loadAgents]);
+        useEffect(() => {
+            if (view !== "agent" && (agentInfo !== null || agentError !== null)) {
+                setAgentInfo(null);
+                setAgentError(null);
+            }
+        }, [view, agentInfo, agentError]);
         const [dragId, setDragId] = useState(null);
         const [dropAt, setDropAt] = useState(null);
         const [railWidth, setRailWidth] = useState(() => {
@@ -1203,7 +1209,7 @@ window.__ModuleLoader__.load({
                 : null);
 
             const agentCard = row => h("div", {
-                key: row.rowId,
+                key: row.rowId === null || row.rowId === undefined ? `agent:${row.id === undefined ? row.name : row.id}` : row.rowId,
                 style: {
                     display: "flex",
                     alignItems: "center",
@@ -1246,10 +1252,10 @@ window.__ModuleLoader__.load({
                     data === null
                         ? h("div", { style: emptyStyle }, error === null ? t("loading") : error)
                         : view === "agent"
-                            ? agentList
+                            ? h("div", { key: "agent-view" }, agentList)
                             : rows.length === 0
                             ? h("div", { style: emptyStyle }, groupId === null ? t("empty") : t("emptyGroup"))
-                            : rows.map(row => h(Row, {
+                            : h("div", { key: "row-view" }, rows.map(row => h(Row, {
                                 key: memberKey(row.kind, row.id),
                                 row,
                                 t,
@@ -1266,7 +1272,7 @@ window.__ModuleLoader__.load({
                                 onDelete: (target) => setDialog({ kind: "mcpDelete", row: target }),
                                 onTools: (target) => setDialog({ kind: "toolEdit", row: target }),
                                 busy,
-                            }))));
+                            })))));
 
             const selectionBar = picked.size === 0 ? null : h("div", {
                 style: {
