@@ -759,20 +759,34 @@ window.__ModuleLoader__.load({
                     alignItems: "center",
                     gap: 8,
                     padding: "8px 14px",
-                    borderTop: `1px solid ${T.borderSoft}`,
-                    background: T.card,
+                    borderTop: `1px solid ${tint(T.brand, 34)}`,
+                    background: tint(T.brand, 9),
                 },
             },
-            h("div", { style: { fontSize: 12, color: T.text2, flex: "0 0 auto" } }, fmt(t, "selected", { n: picked.size })),
+            h("span", {
+                style: {
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "2px 9px",
+                    borderRadius: 999,
+                    background: tint(T.brand, 18),
+                    color: T.brand,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    flex: "0 0 auto",
+                },
+            }, fmt(t, "selected", { n: picked.size })),
             h("div", { style: { flex: 1 } }),
-            h(Button, { small: true, onClick: () => togglePicked(true), disabled: busy }, t("enable")),
-            h(Button, { small: true, onClick: () => togglePicked(false), disabled: busy }, t("disable")),
-            h(Button, {
-                small: true,
+            h(ActionChip, { label: t("enable"), tone: "success", onClick: () => togglePicked(true), disabled: busy }),
+            h(ActionChip, { label: t("disable"), tone: "danger", onClick: () => togglePicked(false), disabled: busy }),
+            h(ActionChip, {
+                label: t("addToGroup"),
+                tone: "brand",
                 onClick: () => setDialog({ kind: "addToGroup", members: selectedMembers() }),
                 disabled: busy || groups.length === 0,
-            }, t("addToGroup")),
-            h(Button, { small: true, onClick: () => setPicked(new Set()) }, t("clearSelection")));
+            }),
+            h(ActionChip, { label: t("clearSelection"), tone: "neutral", onClick: () => setPicked(new Set()) }));
 
             const footer = data === null ? null : h("div", {
                 style: {
@@ -886,25 +900,35 @@ window.__ModuleLoader__.load({
             lineHeight: 1.7,
         };
 
-        function GroupChip({ label, title, on, onClick }) {
+        const chipTone = {
+            success: { fg: T.success, bg: tint(T.success, 14), border: tint(T.success, 34), hover: tint(T.success, 26) },
+            danger: { fg: T.danger, bg: tint(T.danger, 12), border: tint(T.danger, 32), hover: tint(T.danger, 24) },
+            brand: { fg: T.brand, bg: tint(T.brand, 12), border: tint(T.brand, 32), hover: tint(T.brand, 24) },
+            neutral: { fg: T.text, bg: tint(T.text3, 14), border: T.border, hover: tint(T.text3, 22) },
+        };
+
+        function ActionChip({ label, title, tone, onClick, disabled }) {
             const [hover, setHover] = useState(false);
-            const background = on ? groupTint.enableBg : groupTint.disableBg;
+            const palette = chipTone[tone] ?? chipTone.neutral;
+            const off = disabled === true;
             return h("button", {
                 type: "button",
                 title,
                 onClick,
+                disabled: off,
                 onMouseEnter: () => setHover(true),
                 onMouseLeave: () => setHover(false),
                 style: {
                     height: 24,
                     padding: "0 10px",
                     borderRadius: 6,
-                    border: `1px solid ${on ? groupTint.enableBorder : T.border}`,
-                    background: hover === true ? tint(on ? T.success : T.text3, on ? 26 : 22) : background,
-                    color: on ? T.success : T.text,
+                    border: `1px solid ${palette.border}`,
+                    background: hover === true && off !== true ? palette.hover : palette.bg,
+                    color: palette.fg,
                     fontSize: 11.5,
                     fontWeight: 600,
-                    cursor: "pointer",
+                    cursor: off === true ? "default" : "pointer",
+                    opacity: off === true ? 0.5 : 1,
                     fontFamily: "inherit",
                     transition: "background .12s ease",
                 },
@@ -1021,8 +1045,8 @@ window.__ModuleLoader__.load({
                 },
             }, `${count}`)),
             count === 0 ? null : h("div", { style: { display: "flex", alignItems: "center", gap: 5 } },
-                h(GroupChip, { label: t("enable"), title: t("toggleGroupOn"), on: true, onClick: () => onEnable(true) }),
-                h(GroupChip, { label: t("disable"), title: t("toggleGroupOff"), on: false, onClick: () => onEnable(false) }),
+                h(ActionChip, { label: t("enable"), title: t("toggleGroupOn"), tone: "success", onClick: () => onEnable(true) }),
+                h(ActionChip, { label: t("disable"), title: t("toggleGroupOff"), tone: "neutral", onClick: () => onEnable(false) }),
                 h("div", { style: { flex: 1 } }),
                 h(MiniIcon, { label: "✎", title: t("rename"), onClick: onRename }),
                 h(MiniIcon, { label: "✕", title: t("remove"), onClick: onDelete, danger: true })));

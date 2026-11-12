@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.4
+
+- The selection UI carries colour now: picked rows get a brand tint and a brand border, the
+  selection bar is a brand-tinted strip, the count is a brand pill, and its actions are chips —
+  green Enable, red Disable, brand Add to group, neutral Clear. Row and group actions share one
+  chip component, so every button in the panel speaks the same colour language.
+
 ## 0.3.3
 
 - Rename and Delete on a group are no longer faded icons at rest: both are 22px buttons with a
