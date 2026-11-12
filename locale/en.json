@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Tool Hub",
+    "description": "Group plugins and skills, switch a whole group with one click, and keep your own presets.",
+    "detail": "A single page for everything an installation runs. Plugins come from the host's plugin manager and skills from the skill folders, so switching either one here is the same thing as switching it there.\n\nGroups hold any mix of plugins and skills. A group's row toggles every member at once, and Auto group fills groups from a rule table you can review before applying.\n\nPresets store the exact set you have switched on. Applying one turns on what it lists and turns off what it does not, so a preset is a state you can return to rather than a hint.\n\nState lives in ~/.dsh/tool-hub/state.json."
+  }
+}

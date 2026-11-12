@@ -1,0 +1,95 @@
+# dsh-tool-hub
+
+One panel that lists the **plugins** and **skills** an installation actually runs, lets you switch
+them on or off one by one, keeps them in **groups** you can flip as a unit, and stores whole
+**presets** of "what is on right now".
+
+It shows up twice: as a **Hub tab** on the Plugins page, and as a **sidebar panel** of its own.
+
+## Why
+
+Disabling a plugin normally means digging through a profile's patch file, and skills are switched
+by renaming a `SKILL.md` by hand. Deciding "which of my 200 modules do I need for writing, which for
+coding" is a per-profile chore nobody wants to repeat. The hub turns that into one list with
+switches, groups, and presets.
+
+## Install
+
+From a git checkout or a local folder:
+
+```bash
+dsh plugin install FenrirCait/dsh-tool-hub
+# or, from a local copy
+dsh plugin install ./dsh-tool-hub
+```
+
+Then open **Plugins → Hub**, or the **Tool Hub** entry in the sidebar. A restart is not required;
+the plugin hot-loads.
+
+## What it does
+
+- **One list** of every loader entry plus every skill found under the user skill roots. Each row
+  shows what it is, whether it is on, and why it cannot be switched when it cannot.
+- **Per-row switch**. Plugins go through the host's own plugin manager, so enable/disable is written
+  to the profile patch exactly as the Plugins page would write it. Skills are switched by renaming
+  `SKILL.md` ↔ `SKILL.md.disabled`.
+- **Groups**: create, rename, delete, add the current selection, and flip a whole group on or off.
+  Groups over 20 members ask first.
+- **Auto grouping**: one button proposes groups from a rule table (core / interface / media /
+  research / dev / integrations / skills), previewed before anything is written. Applying it replaces
+  only the previous automatic groups; hand-made groups are left alone.
+- **Presets**: save the current set, then apply it later. `Apply` switches on what the preset lists
+  and off what it does not; `Only switch on` never turns anything off. Big changes ask first.
+
+Everything the panel writes about *groups and presets* lives in one file:
+
+```
+<DSH_HOME>/tool-hub/state.json      # defaults to ~/.dsh/tool-hub/state.json
+```
+
+Writes are atomic (temp file + rename), so a crash mid-save cannot leave a half-written state.
+
+## What it does not do
+
+- **MCP servers** are not listed yet. They are edited through their own config block and are the next
+  thing this plugin takes on.
+- **Skills outside the user roots** (`~/.dsh/skills`, `~/.agents/skills`) are not scanned. Project
+  level `.dsh/skills` folders belong to a workspace, not to an installation, and switching them here
+  would be misleading.
+- **Host-managed entries** (the plugin manager itself, the timer, the tool registry, …) are shown but
+  cannot be switched. The host reports them as `management-required` or `unaddressable`; the row says
+  so instead of hiding them.
+- **No terminal UI.** The panel is a Web/Desktop extension.
+
+## How switching actually works
+
+| Kind | Mechanism | Where the change lands |
+| --- | --- | --- |
+| Plugin | `pluginManager.setPluginEnabled(entryId, enabled)` | the profile patch file |
+| Skill | rename `SKILL.md` → `SKILL.md.disabled` (and back) | the skill folder |
+
+Both are reversible from the same row. A plugin switch can answer `restart-required`, `overridden`,
+or `failed`; the panel reports what the host answered instead of assuming success.
+
+## Development
+
+```
+lib/index.js        host half: snapshot, ops, HTTP routes (/tool-hub/api/*)
+client/client.js    client half: one hand-written ModuleLoader bundle, React only
+locale/{zh,en}.json plugin metadata shown on the Plugins page
+cordis.patch.yml    the bundle insert
+probe/host-smoke.mjs  26 assertions against a temp DSH_HOME and a fake plugin manager
+```
+
+```bash
+node --check lib/index.js
+node --check client/client.js
+node probe/host-smoke.mjs
+```
+
+The HTTP surface is two exact routes on the host's own web server — `GET /tool-hub/api/snapshot`
+and `POST /tool-hub/api/op` — guarded by the same origin check the bundled market uses.
+
+## License
+
+MIT

@@ -1,0 +1,8 @@
+# dsh-tool-hub bundle patch.
+#
+# Installing the package with `dsh plugin add <spec>` appends it to
+# dsh.profile.bundles and applies this layer, so the panel mounts without any
+# manual profile editing.
+- insert:
+    - id: tool-hub
+      name: 'dsh-tool-hub'
