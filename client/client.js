@@ -833,14 +833,15 @@ window.__ModuleLoader__.load({
                 alignItems: "center",
                 gap: 6,
                 width: "100%",
-                height: 28,
-                padding: "0 7px",
+                height: 30,
+                padding: "0 8px",
                 marginBottom: 2,
-                borderRadius: 7,
+                borderRadius: 8,
                 border: `1px solid ${active ? T.border : "transparent"}`,
                 background: active ? T.card : "transparent",
                 color: active ? T.text : T.text2,
-                fontSize: 12.5,
+                fontSize: 13.5,
+                fontWeight: 600,
                 cursor: "pointer",
                 fontFamily: "inherit",
             };
@@ -856,63 +857,70 @@ window.__ModuleLoader__.load({
 
         function GroupRow({ group, t, active, onSelect, onEnable, onRename, onDelete }) {
             const [hover, setHover] = useState(false);
+            const count = group.members.length;
             return h("div", {
                 onMouseEnter: () => setHover(true),
                 onMouseLeave: () => setHover(false),
-                style: { position: "relative" },
+                style: {
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 5,
+                    marginBottom: 2,
+                    padding: "7px 8px 7px 9px",
+                    borderRadius: 8,
+                    border: `1px solid ${active === true ? T.border : "transparent"}`,
+                    background: active === true ? T.card : (hover === true ? T.cardHover : "transparent"),
+                },
             },
             h("button", {
                 type: "button",
                 onClick: onSelect,
-                style: navRowStyle(active),
-            }, h("span", { style: { flex: 1, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, group.name),
-            group.stale > 0 ? h("span", { title: fmt(t, "stale", { n: group.stale }), style: { color: T.warn, fontSize: 11 } }, "!") : null,
-            group.auto === true ? h("span", { title: "auto", style: { color: T.text3, fontSize: 10.5 } }, "A") : null,
-            h("span", { style: { color: T.text3, fontSize: 11.5 } }, `${group.members.length}`)),
-            hover === true ? h("div", {
+                title: group.name,
                 style: {
                     display: "flex",
-                    gap: 2,
-                    padding: "0 4px 4px 4px",
+                    alignItems: "baseline",
+                    gap: 6,
+                    width: "100%",
+                    padding: 0,
+                    border: "none",
+                    background: "transparent",
+                    color: active === true ? T.text : T.text2,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    textAlign: "left",
                 },
             },
-            h("button", {
-                type: "button",
-                title: t("toggleGroupOn"),
-                onClick: (event) => {
-                    event.stopPropagation();
-                    onEnable(true);
+            h("span", {
+                style: {
+                    flex: 1,
+                    minWidth: 0,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    fontSize: 13.5,
+                    fontWeight: active === true ? 650 : 600,
                 },
-                style: miniButtonStyle,
-            }, "▸"),
-            h("button", {
-                type: "button",
-                title: t("toggleGroupOff"),
-                onClick: (event) => {
-                    event.stopPropagation();
-                    onEnable(false);
-                },
-                style: miniButtonStyle,
-            }, "▾"),
-            h("div", { style: { flex: 1 } }),
-            h("button", {
-                type: "button",
-                title: t("rename"),
-                onClick: (event) => {
-                    event.stopPropagation();
-                    onRename();
-                },
-                style: miniButtonStyle,
-            }, "✎"),
-            h("button", {
-                type: "button",
-                title: t("remove"),
-                onClick: (event) => {
-                    event.stopPropagation();
-                    onDelete();
-                },
-                style: miniButtonStyle,
-            }, "✕")) : null);
+            }, group.name),
+            group.stale > 0 ? h("span", { title: fmt(t, "stale", { n: group.stale }), style: { color: T.warn, fontSize: 11 } }, "!") : null,
+            group.auto === true ? h("span", { title: "auto", style: { color: T.text3, fontSize: 10 } }, "A") : null,
+            h("span", { style: { color: T.text3, fontSize: 11.5, fontWeight: 400 } }, `${count}`)),
+
+            count === 0 ? null : h("div", { style: { display: "flex", alignItems: "center", gap: 4 } },
+                h(Button, { small: true, title: t("toggleGroupOn"), onClick: () => onEnable(true) }, t("enable")),
+                h(Button, { small: true, title: t("toggleGroupOff"), onClick: () => onEnable(false) }, t("disable")),
+                h("div", { style: { flex: 1 } }),
+                h("button", {
+                    type: "button",
+                    title: t("rename"),
+                    onClick: onRename,
+                    style: { ...miniButtonStyle, opacity: hover === true ? 1 : 0.5 },
+                }, "✎"),
+                h("button", {
+                    type: "button",
+                    title: t("remove"),
+                    onClick: onDelete,
+                    style: { ...miniButtonStyle, opacity: hover === true ? 1 : 0.5 },
+                }, "✕")));
         }
 
         const miniButtonStyle = {

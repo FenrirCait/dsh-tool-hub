@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.1
+
+- Group rows carry explicit **Enable** / **Disable** buttons under the group name instead of
+  hover-only arrows, and the name is larger — a bulk switch nobody can find is a bulk switch that
+  does not exist.
+- The plugin detail page now shows a real document. `meta.detail` is a path, not prose: the host
+  read our sentence as a file name and answered "the plugin declares an invalid details file".
+  It now points at `detail/zh.md` / `detail/en.md`, both shipped in the package.
+
 ## 0.3.0
 
 - Every row now says where it came from: `@deepseek-ai/*` packages and the loader's own `cordis:`
