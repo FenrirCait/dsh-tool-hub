@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.2
+
+- The group rail reads at a glance now: group names use the primary label colour at 14px, the
+  member count is a pill instead of faint grey text, an auto-generated group carries a brand dot,
+  and the selected group gets a brand tint plus a left accent bar.
+- Enable / Disable are chips: Enable is tinted with the success colour, Disable stays neutral and
+  darkens on hover. Both tints are `color-mix` over theme tokens, so they follow light and dark
+  themes instead of hard-coding a colour.
+- Screenshots are out of the README until the interface settles; `screenshots.json` went with them.
+  The market listing will pick images up again once they are stable enough to stop re-shooting.
+
 ## 0.3.1
 
 - Group rows carry explicit **Enable** / **Disable** buttons under the group name instead of
