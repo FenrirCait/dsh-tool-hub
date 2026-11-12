@@ -8,11 +8,11 @@ them on or off one by one, keeps them in **groups** you can flip as a unit, and 
 
 It shows up twice: as a **Hub tab** on the Plugins page, and as a **sidebar panel** of its own.
 
-![The hub tab: one list of plugins and skills, a group rail on the left, per-row switches on the right](assets/hub-groups.png?v=2)
+![The hub tab: one list of plugins and skills, a group rail on the left, per-row switches on the right](assets/hub-panel.png)
 
-![Auto grouping shows its plan before anything is written](assets/auto-groups.png?v=2)
+![Auto grouping shows its plan before anything is written](assets/auto-grouping.png)
 
-![Presets record what is on right now and can be replayed later](assets/presets.png?v=2)
+![Presets record what is on right now and can be replayed later](assets/presets-list.png)
 
 ## Why
 
