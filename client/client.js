@@ -161,6 +161,8 @@ window.__ModuleLoader__.load({
                 presetEmpty: '还没有预设',
                 presetApplied: '已应用 {n}/{total} 项变更',
             presetDeferred: '已换上预设；相关服务器的工具注册后会自动补上屏蔽',
+            compatBadge: '兼容',
+            compatHint: '检测到 dsh-skill-mcp-panel：写入 patch 前会先拿它的 .panel.lock；它的工具屏蔽只读并入，不写它的文件。',
             marketImport: '导入 dshmarket 分组（{n}）',
             marketImportTitle: '导入 dshmarket 分组',
             marketImportHint: '只读 dshmarket 的 state.json，把它的分组复制进来；同名分组会跳过。',
@@ -301,6 +303,8 @@ window.__ModuleLoader__.load({
                 presetEmpty: 'No presets yet',
                 presetApplied: 'Applied {n}/{total} changes',
             presetDeferred: 'Preset applied; masks for its servers land once their tools register',
+            compatBadge: 'Compat',
+            compatHint: 'dsh-skill-mcp-panel detected: patch writes take its .panel.lock first, and its tool deny list is merged read-only.',
             marketImport: 'Import dshmarket groups ({n})',
             marketImportTitle: 'Import dshmarket groups',
             marketImportHint: 'Reads dshmarket state.json and copies its groups here; groups with a name you already use are skipped.',
@@ -786,6 +790,9 @@ window.__ModuleLoader__.load({
                             h(Badge, { key: "skills", tone: "warn" }, fmt(t, "pillSkills", { n: counts.skill[0] })),
                             h(Badge, { key: "mcp", tone: "plain" }, fmt(t, "pillMcp", { n: counts.mcp[0] })),
                             h(Badge, { key: "all", tone: "plain" }, fmt(t, "pillAll", { n: counts.plugin[0] + counts.skill[0] + counts.mcp[0] })),
+                            data.compat?.active === true
+                                ? h(Badge, { key: "compat", tone: "brand", title: t("compatHint") }, t("compatBadge"))
+                                : null,
                         ])),
             h("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" } },
                 view === "mcp"

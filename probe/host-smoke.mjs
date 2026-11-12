@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url'
 
 const home = join(tmpdir(), `tool-hub-smoke-${Date.now()}`)
 process.env.DSH_HOME = home
+process.env.TOOL_HUB_LOCK_TIMEOUT_MS = '250'
 
 const results = []
 const check = (name, ok, detail = '') => {
@@ -71,7 +72,7 @@ const marketText = `${JSON.stringify({
 await writeFile(join(profileDir, '.dsh-market', 'state.json'), marketText)
 
 // ── fixture: plugin manager ────────────────────────────────────────────────
-const enabled = new Set(['@deepseek-ai/dsh-session', 'billion-context', 'ui-theme'])
+const enabled = new Set(['@deepseek-ai/dsh-session', 'billion-context', 'ui-theme', 'dsh-skill-mcp-panel'])
 const fakePlugins = [
   { entryId: 'e1', moduleName: '@deepseek-ai/dsh-session', meta: { title: 'Session' }, fiberPhase: 'active' },
   { entryId: 'e2', moduleName: 'billion-context', meta: { title: 'Billion Context' }, fiberPhase: 'active' },
@@ -80,6 +81,7 @@ const fakePlugins = [
   { entryId: 'e5', moduleName: 'dsh-tool-hub', meta: { title: '工具总控台' }, fiberPhase: 'active' },
   { entryId: 'e6', moduleName: 'plugin-manager', meta: { title: 'Plugin Manager' }, fiberPhase: 'active', readOnlyReason: 'management-required' },
   { entryId: 'e7', moduleName: '@deepseek-ai/dsh-mcp-client', patchId: 'panel-mcp-fixture', fiberPhase: null },
+  { entryId: 'e8', moduleName: 'dsh-skill-mcp-panel', meta: { title: 'Skill / MCP' }, fiberPhase: 'active' },
 ]
 const fakeManager = {
   async listPlugins() {
@@ -157,7 +159,7 @@ const op = async (name, payload) => {
 // ── 1. snapshot ────────────────────────────────────────────────────────────
 let snap = await get('/tool-hub/api/snapshot')
 check('snapshot ok', snap.ok === true, snap.error?.message ?? '')
-check('plugins listed', snap.data.plugins.length === 7, `got ${snap.data.plugins.length}`)
+check('plugins listed', snap.data.plugins.length === 8, `got ${snap.data.plugins.length}`)
 check('mcp row named by server', snap.data.plugins.find(row => row.id === 'e7')?.name === 'fixture', JSON.stringify(snap.data.plugins.find(row => row.id === 'e7')))
 check('mcp row editable', snap.data.plugins.find(row => row.id === 'e7')?.mcpEditable === true)
 check('mcp patch path exposed', snap.data.paths.patch === join(profileDir, 'cordis.patch.yml'), snap.data.paths.patch)
@@ -325,6 +327,16 @@ check('imported groups visible', marketGroups.includes('fixture-group') && marke
 check('imported members point at rows', (await op('snapshot', {})).data.groups.some(group => group.name === 'fixture-group' && group.members.some(member => member.id === 'e1')))
 r = await op('market.import', {})
 check('second import is a no-op', r.ok === true && r.data.imported === 0 && r.data.skipped.length === 2, JSON.stringify(r.data?.skipped))
+await op('toggle', { kind: 'plugin', id: 'e8', enabled: true })
+check('compat detected', (await op('snapshot', {})).data.compat?.active === true, JSON.stringify((await op('snapshot', {})).data.compat))
+const lockFile = join(profileDir, 'cordis.patch.yml.panel.lock')
+await writeFile(lockFile, '1\n' + new Date().toISOString() + '\n')
+r = await op('mcp.save', { id: 'panel-mcp-fixture', config: { serverName: 'blocked' } })
+check('compat lock is respected', r.ok === false && r.error.code === 'lock-timeout', JSON.stringify(r.error))
+await rm(lockFile, { force: true })
+r = await op('mcp.save', { id: 'panel-mcp-fixture', config: { serverName: 'after-lock' } })
+check('save works once the lock is gone', r.ok === true, JSON.stringify(r.error))
+check('no lock file left behind', (await readdir(profileDir)).includes('cordis.patch.yml.panel.lock') === false)
 check('market file untouched', (await readFile(join(profileDir, '.dsh-market', 'state.json'), 'utf8')) === marketText)
 
 // ── 8. state file ──────────────────────────────────────────────────────────

@@ -71,3 +71,7 @@ TOOL_HUB_SKILL_ROOTS=<dir>/skills;<dir>/skills2   # Windows 用分号分隔
 ## 导入 dshmarket 分组
 
 `dshmarket` 的分组存在 `<profile>/.dsh-market/state.json`。该文件有分组时，顶栏会出现导入按钮：面板把每个包名映射到它安装出来的 loader 行，再整组复制过来。这里已有同名的分组会被跳过而不是合并，所以重复导入不会产生重复项，也不会打乱你中途改过的分组；未安装的包按组列出并跳过，该文件本身只读不写。
+
+## 与 dsh-skill-mcp-panel 共存
+
+两个面板读的是同一份真值：技能是文件、MCP 是 patch 里的行。所以「同步状态」不是问题，**同时写**才是。装并启用了 dsh-skill-mcp-panel 时，本插件在重写 patch 前会先拿同一个 `<patch>.panel.lock`（独占创建、30 秒陈旧接管、最多等 5 秒），顶栏出现「兼容」徽标；它的工具屏蔽名单在这里只读并入（并集），绝不写它的文件。读操作不拿锁，列表与快照不会被拖慢。

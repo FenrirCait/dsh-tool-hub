@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.5.0
+
+- **Compatibility with dsh-skill-mcp-panel is detected, not configured.** Both panels read the same
+  truth — skills are files, MCP servers are rows in the profile patch — so the only way they can
+  hurt each other is by writing at the same moment. When that panel is installed and enabled, this
+  panel now takes the same `<patch>.panel.lock` (exclusive create, 30s stale takeover, 5s wait)
+  before rewriting the patch, and shows a small **Compat** badge in the header. Its tool deny list
+  stays read-only here and is merged as a union; its file is never written.
+- Releasing the lock is unconditional: a failed write, a rejected op, or a crash during the write
+  all remove the file in the same `finally`.
+- The lock is only taken while writing the patch, never while reading, so listing and the snapshot
+  stay wait-free.
+
 ## 1.4.0
 
 - **Groups can be imported from dshmarket.** `dshmarket` keeps its groups in

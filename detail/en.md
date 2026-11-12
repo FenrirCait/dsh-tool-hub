@@ -84,3 +84,7 @@ TOOL_HUB_SKILL_ROOTS=<dir>/skills:<dir>/skills2   # semicolon on Windows
 ## Importing dshmarket groups
 
 `dshmarket` stores its groups in `<profile>/.dsh-market/state.json`. When that file has groups, the header shows an import button: the panel maps each package name to the loader rows it installed and copies the groups in. A group whose name is already used here is skipped rather than merged, so a second import never duplicates or reshuffles anything you edited in between. Uninstalled packages are listed per group and skipped; the file itself is only read.
+
+## Living next to dsh-skill-mcp-panel
+
+Both panels read the same truth — skills are files, MCP servers are rows in the patch — so state does not need syncing; writing at the same time is the real risk. When that panel is installed and enabled, this one takes the same `<patch>.panel.lock` before rewriting the patch (exclusive create, 30s stale takeover, 5s wait) and shows a **Compat** badge in the header. Its tool deny list is merged read-only (union) and its file is never written. Reads never take the lock, so listing and the snapshot stay wait-free.
