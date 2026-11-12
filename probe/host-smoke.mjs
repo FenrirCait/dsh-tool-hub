@@ -236,6 +236,32 @@ r = await op('preset.save', { name: 'tool-preset' })
 const savedPreset = r.data.presets.find(preset => preset.name === 'tool-preset')
 check('preset records the tool dimension', Array.isArray(savedPreset?.enabled?.tool) && savedPreset.enabled.tool.length === 2, JSON.stringify(savedPreset?.enabled?.tool))
 
+// A preset must replay while the servers it mentions are switched off: the live view then
+// knows none of their tools, so the recorded deny list is what has to be applied.
+await op('tool.save', { deny: ['mcp__fixture__beta'] })
+r = await op('preset.save', { name: 'offline-preset' })
+check('preset records the deny list too', JSON.stringify(r.data.presets.find(preset => preset.name === 'offline-preset')?.toolDeny) === '["mcp__fixture__beta"]', JSON.stringify(r.data.presets.map(preset => preset.toolDeny)))
+await op('tool.save', { deny: [] })
+const liveTools = [...mcpTools]
+mcpTools.length = 0
+r = await op('preset.apply', { name: 'offline-preset', mode: 'exact' })
+check('offline preset applies its tools without a second press', r.ok === true && r.data.tools?.denied === 1, JSON.stringify(r.data?.tools))
+check('offline preset wrote the recorded deny', JSON.stringify(JSON.parse(await readFile(join(home, 'tool-hub', 'state.json'), 'utf8')).toolDeny) === '["mcp__fixture__beta"]')
+mcpTools.push(...liveTools)
+await op('tool.save', { deny: [] })
+
+// Presets saved before `toolDeny` existed still work once the tools show up again.
+const legacyState = JSON.parse(await readFile(join(home, 'tool-hub', 'state.json'), 'utf8'))
+legacyState.presets.push({ name: 'legacy-preset', enabled: { plugin: [], skill: [], tool: ['mcp__fixture__alpha'] }, createdAt: Date.now() })
+await writeFile(join(home, 'tool-hub', 'state.json'), JSON.stringify(legacyState, null, 2))
+mcpTools.length = 0
+r = await op('preset.apply', { name: 'legacy-preset', mode: 'exact' })
+check('legacy preset defers while nothing is known', r.ok === true && r.data.tools?.deferred === true, JSON.stringify(r.data?.tools))
+mcpTools.push(...liveTools)
+await new Promise(done => setTimeout(done, 1900))
+check('legacy preset finishes the job after the tools register', JSON.stringify(JSON.parse(await readFile(join(home, 'tool-hub', 'state.json'), 'utf8')).toolDeny) === '["mcp__fixture__beta"]')
+await op('tool.save', { deny: [] })
+
 // ── 3. plugin toggle + read-only refusal ───────────────────────────────────
 r = await op('toggle', { kind: 'plugin', id: 'e4', enabled: true })
 check('plugin on', r.ok === true && r.data.ok === true && r.data.application === 'applied', JSON.stringify(r.data))

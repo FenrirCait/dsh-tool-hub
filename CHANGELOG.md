@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.3.1
+
+- **A preset now replays its tool masks in one press.** Applying a preset used to compute the mask
+  from the tools that exist right now, so a preset whose MCP servers were switched off found no
+  tools to compare against, masked nothing, and only worked when applied a second time — after the
+  servers had come back. A preset now records the deny list alongside the enabled list, and that
+  list is name-based: it applies even while the servers it mentions are off, and takes effect as
+  their tools register.
+- Presets saved before this change carry no deny list; they are applied the old way and, if the
+  tools were not there yet, retried once when they appear. Nothing is masked for presets that were
+  never about tools.
+
 ## 1.3.0
 
 - **Test a server before you trust it.** The MCP edit dialog has a *Test* button: it starts the

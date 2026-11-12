@@ -160,6 +160,7 @@ window.__ModuleLoader__.load({
                 presetDelete: '删除',
                 presetEmpty: '还没有预设',
                 presetApplied: '已应用 {n}/{total} 项变更',
+            presetDeferred: '已换上预设；相关服务器的工具注册后会自动补上屏蔽',
                 presetOnlyOn: '只开启，不关闭',
                 auto: '自动分组',
                 autoTitle: '自动分组预览',
@@ -291,6 +292,7 @@ window.__ModuleLoader__.load({
                 presetDelete: 'Delete',
                 presetEmpty: 'No presets yet',
                 presetApplied: 'Applied {n}/{total} changes',
+            presetDeferred: 'Preset applied; masks for its servers land once their tools register',
                 presetOnlyOn: 'Only switch on',
                 auto: 'Auto group',
                 autoTitle: 'Auto group preview',
@@ -745,8 +747,14 @@ window.__ModuleLoader__.load({
             };
 
             const runPresetApply = async (name, mode) => {
-                await act("preset.apply", { name, mode }, (result) => flash(fmt(t, "presetApplied", { n: result.applied, total: result.requested })));
+                await act("preset.apply", { name, mode }, (result) => {
+                    if (result.tools?.deferred === true) flash(t("presetDeferred"));
+                    else flash(fmt(t, "presetApplied", { n: result.applied, total: result.requested }));
+                });
                 setDialog(null);
+                // Servers the preset switched on take a moment to register their tools; look again
+                // once, the same way the create dialog waits for the host to reconcile.
+                setTimeout(refresh, 1800);
             };
 
             const header = h("div", {
