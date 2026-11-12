@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.9
+
+- The Enable / Disable chips on a group stay on one line and inside their border at any rail width, and the
+  whole action row (chips plus move/rename/delete) fits on one 20px line in a narrow rail.
+
 ## 1.6.8
 
 - Auto grouping now makes three buckets and stops guessing: **official** (anything that ships with the

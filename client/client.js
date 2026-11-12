@@ -1377,13 +1377,23 @@ window.__ModuleLoader__.load({
                 onMouseEnter: () => setHover(true),
                 onMouseLeave: () => setHover(false),
                 style: {
-                    height: 24,
-                    padding: "0 10px",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    // A narrow rail used to squeeze these two chips until the label wrapped inside a
+                    // 24px box and spilled over the border. The label stays on one line; the row wraps.
+                    whiteSpace: "nowrap",
+                    lineHeight: 1,
+                    height: 22,
+                    minWidth: 0,
+                    overflow: "hidden",
+                    flex: "0 0 auto",
+                    padding: "0 7px",
                     borderRadius: 6,
                     border: `1px solid ${palette.border}`,
                     background: hover === true && off !== true ? palette.hover : palette.bg,
                     color: palette.fg,
-                    fontSize: 11.5,
+                    fontSize: 11,
                     fontWeight: 600,
                     cursor: off === true ? "default" : "pointer",
                     opacity: off === true ? 0.5 : 1,
@@ -1404,8 +1414,8 @@ window.__ModuleLoader__.load({
                 onMouseEnter: () => setHover(true),
                 onMouseLeave: () => setHover(false),
                 style: {
-                    width: 22,
-                    height: 22,
+                    width: 20,
+                    height: 20,
                     padding: 0,
                     display: "flex",
                     alignItems: "center",
@@ -1531,7 +1541,7 @@ window.__ModuleLoader__.load({
                         },
                     }, tag)))
                 : null,
-            count === 0 ? null : h("div", { style: { display: "flex", alignItems: "center", gap: 5 } },
+            count === 0 ? null : h("div", { style: { display: "flex", alignItems: "center", gap: 4, flexWrap: "nowrap", minWidth: 0 } },
                 h(ActionChip, { label: t("enable"), title: t("toggleGroupOn"), tone: "success", onClick: () => onEnable(true) }),
                 h(ActionChip, {
                     label: t("disable"),
