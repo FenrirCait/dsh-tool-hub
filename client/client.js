@@ -72,6 +72,8 @@ window.__ModuleLoader__.load({
                 remove: '删除',
                 removeConfirm: '删除分组「{name}」？成员本身不会被开关。',
                 readonly: '宿主托管',
+                selfBadge: '本插件',
+                selfHint: '这个面板不能关掉自己，否则你就没有地方再把它打开。',
                 restart: '需重启生效',
                 overridden: '被更高优先层覆盖',
                 preset: '预设',
@@ -89,6 +91,9 @@ window.__ModuleLoader__.load({
                 autoHint: '按规则表分组，还没生效。确认后再写。',
                 autoApply: '应用到分组',
                 autoEmpty: '没有可自动分组的条目',
+                railEmptyTitle: '还没有分组',
+                railEmptyBody: '一键自动分组会按规则把插件和技能分成几组，先看预览，确认后才写盘。',
+                railEmptyAction: '自动分组',
                 autoDone: '已建 {n} 个自动分组',
                 cancel: '取消',
                 close: '关闭',
@@ -139,6 +144,8 @@ window.__ModuleLoader__.load({
                 remove: 'Delete',
                 removeConfirm: 'Delete the group “{name}”? Its members keep their own state.',
                 readonly: 'Host-managed',
+                selfBadge: 'This plugin',
+                selfHint: 'This panel cannot switch itself off — there would be no way back in.',
                 restart: 'Needs restart',
                 overridden: 'Overridden by a higher layer',
                 preset: 'Presets',
@@ -156,6 +163,9 @@ window.__ModuleLoader__.load({
                 autoHint: 'Grouped by the rule table. Nothing is written until you confirm.',
                 autoApply: 'Apply to groups',
                 autoEmpty: 'Nothing to auto group',
+                railEmptyTitle: 'No groups yet',
+                railEmptyBody: 'Auto grouping sorts plugins and skills into a few groups by rule. You see a preview first; nothing is written until you apply it.',
+                railEmptyAction: 'Auto group',
                 autoDone: 'Created {n} automatic groups',
                 cancel: 'Cancel',
                 close: 'Close',
@@ -667,7 +677,24 @@ window.__ModuleLoader__.load({
                 onEnable: value => enableAllInGroup(group, value),
                 onRename: () => setDialog({ kind: "rename", group }),
                 onDelete: () => setDialog({ kind: "deleteGroup", group }),
-            })));
+            })),
+            groups.length === 0
+                ? h("div", {
+                    style: {
+                        marginTop: 10,
+                        padding: "10px 10px 11px",
+                        borderRadius: 9,
+                        border: `1px dashed ${T.border}`,
+                        background: T.cardHover,
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 7,
+                    },
+                },
+                    h("div", { style: { fontSize: 12, fontWeight: 600, color: T.text } }, t("railEmptyTitle")),
+                    h("div", { style: { fontSize: 11.5, lineHeight: 1.55, color: T.text3 } }, t("railEmptyBody")),
+                    h(Button, { small: true, onClick: () => { void openAuto(); }, disabled: busy || data === null }, t("railEmptyAction")))
+                : null);
 
             const list = h("div", { style: { flex: 1, minWidth: 0, display: "flex", flexDirection: "column" } },
                 h("div", { style: { flex: 1, overflow: "auto", padding: "10px 12px 12px" } },
@@ -901,6 +928,7 @@ window.__ModuleLoader__.load({
         function Row({ row, t, picked, onPick, onToggle, busy }) {
             const [hover, setHover] = useState(false);
             const readOnly = row.manageable === false;
+            const selfEntry = row.self === true;
             return h("div", {
                 onMouseEnter: () => setHover(true),
                 onMouseLeave: () => setHover(false),
@@ -960,6 +988,7 @@ window.__ModuleLoader__.load({
                     style: { fontSize: 10.5, color: T.text3, flex: "0 0 auto" },
                 }, row.dupeLabel),
                 readOnly ? h(Badge, { tone: "warn", title: row.readOnlyReason }, t("readonly")) : null,
+                selfEntry ? h(Badge, { tone: "plain", title: t("selfHint") }, t("selfBadge")) : null,
                 row.phase === "failed" ? h(Badge, { tone: "danger" }, "failed") : null),
                 row.description === "" ? null : h("div", {
                     style: {
@@ -983,7 +1012,7 @@ window.__ModuleLoader__.load({
             }, row.enabled ? t("enabled") : t("disabled")),
             h(Switch, {
                 checked: row.enabled,
-                disabled: busy || readOnly,
+                disabled: busy || readOnly || selfEntry,
                 label: row.name,
                 onChange: enabled => onToggle(enabled),
             }));
