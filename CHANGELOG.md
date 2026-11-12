@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.6.2
+
+- Fixed groups disappearing when two of them share a name. Identity is the group id, which matters now
+  that the same topic can appear once under always-on and once under per-task.
+- The tag chips no longer repeat the role that the section header already states.
+
+## 1.6.1
+
+- The auto-grouping preview labels every bucket with its role (always on / per task / skills), so the
+  split you are about to apply is readable before it is written, not only in the rail afterwards.
+
+## 1.6.0
+
+- **Auto grouping now separates "always on" from "per task".** The first axis is role: official
+  infrastructure and anything whose name/description reads like a layer (context, session, sidebar,
+  theme, market, runtime, tools) lands under **always on**; everything whose text reads like a job
+  (generate, search, crawl, convert, render, notify) lands under **per task**. The second axis is
+  the topic it belongs to. Classification is scoring, not first-match, so a module that hits
+  several topics no longer lands wherever rule order happened to put it.
+- **The rail groups by role.** Two labelled sections, always-on first, so the difference is visible
+  without reading names. Switching off a whole always-on group always asks first, whatever its size.
+- **Groups carry tags.** The signal words that decided the classification are stored with the group
+  and shown as small chips, so "why is this here" is answerable from the row itself.
+- **Drag to reorder.** Dropping a group in front of another moves it there, across sections too; the
+  order is written to state.json and survives a restart. An op that is rejected leaves the order
+  untouched (the list re-reads the snapshot).
+
 ## 1.5.0
 
 - **Compatibility with dsh-skill-mcp-panel is detected, not configured.** Both panels read the same

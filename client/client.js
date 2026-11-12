@@ -177,7 +177,12 @@ window.__ModuleLoader__.load({
                 autoHint: '按规则表分组，还没生效。确认后再写。',
                 autoApply: '应用到分组',
                 autoEmpty: '没有可自动分组的条目',
-                railEmptyTitle: '还没有分组',
+                roleBase: '常开底座',
+            toggleBaseOff: '这是常开底座，关掉可能连累整条链（会先确认）',
+            roleTask: '专项任务',
+            roleSkill: '技能',
+            roleLoose: '手动分组',
+            railEmptyTitle: '还没有分组',
                 railEmptyBody: '一键自动分组会按规则把插件和技能分成几组，先看预览，确认后才写盘。',
                 railEmptyAction: '自动分组',
                 autoDone: '已建 {n} 个自动分组',
@@ -319,7 +324,12 @@ window.__ModuleLoader__.load({
                 autoHint: 'Grouped by the rule table. Nothing is written until you confirm.',
                 autoApply: 'Apply to groups',
                 autoEmpty: 'Nothing to auto group',
-                railEmptyTitle: 'No groups yet',
+                roleBase: 'ALWAYS ON',
+            toggleBaseOff: 'This is the always-on layer; switching it off can break the chain (asks first)',
+            roleTask: 'PER TASK',
+            roleSkill: 'SKILLS',
+            roleLoose: 'MANUAL',
+            railEmptyTitle: 'No groups yet',
                 railEmptyBody: 'Auto grouping sorts plugins and skills into a few groups by rule. You see a preview first; nothing is written until you apply it.',
                 railEmptyAction: 'Auto group',
                 autoDone: 'Created {n} automatic groups',
@@ -623,6 +633,57 @@ window.__ModuleLoader__.load({
             }, [refresh, flash]);
 
             const groups = data === null ? [] : data.groups;
+        const [dragId, setDragId] = useState(null);
+        const roleSections = [
+            { role: "base", key: "roleBase" },
+            { role: "task", key: "roleTask" },
+            { role: "skill", key: "roleSkill" },
+        ];
+        const sections = roleSections
+            .map(section => ({ ...section, list: groups.filter(group => group.role === section.role) }))
+            .filter(section => section.list.length > 0);
+        const loose = groups.filter(group => group.role !== "base" && group.role !== "task" && group.role !== "skill");
+        // Dropping a row moves it in front of the row it was dropped on, across sections too:
+        // the order array is the whole rail, so a drag is one op and one write.
+        const reorderGroups = (fromId, toId) => {
+            if (fromId === "" || fromId === toId) return;
+            const ids = groups.map(group => group.id);
+            const from = ids.indexOf(fromId);
+            const to = ids.indexOf(toId);
+            if (from < 0 || to < 0) return;
+            ids.splice(to, 0, ids.splice(from, 1)[0]);
+            void act("group.reorder", { order: ids });
+        };
+        const groupRow = group => h("div", {
+            key: group.id,
+            draggable: true,
+            onDragStart: event => {
+                setDragId(group.id);
+                try { event.dataTransfer.setData("text/plain", group.id); }
+                catch { /* some engines refuse to write during a drag */ }
+            },
+            onDragEnd: () => setDragId(null),
+            onDragOver: event => { event.preventDefault(); },
+            onDrop: event => {
+                event.preventDefault();
+                reorderGroups(dragId ?? event.dataTransfer.getData("text/plain") ?? "", group.id);
+                setDragId(null);
+            },
+            style: dragId === group.id ? { opacity: 0.4 } : null,
+        }, h(GroupRow, {
+            group,
+            accent: groupAccent(group.members.length).accent,
+            accentDepth: groupAccent(group.members.length).accentDepth,
+            t,
+            active: groupId === group.id,
+            onSelect: () => {
+                setGroupId(group.id);
+                setPicked(new Set());
+            },
+            onEnable: value => enableAllInGroup(group, value),
+            onRename: () => setDialog({ kind: "rename", group }),
+            onDelete: () => setDialog({ kind: "deleteGroup", group }),
+        }));
             const plugins = data === null ? [] : data.plugins;
             const skills = data === null ? [] : data.skills;
 
@@ -757,9 +818,10 @@ window.__ModuleLoader__.load({
             };
 
             // A big group is a hundred switches at once; ask before writing that,
-            // and show how many rows it actually touches.
+            // and show how many rows it actually touches. Switching off part of the
+            // always-on layer is confirmed whatever its size: it can take the rest down.
             const enableAllInGroup = async (group, enabled) => {
-                if (group.members.length > 20) {
+                if (group.members.length > 20 || (enabled === false && group.role === "base")) {
                     setDialog({ kind: "confirmGroup", group, enabled });
                     return;
                 }
@@ -898,21 +960,26 @@ window.__ModuleLoader__.load({
                     textAlign: "center",
                 },
             }, `${counts.plugin[0] + counts.skill[0]}`)),
-            groups.map(group => h(GroupRow, {
-                key: group.id,
-                group,
-                accent: groupAccent(group.members.length).accent,
-                accentDepth: groupAccent(group.members.length).accentDepth,
-                t,
-                active: groupId === group.id,
-                onSelect: () => {
-                    setGroupId(group.id);
-                    setPicked(new Set());
-                },
-                onEnable: value => enableAllInGroup(group, value),
-                onRename: () => setDialog({ kind: "rename", group }),
-                onDelete: () => setDialog({ kind: "deleteGroup", group }),
-            })),
+            ...sections.flatMap(section => [
+                h("div", {
+                    key: `role-${section.role}`,
+                    style: {
+                        margin: "10px 4px 3px",
+                        fontSize: 10.5,
+                        letterSpacing: "0.04em",
+                        color: T.text3,
+                        fontWeight: 600,
+                    },
+                }, t(section.key)),
+                ...section.list.map(group => groupRow(group)),
+            ]),
+            loose.length > 0
+                ? h("div", {
+                    key: "role-loose",
+                    style: { margin: "10px 4px 3px", fontSize: 10.5, letterSpacing: "0.04em", color: T.text3, fontWeight: 600 },
+                }, t("roleLoose"))
+                : null,
+            loose.map(group => groupRow(group)),
             groups.length === 0
                 ? h("div", {
                     style: {
@@ -1298,9 +1365,28 @@ window.__ModuleLoader__.load({
                     flex: "0 0 auto",
                 },
             }, `${count}`)),
+            Array.isArray(group.tags) && group.tags.filter(tag => tag !== "base" && tag !== "task" && tag !== "skill").length > 0
+                ? h("div", { style: { display: "flex", gap: 4, flexWrap: "wrap", marginTop: -2 } },
+                    group.tags.filter(tag => tag !== "base" && tag !== "task" && tag !== "skill").slice(0, 4).map(tag => h("span", {
+                        key: tag,
+                        style: {
+                            padding: "0 5px",
+                            borderRadius: 4,
+                            border: `1px solid ${T.borderSoft}`,
+                            color: T.text3,
+                            fontSize: 10,
+                            lineHeight: "16px",
+                        },
+                    }, tag)))
+                : null,
             count === 0 ? null : h("div", { style: { display: "flex", alignItems: "center", gap: 5 } },
                 h(ActionChip, { label: t("enable"), title: t("toggleGroupOn"), tone: "success", onClick: () => onEnable(true) }),
-                h(ActionChip, { label: t("disable"), title: t("toggleGroupOff"), tone: "neutral", onClick: () => onEnable(false) }),
+                h(ActionChip, {
+                    label: t("disable"),
+                    title: group.role === "base" ? t("toggleBaseOff") : t("toggleGroupOff"),
+                    tone: group.role === "base" ? "danger" : "neutral",
+                    onClick: () => onEnable(false),
+                }),
                 h("div", { style: { flex: 1 } }),
                 h(MiniIcon, { label: "✎", title: t("rename"), onClick: onRename }),
                 h(MiniIcon, { label: "✕", title: t("remove"), onClick: onDelete, danger: true })));
@@ -1937,7 +2023,7 @@ window.__ModuleLoader__.load({
                     ]),
                 }, h("div", { style: { fontSize: 12, color: T.text3, marginBottom: 8 } }, fmt(t, "membersCount", { n: total })),
                 dialog.plan.map(entry => h("div", {
-                    key: entry.name,
+                    key: `${entry.role}-${entry.name}`,
                     style: {
                         display: "flex",
                         alignItems: "center",
@@ -1946,6 +2032,10 @@ window.__ModuleLoader__.load({
                         borderBottom: `1px solid ${T.borderSoft}`,
                     },
                 },
+                h("span", { style: { flex: "0 0 auto" } }, h(Badge, {
+                    tone: entry.role === "base" ? "danger" : (entry.role === "task" ? "brand" : "warn"),
+                    title: entry.role === "base" ? t("roleBase") : (entry.role === "task" ? t("roleTask") : t("roleSkill")),
+                }, entry.role === "base" ? t("roleBase") : (entry.role === "task" ? t("roleTask") : t("roleSkill")))),
                 h("span", { style: { flex: 1 } }, entry.name),
                 h("span", { style: { fontSize: 11.5, color: T.text3 } }, fmt(t, "membersCount", { n: entry.members.length })))));
             }

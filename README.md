@@ -42,8 +42,10 @@ the plugin hot-loads.
   `SKILL.md` ↔ `SKILL.md.disabled`.
 - **Groups**: create, rename, delete, add the current selection, and flip a whole group on or off.
   Groups over 20 members ask first.
-- **Auto grouping**: one button proposes groups from a rule table (core / interface / media /
+- **Auto grouping**: one button proposes groups from two axes — role first (always-on layer vs per-task),
   research / dev / integrations / skills), previewed before anything is written. Applying it replaces
+  then topic. The rail shows the role as a section header, each group carries the tags that decided its
+  bucket, and rows can be dragged to reorder (the order is written to state.json). Applying replaces
   only the previous automatic groups; hand-made groups are left alone.
 - **Presets**: save the current set, then apply it later. `Apply` switches on what the preset lists
   and off what it does not; `Only switch on` never turns anything off. Big changes ask first.- **MCP servers** get their own view: name, transport and command per row, the same switch as every

@@ -45,7 +45,8 @@ A group holds any mix of plugins and skills. With a group selected, two explicit
 **Disable** buttons sit under its name and flip every member at once; groups over 20 members ask
 first.
 
-**Auto group** buckets the current inventory from a rule table: core, interface, media, research,
+**Auto group** buckets the current inventory on two axes: role first (always-on layer vs per-task),
+then topic (context, interface, media, research,
 dev, integrations, skills. It previews the plan before writing anything, and re-running it replaces
 only the groups it generated — hand-made groups stay as they are.
 

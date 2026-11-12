@@ -292,18 +292,23 @@ check('bulk disables three', r.ok === true && r.data.changed === 3, JSON.stringi
 r = await op('auto.preview', {})
 const plan = r.data.plan
 check('auto preview buckets', plan.length >= 2, plan.map(entry => `${entry.name}:${entry.members.length}`).join(', '))
-check('auto preview has foundation bucket', plan.some(entry => entry.name === '基础功能' && entry.members.length >= 2))
+check('auto preview splits roles', plan.some(entry => entry.role === 'base') && plan.some(entry => entry.role === 'task'), plan.map(entry => `${entry.role}:${entry.name}:${entry.members.length}`).join(', '))
+check('auto preview tags every bucket', plan.every(entry => Array.isArray(entry.tags) && entry.tags.length > 0))
 r = await op('auto.apply', {})
 check('auto applied', r.ok === true && r.data.groups >= 2, JSON.stringify({ groups: r.data?.groups, members: r.data?.members }))
 snap = await get('/tool-hub/api/snapshot')
 check('auto groups in snapshot', snap.data.groups.length >= 2 && snap.data.groups.every(group => group.auto === true))
 
 // ── 6. group toggle ────────────────────────────────────────────────────────
-const foundation = snap.data.groups.find(group => group.name === '基础功能')
+const foundation = snap.data.groups.find(group => group.role === 'base')
+check('auto groups carry role', snap.data.groups.every(group => group.role === 'base' || group.role === 'task' || group.role === 'skill'), snap.data.groups.map(group => `${group.name}:${group.role}`).join(', '))
+const reordered = await op('group.reorder', { order: [...snap.data.groups].reverse().map(group => group.id) })
+check('reorder persists', reordered.ok === true && reordered.data.order[0] === snap.data.groups[snap.data.groups.length - 1].id, JSON.stringify(reordered.data?.order))
 r = await op('group.toggle', { id: foundation.id, enabled: true })
 check('group toggled on', r.ok === true && r.data.changed === foundation.members.length, JSON.stringify({ changed: r.data?.changed, want: foundation.members.length }))
 
 // ── 7. presets ─────────────────────────────────────────────────────────────
+await op('toggle', { kind: 'plugin', id: 'e2', enabled: true })
 r = await op('preset.save', { name: 'smoke' })
 check('preset saved', r.ok === true && r.data.presets.some(preset => preset.name === 'smoke' && preset.enabled.plugin.length > 0), JSON.stringify(r.data?.presets?.map(preset => preset.name)))
 // flip one plugin off, then apply exact
