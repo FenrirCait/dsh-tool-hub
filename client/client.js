@@ -107,6 +107,18 @@ window.__ModuleLoader__.load({
                 mcpDeleteDone: '已删除，等待热加载…',
                 mcpInvalidNumber: '超时要是数字',
                 mcpBadEnv: '这一行不是 KEY=VALUE：{line}',
+                toolsButton: '工具 · {on}/{total}',
+                toolsTitle: 'MCP 工具',
+                toolsHint: '取消勾选后，这个工具对该安装的所有会话都不再出现在模型可见的工具表里；状态存在本插件自己的 state.json。',
+                toolsEmpty: '这个服务器还没有注册工具。先启用它，等宿主连上，再回来刷新。',
+                toolsSearch: '筛选工具名',
+                toolsAll: '全选',
+                toolsNone: '全不选',
+                toolsSaved: '工具设置已保存',
+                toolsPanelNote: '另有 {n} 项被 Skill / MCP 面板禁用（只读）',
+                toolsImport: '导入他们的 {n} 项',
+                toolsImported: '已导入 {n} 项',
+                toolsCount: '共 {n} 个工具',
                 groups: '分组',
                 newGroup: '新建分组',
                 search: '搜索名称或模块名',
@@ -221,6 +233,18 @@ window.__ModuleLoader__.load({
                 mcpDeleteDone: 'Deleted, waiting for the reload…',
                 mcpInvalidNumber: 'The timeout has to be a number.',
                 mcpBadEnv: 'This line is not KEY=VALUE: {line}',
+                toolsButton: 'Tools · {on}/{total}',
+                toolsTitle: 'MCP tools',
+                toolsHint: 'An unchecked tool disappears from the model-visible tool list in every session of this install. The list lives in this panel’s own state.json.',
+                toolsEmpty: 'This server has not registered any tool yet. Enable it, wait for the host to connect, then reload.',
+                toolsSearch: 'Filter tools',
+                toolsAll: 'All',
+                toolsNone: 'None',
+                toolsSaved: 'Tool settings saved',
+                toolsPanelNote: '{n} more are disabled by the Skill / MCP panel (read-only)',
+                toolsImport: 'Import their {n}',
+                toolsImported: 'Imported {n}',
+                toolsCount: '{n} tools',
                 groups: 'Groups',
                 newGroup: 'New group',
                 search: 'Search name or module',
@@ -616,13 +640,25 @@ window.__ModuleLoader__.load({
                     totals.set(label, (totals.get(label) ?? 0) + 1);
                 }
                 const seen = new Map();
+                const toolStats = new Map();
+                for (const tool of data?.tools ?? []) {
+                    const stat = toolStats.get(tool.server) ?? { total: 0, on: 0 };
+                    stat.total += 1;
+                    if (tool.enabled) stat.on += 1;
+                    toolStats.set(tool.server, stat);
+                }
                 return combined.map((row) => {
                     const label = row.kind === "plugin" ? row.moduleName : row.name;
                     const index = (seen.get(label) ?? 0) + 1;
                     seen.set(label, index);
-                    return { ...row, dupeLabel: (totals.get(label) ?? 0) > 1 ? `#${index}` : "" };
+                    const server = row.config?.serverName ?? row.name;
+                    return {
+                        ...row,
+                        dupeLabel: (totals.get(label) ?? 0) > 1 ? `#${index}` : "",
+                        toolStats: row.mcp === true ? toolStats.get(server) ?? null : null,
+                    };
                 });
-            }, [plugins, skills, query, view, groupId, groupMembers]);
+            }, [plugins, skills, query, view, groupId, groupMembers, data]);
 
             const counts = useMemo(() => {
                 const value = { plugin: [0, 0], skill: [0, 0], mcp: [0, 0] };
@@ -720,6 +756,13 @@ window.__ModuleLoader__.load({
             h("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" } },
                 view === "mcp"
                     ? h(Button, { onClick: () => setDialog({ kind: "mcpEdit", row: null }), disabled: busy }, t("mcpCreate"))
+                    : null,
+                view === "mcp" && (data?.panelDeny ?? []).length > 0
+                    ? h(Button, {
+                        onClick: () => { void act("tool.import", {}, result => flash(fmt(t, "toolsImported", { n: result.added }))); },
+                        disabled: busy,
+                        title: t("toolsPanelNote"),
+                    }, fmt(t, "toolsImport", { n: data.panelDeny.length }))
                     : null,
                 h(Button, { onClick: openAuto, disabled: busy, title: t("autoHint") }, t("auto")),
                 h(Button, { onClick: openPresets, disabled: busy }, t("preset")),
@@ -860,7 +903,8 @@ window.__ModuleLoader__.load({
                                 },
                                 onToggle: enabled => toggleRow(row.kind, row.id, enabled),
                                 onEdit: (target) => setDialog({ kind: "mcpEdit", row: target }),
-                onDelete: (target) => setDialog({ kind: "mcpDelete", row: target }),
+                                onDelete: (target) => setDialog({ kind: "mcpDelete", row: target }),
+                                onTools: (target) => setDialog({ kind: "toolEdit", row: target }),
                                 busy,
                             }))));
 
@@ -957,6 +1001,14 @@ window.__ModuleLoader__.load({
                     await act("mcp.delete", { id }, () => flash(t("mcpDeleteDone")));
                     setDialog(null);
                     setTimeout(refresh, 1500);
+                },
+                onSaveTool: async (server, denied) => {
+                    // Keep every other server's state exactly as it is: the op replaces the
+                    // whole list, so the rest of it has to be carried over explicitly.
+                    const others = (data?.tools ?? []).filter(tool => tool.server !== server && tool.enabled === false).map(tool => tool.name);
+                    const deny = [...new Set([...others, ...denied])];
+                    await act("tool.save", { deny }, () => flash(t("toolsSaved")));
+                    setDialog(null);
                 },
                 act,
                 flash,
@@ -1200,7 +1252,7 @@ window.__ModuleLoader__.load({
         }
 
 
-        function Row({ row, t, picked, onPick, onToggle, busy, onEdit, onDelete }) {
+        function Row({ row, t, picked, onPick, onToggle, busy, onEdit, onDelete, onTools }) {
             const [hover, setHover] = useState(false);
             const readOnly = row.manageable === false;
             const selfEntry = row.self === true;
@@ -1281,6 +1333,9 @@ window.__ModuleLoader__.load({
                     },
                     title: row.description,
                 }, row.description)),
+            row.mcp === true && row.mcpEditable === true && row.toolStats !== null && row.toolStats !== undefined
+                ? h(Button, { small: true, onClick: () => onTools(row), disabled: busy, title: t("toolsHint") }, fmt(t, "toolsButton", { on: row.toolStats.on, total: row.toolStats.total }))
+                : null,
             row.mcp === true && row.mcpEditable === true
                 ? h(Button, { small: true, onClick: () => onEdit(row), disabled: busy, title: t("mcpEditHint") }, t("mcpEdit"))
                 : null,
@@ -1524,7 +1579,80 @@ window.__ModuleLoader__.load({
                 error === null ? null : h("div", { style: { marginTop: 4, fontSize: 12, color: T.danger } }, error)));
         }
 
-        function DialogHost({ dialog, t, busy, groups, data, onClose, onSaveMcp, onDeleteMcp, act, flash, onApplyAuto, onSaveGroup, onSavePreset, onApplyPreset, onApplyPresetNow, onRunGroupToggle }) {
+        function ToolEditDialog({ row, tools, t, busy, onClose, onSave }) {
+            const server = row?.config?.serverName ?? row?.name ?? "";
+            const list = (tools ?? []).filter(tool => tool.server === server);
+            const [deny, setDeny] = useState(() => new Set(list.filter(tool => tool.enabled === false).map(tool => tool.name)));
+            const [query, setQuery] = useState("");
+            const wanted = `${query}`.trim().toLowerCase();
+            const shown = wanted === "" ? list : list.filter(tool => tool.tool.toLowerCase().includes(wanted));
+            const pick = (name, on) => {
+                const next = new Set(deny);
+                if (on) next.delete(name);
+                else next.add(name);
+                setDeny(next);
+            };
+            const bulk = (on) => {
+                const next = new Set(deny);
+                for (const tool of shown) {
+                    if (on) next.delete(tool.name);
+                    else next.add(tool.name);
+                }
+                setDeny(next);
+            };
+            const rowStyle = {
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "5px 8px",
+                borderRadius: 7,
+                fontSize: 12.5,
+            };
+            return h(Dialog, {
+                title: t("toolsTitle"),
+                hint: t("toolsHint"),
+                width: 520,
+                onClose,
+                footer: [
+                    h(Button, { key: "c", onClick: onClose }, t("cancel")),
+                    h(Button, {
+                        key: "s",
+                        tone: "primary",
+                        disabled: busy,
+                        onClick: () => onSave(server, [...deny]),
+                    }, t("save")),
+                ],
+                children: h("div", { style: { display: "flex", flexDirection: "column", gap: 8 } },
+                    h("div", { style: { display: "flex", gap: 6, alignItems: "center" } },
+                        h("div", { style: { flex: 1, minWidth: 0 } }, h(Input, { value: query, onChange: setQuery, placeholder: t("toolsSearch"), grow: true })),
+                        h(Button, { small: true, onClick: () => bulk(true), disabled: shown.length === 0 }, t("toolsAll")),
+                        h(Button, { small: true, onClick: () => bulk(false), disabled: shown.length === 0 }, t("toolsNone"))),
+                    list.length === 0
+                        ? h("div", { style: { padding: "10px 2px", fontSize: 12, color: T.text3, lineHeight: 1.6 } }, t("toolsEmpty"))
+                        : h("div", {
+                            style: {
+                                maxHeight: 300,
+                                overflow: "auto",
+                                border: `1px solid ${T.borderSoft}`,
+                                borderRadius: 9,
+                                padding: 4,
+                            },
+                        }, shown.length === 0
+                            ? h("div", { style: { padding: "8px 6px", fontSize: 12, color: T.text3 } }, t("empty"))
+                            : shown.map(tool => h("label", { key: tool.name, style: { ...rowStyle, cursor: "pointer" } },
+                                h("input", {
+                                    type: "checkbox",
+                                    checked: !deny.has(tool.name),
+                                    onChange: event => pick(tool.name, event.target.checked),
+                                    style: { accentColor: T.brand, cursor: "pointer" },
+                                }),
+                                h("span", { style: { flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: T.text } }, tool.tool),
+                                tool.panelDenied === true ? h(Badge, { tone: "warn", title: t("toolsPanelNote") }, "panel") : null))),
+                    h("div", { style: { fontSize: 11, color: T.text3 } }, fmt(t, "toolsCount", { n: list.length }))),
+            });
+        }
+
+        function DialogHost({ dialog, t, busy, groups, data, onClose, onSaveMcp, onDeleteMcp, onSaveTool, act, flash, onApplyAuto, onSaveGroup, onSavePreset, onApplyPreset, onApplyPresetNow, onRunGroupToggle }) {
             const [name, setName] = useState(dialog.kind === "rename" ? dialog.group.name : "");
             const foot = (children) => children;
             const mcpIds = new Set((data === null ? [] : data.plugins).filter(row => row.mcp === true).map(row => row.id));
@@ -1532,6 +1660,17 @@ window.__ModuleLoader__.load({
 
             if (dialog.kind === "mcpEdit") {
                 return h(McpEditDialog, { row: dialog.row, t, busy, onClose, onSave: onSaveMcp });
+            }
+
+            if (dialog.kind === "toolEdit") {
+                return h(ToolEditDialog, {
+                    row: dialog.row,
+                    tools: data === null ? [] : data.tools,
+                    t,
+                    busy,
+                    onClose,
+                    onSave: onSaveTool,
+                });
             }
 
             if (dialog.kind === "mcpDelete") {

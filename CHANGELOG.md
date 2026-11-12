@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.2.0
+
+- **Per-tool switches for MCP servers.** Each server row now opens a tool list: unchecked tools are
+  masked out of the model-visible tool table for every session of this install, not merely blocked
+  when called. The mask is installed per agent (a context-global restriction is refused by the
+  host), with re-entrancy guards so `tools/change` cannot loop.
+- **The mask is ours, and only ours.** It lives in this panel's `state.json` (`toolDeny`), never in
+  another panel's file. If dsh-skill-mcp-panel is installed too, both masks apply and the union
+  wins; its entries are shown read-only per tool, and one button imports them into our list.
+- **Presets gained a fourth dimension.** A preset now records which tools were on. Presets saved
+  before 1.2.0 carry no tool list and leave tools untouched, so an old preset never re-enables a
+  tool you switched off by hand.
+
 ## 1.1.0
 
 - **Presets cover MCP servers, and say so.** A preset already stored every enabled entry, MCP

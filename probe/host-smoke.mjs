@@ -27,6 +27,14 @@ await writeFile(join(skillsRoot, 'beta', 'SKILL.md.disabled'), '---\nname: beta-
 await mkdir(join(skillsRoot, 'nested', 'gamma'), { recursive: true })
 await writeFile(join(skillsRoot, 'nested', 'gamma', 'SKILL.md'), '---\nname: gamma-skill\ndescription: nested fixture skill\n---\n\nbody\n')
 
+// ── fixture: tools of one MCP server, and the other panel's own deny list ──
+const mcpTools = ['mcp__fixture__alpha', 'mcp__fixture__beta', 'read_file']
+await mkdir(join(home, 'skills', '.system', 'skill-viewer'), { recursive: true })
+await writeFile(
+  join(home, 'skills', '.system', 'skill-viewer', 'tool-filter.json'),
+  `${JSON.stringify({ version: 1, deny: ['mcp__fixture__beta', 'mcp__gone__x'] }, null, 2)}\n`,
+)
+
 // ── fixture: profile patch with one MCP server ─────────────────────────────
 const profileDir = join(home, 'profile')
 await mkdir(profileDir, { recursive: true })
@@ -89,7 +97,12 @@ const ctx = {
     }
     if (name === 'pluginManager') return fakeManager
     if (name === 'profileContext') return { dir: profileDir }
+    if (name === 'tools') return { view: () => ({ knownNames: mcpTools, restrictableNames: mcpTools }) }
+    if (name === 'agents') return { list: () => [] }
     return undefined
+  },
+  on() {
+    return () => {}
   },
   inject(_deps, callback) {
     return callback(ctx)
@@ -186,6 +199,31 @@ check('mcp delete removes only that entry', !deleted.includes('tool-hub-mcp-fres
 check('mcp delete refuses unknown id', (await op('mcp.delete', { id: 'nope' })).ok === false)
 void snap2
 
+// ── 2d. per-tool masking ──────────────────────────────────────────────────
+let toolSnap = (await get('/tool-hub/api/snapshot')).data
+check('tools listed from the live view', toolSnap.toolsKnown === true && toolSnap.tools.filter(row => row.server === 'fixture').length === 2, JSON.stringify(toolSnap.tools))
+check('non-mcp names are not offered as server tools', !toolSnap.tools.some(row => row.name === 'read_file'))
+check('tools start enabled', toolSnap.tools.every(row => row.enabled === true))
+check('other panel list is exposed read-only', Array.isArray(toolSnap.panelDeny) && toolSnap.panelDeny.length === 2, JSON.stringify(toolSnap.panelDeny))
+check('other panel entries are flagged per tool', toolSnap.tools.find(row => row.name === 'mcp__fixture__beta')?.panelDenied === true)
+r = await op('tool.save', { deny: ['mcp__fixture__alpha', 'not_a_tool'] })
+check('tool save drops non-mcp names', r.ok === true && JSON.stringify(r.data.deny) === '["mcp__fixture__alpha"]', JSON.stringify(r))
+toolSnap = (await get('/tool-hub/api/snapshot')).data
+check('denied tool shows as off', toolSnap.tools.find(row => row.name === 'mcp__fixture__alpha')?.enabled === false)
+check('other tool stays on', toolSnap.tools.find(row => row.name === 'mcp__fixture__beta')?.enabled === true)
+check('tool save refuses an unknown mcp tool', (await op('tool.save', { deny: ['mcp__fixture__nope'] })).ok === false)
+check('tool save refuses a non-array', (await op('tool.save', { deny: 'mcp__fixture__alpha' })).ok === false)
+r = await op('tool.import', {})
+check('tool import merges the other panel list', r.ok === true && r.data.added === 1 && r.data.read === 1, JSON.stringify(r))
+check('imported name is denied now', (await get('/tool-hub/api/snapshot')).data.tools.every(row => row.enabled === false))
+const stateAfterTools = JSON.parse(await readFile(join(home, 'tool-hub', 'state.json'), 'utf8'))
+check('tool deny persisted in our own state file', JSON.stringify(stateAfterTools.toolDeny) === '["mcp__fixture__alpha","mcp__fixture__beta"]', JSON.stringify(stateAfterTools.toolDeny))
+r = await op('tool.save', { deny: [] })
+check('clearing the list re-enables everything', r.ok === true && (await get('/tool-hub/api/snapshot')).data.tools.every(row => row.enabled === true))
+r = await op('preset.save', { name: 'tool-preset' })
+const savedPreset = r.data.presets.find(preset => preset.name === 'tool-preset')
+check('preset records the tool dimension', Array.isArray(savedPreset?.enabled?.tool) && savedPreset.enabled.tool.length === 2, JSON.stringify(savedPreset?.enabled?.tool))
+
 // ── 3. plugin toggle + read-only refusal ───────────────────────────────────
 r = await op('toggle', { kind: 'plugin', id: 'e4', enabled: true })
 check('plugin on', r.ok === true && r.data.ok === true && r.data.application === 'applied', JSON.stringify(r.data))
@@ -216,7 +254,7 @@ check('group toggled on', r.ok === true && r.data.changed === foundation.members
 
 // ── 7. presets ─────────────────────────────────────────────────────────────
 r = await op('preset.save', { name: 'smoke' })
-check('preset saved', r.ok === true && r.data.presets.length === 1 && r.data.presets[0].enabled.plugin.length > 0, JSON.stringify(r.data?.presets?.[0]?.enabled))
+check('preset saved', r.ok === true && r.data.presets.some(preset => preset.name === 'smoke' && preset.enabled.plugin.length > 0), JSON.stringify(r.data?.presets?.map(preset => preset.name)))
 // flip one plugin off, then apply exact
 await op('toggle', { kind: 'plugin', id: 'e2', enabled: false })
 r = await op('preset.apply', { name: 'smoke', mode: 'exact' })
