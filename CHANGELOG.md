@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.6
+
+- The whole panel carries colour instead of reading grey-on-grey: the header shows its counts as
+  green / amber / neutral pills, the selected view is a brand tab, kind and origin badges are
+  tinted pills (blue plugin, amber skill, green official, amber host-managed), and every
+  auto-generated group gets an accent dot that cycles through brand, success, warn and danger.
+- Row state follows the same palette: enabled is green, disabled is neutral grey.
+
 ## 0.3.4
 
 - The selection UI carries colour now: picked rows get a brand tint and a brand border, the

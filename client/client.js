@@ -67,6 +67,9 @@ window.__ModuleLoader__.load({
                 tabLabel: '总控台',
                 heading: '工具总控台',
                 sub: '{p} 个插件已启用 · 共 {s} 个技能',
+                pillOn: '{n} 已启用',
+                pillSkills: '{n} 个技能',
+                pillAll: '{n} 项合计',
                 viewAll: '全部',
                 viewPlugins: '插件',
                 viewSkills: '技能',
@@ -142,6 +145,9 @@ window.__ModuleLoader__.load({
                 tabLabel: 'Hub',
                 heading: 'Tool Hub',
                 sub: '{p} plugins on · {s} skills',
+                pillOn: '{n} on',
+                pillSkills: '{n} skills',
+                pillAll: '{n} total',
                 viewAll: 'All',
                 viewPlugins: 'Plugins',
                 viewSkills: 'Skills',
@@ -292,15 +298,24 @@ window.__ModuleLoader__.load({
         }
 
         function Badge({ children, tone, title }) {
-            const color = tone === "warn" ? T.warn : tone === "danger" ? T.danger : T.text3;
+            const palette = tone === "warn"
+                ? { fg: T.warn, bg: tint(T.warn, 12), border: tint(T.warn, 30) }
+                : tone === "danger"
+                    ? { fg: T.danger, bg: tint(T.danger, 12), border: tint(T.danger, 30) }
+                    : tone === "brand"
+                        ? { fg: T.brand, bg: tint(T.brand, 12), border: tint(T.brand, 30) }
+                        : tone === "success"
+                            ? { fg: T.success, bg: tint(T.success, 12), border: tint(T.success, 30) }
+                            : { fg: T.text3, bg: "transparent", border: T.borderSoft };
             return h("span", {
                 title,
                 style: {
                     flex: "0 0 auto",
                     padding: "1px 6px",
                     borderRadius: 5,
-                    border: `1px solid ${T.borderSoft}`,
-                    color,
+                    border: `1px solid ${palette.border}`,
+                    background: palette.bg,
+                    color: palette.fg,
                     fontSize: 11,
                     lineHeight: "16px",
                     whiteSpace: "nowrap",
@@ -612,8 +627,14 @@ window.__ModuleLoader__.load({
             },
             h("div", { style: { minWidth: 0, flex: 1 } },
                 h("div", { style: { fontSize: embedded === true ? 15 : 17, fontWeight: 650, letterSpacing: 0.1 } }, t("heading")),
-                h("div", { style: { marginTop: 3, fontSize: 12, color: T.text3 } },
-                    data === null ? t("loading") : fmt(t, "sub", { p: counts.plugin[1] + counts.skill[1], s: counts.skill[0] }))),
+                h("div", { style: { marginTop: 5, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" } },
+                    data === null
+                        ? h("span", { style: { fontSize: 12, color: T.text3 } }, t("loading"))
+                        : [
+                            h(Badge, { key: "on", tone: "success" }, fmt(t, "pillOn", { n: counts.plugin[1] + counts.skill[1] })),
+                            h(Badge, { key: "skills", tone: "warn" }, fmt(t, "pillSkills", { n: counts.skill[0] })),
+                            h(Badge, { key: "all", tone: "plain" }, fmt(t, "pillAll", { n: counts.plugin[0] + counts.skill[0] })),
+                        ])),
             h("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" } },
                 h(Button, { onClick: openAuto, disabled: busy, title: t("autoHint") }, t("auto")),
                 h(Button, { onClick: openPresets, disabled: busy }, t("preset")),
@@ -633,9 +654,10 @@ window.__ModuleLoader__.load({
                     height: 26,
                     padding: "0 11px",
                     borderRadius: 7,
-                    border: `1px solid ${view === key ? T.border : "transparent"}`,
-                    background: view === key ? T.card : "transparent",
-                    color: view === key ? T.text : T.text3,
+                    border: `1px solid ${view === key ? tint(T.brand, 34) : "transparent"}`,
+                    background: view === key ? tint(T.brand, 12) : "transparent",
+                    color: view === key ? T.brand : T.text3,
+                    fontWeight: view === key ? 600 : 500,
                     fontSize: 12.5,
                     cursor: "pointer",
                     fontFamily: "inherit",
@@ -700,9 +722,10 @@ window.__ModuleLoader__.load({
                     textAlign: "center",
                 },
             }, `${counts.plugin[0] + counts.skill[0]}`)),
-            groups.map(group => h(GroupRow, {
+            groups.map((group, index) => h(GroupRow, {
                 key: group.id,
                 group,
+                    accent: accentPalette[index % accentPalette.length],
                 t,
                 active: groupId === group.id,
                 onSelect: () => {
@@ -965,7 +988,9 @@ window.__ModuleLoader__.load({
             }, label);
         }
 
-        function GroupRow({ group, t, active, onSelect, onEnable, onRename, onDelete }) {
+        const accentPalette = [T.brand, T.success, T.warn, T.danger];
+
+        function GroupRow({ group, t, accent, active, onSelect, onEnable, onRename, onDelete }) {
             const [hover, setHover] = useState(false);
             const count = group.members.length;
             return h("div", {
@@ -1028,7 +1053,7 @@ window.__ModuleLoader__.load({
             }, group.name),
             group.auto === true ? h("span", {
                 title: t("autoTag"),
-                style: { width: 5, height: 5, borderRadius: 3, background: T.brand, flex: "0 0 auto" },
+                style: { width: 6, height: 6, borderRadius: 3, background: accent ?? T.brand, flex: "0 0 auto" },
             }) : null,
             group.stale > 0 ? h("span", { title: fmt(t, "stale", { n: group.stale }), style: { color: T.warn, fontSize: 11, fontWeight: 700 } }, "!") : null,
             h("span", {
@@ -1110,14 +1135,14 @@ window.__ModuleLoader__.load({
                     },
                     title: row.kind === "plugin" ? row.moduleName : row.name,
                 }, row.name),
-                h(Badge, null, row.kind === "plugin" ? t("kindPlugin") : t("kindSkill")),
-                row.official === true ? h(Badge, { tone: "plain", title: t("officialHint") }, t("officialBadge")) : null,
+                h(Badge, { tone: row.kind === "plugin" ? "brand" : "warn" }, row.kind === "plugin" ? t("kindPlugin") : t("kindSkill")),
+                row.official === true ? h(Badge, { tone: "success", title: t("officialHint") }, t("officialBadge")) : null,
                 row.dupeLabel === "" ? null : h("span", {
                     title: row.kind === "plugin" ? row.moduleName : row.name,
                     style: { fontSize: 10.5, color: T.text3, flex: "0 0 auto" },
                 }, row.dupeLabel),
                 readOnly ? h(Badge, { tone: "warn", title: row.readOnlyReason }, t("readonly")) : null,
-                selfEntry ? h(Badge, { tone: "plain", title: t("selfHint") }, t("selfBadge")) : null,
+                selfEntry ? h(Badge, { tone: "brand", title: t("selfHint") }, t("selfBadge")) : null,
                 row.phase === "failed" ? h(Badge, { tone: "danger" }, "failed") : null),
                 row.description === "" ? null : h("div", {
                     style: {

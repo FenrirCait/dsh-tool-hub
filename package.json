@@ -1,6 +1,6 @@
 {
   "name": "dsh-tool-hub",
-  "version": "0.3.4",
+  "version": "0.3.6",
   "description": "One panel to list, group, and switch on or off the plugins and skills an installation runs, with saved presets and rule-based auto grouping.",
   "keywords": [
     "dsh",
