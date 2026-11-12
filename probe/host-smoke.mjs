@@ -1,0 +1,193 @@
+/**
+ * Host-half smoke test: runs lib/index.js against a fake cordis context and a
+ * fake pluginManager, over a real HTTP listener, so the wire format, the skill
+ * file rename, the state file and the toggle paths are all exercised without
+ * touching any profile on this machine.
+ */
+import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { createServer } from 'node:http'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+const home = join(tmpdir(), `tool-hub-smoke-${Date.now()}`)
+process.env.DSH_HOME = home
+
+const results = []
+const check = (name, ok, detail = '') => {
+  results.push({ name, ok, detail })
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail === '' ? '' : `  — ${detail}`}`)
+}
+
+// ── fixture: skills ────────────────────────────────────────────────────────
+const skillsRoot = join(home, 'skills')
+await mkdir(join(skillsRoot, 'alpha'), { recursive: true })
+await writeFile(join(skillsRoot, 'alpha', 'SKILL.md'), '---\nname: alpha-skill\ndescription: first fixture skill\n---\n\nbody\n')
+await mkdir(join(skillsRoot, 'beta'), { recursive: true })
+await writeFile(join(skillsRoot, 'beta', 'SKILL.md.disabled'), '---\nname: beta-skill\ndescription: second fixture skill\n---\n\nbody\n')
+await mkdir(join(skillsRoot, 'nested', 'gamma'), { recursive: true })
+await writeFile(join(skillsRoot, 'nested', 'gamma', 'SKILL.md'), '---\nname: gamma-skill\ndescription: nested fixture skill\n---\n\nbody\n')
+
+// ── fixture: plugin manager ────────────────────────────────────────────────
+const enabled = new Set(['@deepseek-ai/dsh-session', 'billion-context', 'ui-theme'])
+const fakePlugins = [
+  { entryId: 'e1', moduleName: '@deepseek-ai/dsh-session', meta: { title: 'Session' }, fiberPhase: 'active' },
+  { entryId: 'e2', moduleName: 'billion-context', meta: { title: 'Billion Context' }, fiberPhase: 'active' },
+  { entryId: 'e3', moduleName: 'ui-theme', meta: { title: 'Theme' }, fiberPhase: 'active' },
+  { entryId: 'e4', moduleName: 'dsh-market', meta: { title: '插件市场' }, fiberPhase: 'pending' },
+  { entryId: 'e5', moduleName: 'dsh-tool-hub', meta: { title: '工具总控台' }, fiberPhase: 'active' },
+  { entryId: 'e6', moduleName: 'plugin-manager', meta: { title: 'Plugin Manager' }, fiberPhase: 'active', readOnlyReason: 'management-required' },
+]
+const fakeManager = {
+  async listPlugins() {
+    return fakePlugins.map(row => ({ ...row, enabled: enabled.has(row.moduleName) }))
+  },
+  async setPluginEnabled(id, value) {
+    const row = fakePlugins.find(item => item.entryId === id)
+    if (row === undefined) return { changed: false, application: 'failed', error: 'unknown-plugin' }
+    if (row.readOnlyReason !== undefined) return { changed: false, application: 'failed', error: row.readOnlyReason }
+    if (value) enabled.add(row.moduleName)
+    else enabled.delete(row.moduleName)
+    return { changed: true, application: 'applied', stage: 'enable', target: id, enabled: value }
+  },
+}
+
+// ── fake cordis context + real listener ────────────────────────────────────
+const routes = new Map()
+const ctx = {
+  get(name) {
+    if (name === 'webServer') {
+      return {
+        register(route) {
+          routes.set(route.path, route)
+          return () => routes.delete(route.path)
+        },
+      }
+    }
+    if (name === 'pluginManager') return fakeManager
+    return undefined
+  },
+  inject(_deps, callback) {
+    return callback(ctx)
+  },
+  effect(fn) {
+    return typeof fn === 'function' ? fn() : undefined
+  },
+  logger: { warn: message => console.log(`  warn: ${message}`) },
+}
+
+const mod = await import('../lib/index.js')
+mod.apply(ctx)
+check('routes registered', routes.has('/tool-hub/api/snapshot') && routes.has('/tool-hub/api/op'), [...routes.keys()].join(', '))
+
+const server = createServer((request, response) => {
+  const route = routes.get(request.url.split('?')[0])
+  if (route === undefined) {
+    response.writeHead(404).end()
+    return
+  }
+  route.handler(request, response)
+})
+await new Promise(done => server.listen(0, '127.0.0.1', done))
+const port = server.address().port
+const base = `http://127.0.0.1:${port}`
+
+const get = async (path) => {
+  const response = await fetch(`${base}${path}`, { headers: { host: `127.0.0.1:${port}` } })
+  return await response.json()
+}
+const op = async (name, payload) => {
+  const response = await fetch(`${base}/tool-hub/api/op`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', host: `127.0.0.1:${port}` },
+    body: JSON.stringify({ op: name, payload }),
+  })
+  return await response.json()
+}
+
+// ── 1. snapshot ────────────────────────────────────────────────────────────
+let snap = await get('/tool-hub/api/snapshot')
+check('snapshot ok', snap.ok === true, snap.error?.message ?? '')
+check('plugins listed', snap.data.plugins.length === 6, `got ${snap.data.plugins.length}`)
+check('read-only flagged', snap.data.plugins.find(row => row.moduleName === 'plugin-manager').manageable === false)
+check('skills listed with disabled one', snap.data.skills.length === 3, JSON.stringify(snap.data.skills.map(row => `${row.id}:${row.enabled}`)))
+check('nested skill found', snap.data.skills.some(row => row.id === 'user|nested/gamma'))
+
+// ── 2. skill toggle ────────────────────────────────────────────────────────
+let r = await op('toggle', { kind: 'skill', id: 'user|beta', enabled: true })
+check('skill on', r.ok === true && r.data.ok === true, JSON.stringify(r))
+const betaOn = await stat(join(skillsRoot, 'beta', 'SKILL.md')).then(() => true, () => false)
+check('skill file renamed on', betaOn)
+r = await op('toggle', { kind: 'skill', id: 'user|alpha', enabled: false })
+const alphaOff = await stat(join(skillsRoot, 'alpha', 'SKILL.md.disabled')).then(() => true, () => false)
+check('skill file renamed off', r.ok === true && alphaOff)
+
+// ── 3. plugin toggle + read-only refusal ───────────────────────────────────
+r = await op('toggle', { kind: 'plugin', id: 'e4', enabled: true })
+check('plugin on', r.ok === true && r.data.ok === true && r.data.application === 'applied', JSON.stringify(r.data))
+r = await op('toggle', { kind: 'plugin', id: 'e6', enabled: true })
+check('read-only plugin refuses', r.ok === true && r.data.ok === false, JSON.stringify(r.data))
+check('self row flagged', snap.data.plugins.find(row => row.id === 'e5')?.self === true, JSON.stringify(snap.data.plugins.find(row => row.id === 'e5')))
+r = await op('toggle', { kind: 'plugin', id: 'e5', enabled: false })
+check('self disable refused', r.ok === false && r.error?.code === 'self-protected', JSON.stringify(r))
+
+// ── 4. bulk ────────────────────────────────────────────────────────────────
+r = await op('bulk', { items: [{ kind: 'plugin', id: 'e1' }, { kind: 'plugin', id: 'e2' }, { kind: 'skill', id: 'user|nested/gamma' }], enabled: false })
+check('bulk disables three', r.ok === true && r.data.changed === 3, JSON.stringify(r.data))
+
+// ── 5. auto grouping ───────────────────────────────────────────────────────
+r = await op('auto.preview', {})
+const plan = r.data.plan
+check('auto preview buckets', plan.length >= 2, plan.map(entry => `${entry.name}:${entry.members.length}`).join(', '))
+check('auto preview has foundation bucket', plan.some(entry => entry.name === '基础功能' && entry.members.length >= 2))
+r = await op('auto.apply', {})
+check('auto applied', r.ok === true && r.data.groups >= 2, JSON.stringify({ groups: r.data?.groups, members: r.data?.members }))
+snap = await get('/tool-hub/api/snapshot')
+check('auto groups in snapshot', snap.data.groups.length >= 2 && snap.data.groups.every(group => group.auto === true))
+
+// ── 6. group toggle ────────────────────────────────────────────────────────
+const foundation = snap.data.groups.find(group => group.name === '基础功能')
+r = await op('group.toggle', { id: foundation.id, enabled: true })
+check('group toggled on', r.ok === true && r.data.changed === foundation.members.length, JSON.stringify({ changed: r.data?.changed, want: foundation.members.length }))
+
+// ── 7. presets ─────────────────────────────────────────────────────────────
+r = await op('preset.save', { name: 'smoke' })
+check('preset saved', r.ok === true && r.data.presets.length === 1 && r.data.presets[0].enabled.plugin.length > 0, JSON.stringify(r.data?.presets?.[0]?.enabled))
+// flip one plugin off, then apply exact
+await op('toggle', { kind: 'plugin', id: 'e2', enabled: false })
+r = await op('preset.apply', { name: 'smoke', mode: 'exact' })
+check('preset applies exact diff', r.ok === true && r.data.requested >= 1 && r.data.applied >= 1, JSON.stringify({ requested: r.data?.requested, applied: r.data?.applied }))
+snap = await get('/tool-hub/api/snapshot')
+check('preset restored state', snap.data.plugins.find(row => row.id === 'e2').enabled === true)
+r = await op('preset.apply', { name: 'smoke', mode: 'only-enable' })
+check('only-enable mode is a no-op here', r.ok === true && r.data.requested === 0, JSON.stringify(r.data?.requested))
+
+// ── 8. state file ──────────────────────────────────────────────────────────
+const raw = JSON.parse(await readFile(join(home, 'tool-hub', 'state.json'), 'utf8'))
+check('state file written', raw.version === 1 && Array.isArray(raw.groups) && Array.isArray(raw.presets))
+const leftovers = (await readdir(join(home, 'tool-hub'))).filter(name => name.endsWith('.tmp'))
+check('no temp files left', leftovers.length === 0, leftovers.join(','))
+
+// ── 9. origin fence ────────────────────────────────────────────────────────
+const evil = await fetch(`${base}/tool-hub/api/op`, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json', host: 'evil.example', origin: 'http://evil.example' },
+  body: JSON.stringify({ op: 'snapshot' }),
+})
+check('cross-origin refused', evil.status === 403)
+const wrongMethod = await fetch(`${base}/tool-hub/api/op`, { method: 'GET', headers: { host: `127.0.0.1:${port}` } })
+check('wrong method refused', wrongMethod.status === 405)
+
+// ── 10. bad op ─────────────────────────────────────────────────────────────
+r = await op('nope', {})
+check('unknown op answers an error', r.ok === false && r.error.code === 'bad-op', JSON.stringify(r.error))
+
+server.close()
+const failed = results.filter(row => row.ok !== true)
+console.log(`\n${results.length - failed.length}/${results.length} passed`)
+if (failed.length > 0) {
+  await rm(home, { recursive: true, force: true })
+  process.exitCode = 1
+}
+else {
+  console.log(`fixture kept: ${home}`)
+}
