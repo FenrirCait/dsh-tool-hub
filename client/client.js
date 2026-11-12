@@ -911,6 +911,36 @@ window.__ModuleLoader__.load({
             }, label);
         }
 
+        function MiniIcon({ label, title, onClick, danger }) {
+            const [hover, setHover] = useState(false);
+            const accent = danger === true ? T.danger : T.text;
+            return h("button", {
+                type: "button",
+                title,
+                "aria-label": title,
+                onClick,
+                onMouseEnter: () => setHover(true),
+                onMouseLeave: () => setHover(false),
+                style: {
+                    width: 22,
+                    height: 22,
+                    padding: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    borderRadius: 5,
+                    border: `1px solid ${hover === true ? (danger === true ? tint(T.danger, 45) : T.border) : T.borderSoft}`,
+                    background: hover === true ? (danger === true ? tint(T.danger, 14) : T.card) : "transparent",
+                    color: hover === true ? accent : T.text2,
+                    fontSize: 12,
+                    lineHeight: "16px",
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    transition: "background .12s ease, color .12s ease",
+                },
+            }, label);
+        }
+
         function GroupRow({ group, t, active, onSelect, onEnable, onRename, onDelete }) {
             const [hover, setHover] = useState(false);
             const count = group.members.length;
@@ -994,33 +1024,10 @@ window.__ModuleLoader__.load({
                 h(GroupChip, { label: t("enable"), title: t("toggleGroupOn"), on: true, onClick: () => onEnable(true) }),
                 h(GroupChip, { label: t("disable"), title: t("toggleGroupOff"), on: false, onClick: () => onEnable(false) }),
                 h("div", { style: { flex: 1 } }),
-                h("button", {
-                    type: "button",
-                    title: t("rename"),
-                    onClick: onRename,
-                    style: { ...miniButtonStyle, opacity: hover === true ? 1 : 0.55 },
-                }, "✎"),
-                h("button", {
-                    type: "button",
-                    title: t("remove"),
-                    onClick: onDelete,
-                    style: { ...miniButtonStyle, opacity: hover === true ? 1 : 0.55 },
-                }, "✕")));
+                h(MiniIcon, { label: "✎", title: t("rename"), onClick: onRename }),
+                h(MiniIcon, { label: "✕", title: t("remove"), onClick: onDelete, danger: true })));
         }
 
-        const miniButtonStyle = {
-            width: 20,
-            height: 20,
-            padding: 0,
-            borderRadius: 5,
-            border: `1px solid ${T.borderSoft}`,
-            background: "transparent",
-            color: T.text2,
-            fontSize: 11,
-            cursor: "pointer",
-            fontFamily: "inherit",
-            lineHeight: "16px",
-        };
 
         function Row({ row, t, picked, onPick, onToggle, busy }) {
             const [hover, setHover] = useState(false);

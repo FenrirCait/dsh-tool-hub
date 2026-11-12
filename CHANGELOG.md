@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.3
+
+- Rename and Delete on a group are no longer faded icons at rest: both are 22px buttons with a
+  visible border, Rename darkens to the primary label colour on hover, and Delete turns red.
+
 ## 0.3.2
 
 - The group rail reads at a glance now: group names use the primary label colour at 14px, the
