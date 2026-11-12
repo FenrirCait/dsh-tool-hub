@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.0.0
+
+First stable release: plugins, skills and MCP servers in one panel.
+
+- **MCP servers have their own view.** A server shows its name, transport and start command, and
+  switches on and off through the same loader mechanism as any other entry, so a save needs no
+  restart.
+- **You can add and remove MCP servers from the panel.** The create dialog validates the server
+  name while you type, asks only for the fields the chosen transport uses (stdio: command, args,
+  env, cwd — HTTP/SSE: url, headers), keeps advanced options behind a fold, and writes a new
+  `@deepseek-ai/dsh-mcp-client` entry to the profile's `cordis.patch.yml` — disabled by default.
+  Deleting asks once and removes exactly that entry.
+- **Editing rewrites only that entry's `config:` block.** Every other byte of the file, including
+  comments, neighbour entries and the entry's own `disabled:` line, stays exactly as it was, and the
+  host's HMR watcher picks the change up on save.
+- **Group dots carry size.** The marker next to a group name takes a colour per order of magnitude
+  (few → blue, then green, amber, red), so a rail of groups reads by weight at a glance.
+- Dialogs got their contrast back: a disabled primary button is readable instead of white on white,
+  and the name rule stays neutral until the name is actually invalid.
+
 ## 0.4.3
 
 - The MCP server dialog gives its fields the full dialog width: a Windows start command or a long

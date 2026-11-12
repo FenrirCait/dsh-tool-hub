@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Tool Hub",
-    "description": "Group plugins and skills, switch a whole group with one click, and keep your own presets.",
+    "description": "Group plugins, skills and MCP servers, switch a whole group with one click, and keep your own presets.",
     "detail": "detail/en.md"
   }
 }

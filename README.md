@@ -2,9 +2,9 @@
 
 # dsh-tool-hub
 
-One panel that lists the **plugins** and **skills** an installation actually runs, lets you switch
-them on or off one by one, keeps them in **groups** you can flip as a unit, and stores whole
-**presets** of "what is on right now".
+One panel that lists the **plugins**, **skills** and **MCP servers** an installation actually runs,
+lets you switch them on or off one by one, keeps them in **groups** you can flip as a unit, and
+stores whole **presets** of "what is on right now".
 
 It shows up twice: as a **Hub tab** on the Plugins page, and as a **sidebar panel** of its own.
 

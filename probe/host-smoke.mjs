@@ -168,6 +168,24 @@ check('mcp save refuses garbage config', (await op('mcp.save', { id: 'panel-mcp-
 const restored = await readFile(patchFile, 'utf8')
 check('mcp refused writes leave file alone', restored === after, 'file changed after a refused write')
 
+// ── 2c. mcp create + delete ───────────────────────────────────────────────
+r = await op('mcp.create', { config: { serverName: 'fresh', transport: 'stdio', command: 'C:\\node.exe', args: ['-y', 'pkg'], env: { A: '1' }, toolCallTimeoutMs: 30000 } })
+check('mcp create accepted', r.ok === true && r.data.created === true && r.data.id === 'tool-hub-mcp-fresh', JSON.stringify(r))
+const created = await readFile(patchFile, 'utf8')
+check('mcp create appends an entry', created.includes('- id: tool-hub-mcp-fresh') && created.includes('serverName: fresh') && created.includes('- "-y"') === false)
+check('mcp create keeps the old entries', created.includes('- id: panel-mcp-fixture') && created.includes('- id: keep-me'))
+check('mcp create starts disabled', /- id: tool-hub-mcp-fresh[\s\S]{0,400}disabled: true/.test(created), created.slice(-420))
+check('mcp create refuses a duplicate name', (await op('mcp.create', { config: { serverName: 'renamed' } })).ok === false)
+check('mcp create refuses a bad name', (await op('mcp.create', { config: { serverName: 'bad name' } })).ok === false)
+const snap2 = await get('/tool-hub/api/snapshot')
+check('created server shows up in the snapshot', (await get('/tool-hub/api/snapshot')).data.plugins.some(row => row.mcpPatchId === 'tool-hub-mcp-fresh'), 'missing created row')
+r = await op('mcp.delete', { id: 'tool-hub-mcp-fresh' })
+check('mcp delete accepted', r.ok === true && r.data.removed === true, JSON.stringify(r))
+const deleted = await readFile(patchFile, 'utf8')
+check('mcp delete removes only that entry', !deleted.includes('tool-hub-mcp-fresh') && deleted.includes('- id: panel-mcp-fixture') && deleted.includes('- id: keep-me'))
+check('mcp delete refuses unknown id', (await op('mcp.delete', { id: 'nope' })).ok === false)
+void snap2
+
 // ── 3. plugin toggle + read-only refusal ───────────────────────────────────
 r = await op('toggle', { kind: 'plugin', id: 'e4', enabled: true })
 check('plugin on', r.ok === true && r.data.ok === true && r.data.application === 'applied', JSON.stringify(r.data))

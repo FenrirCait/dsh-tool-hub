@@ -13,6 +13,7 @@
 | --- | --- | --- |
 | 插件 | 宿主的插件管理器（`pluginManager.listPlugins()`） | 写 profile 的补丁层，和「插件」页写的是同一处 |
 | 技能 | `~/.dsh/skills`、`~/.agents/skills` | `SKILL.md` 改名成 `SKILL.md.disabled`（可逆） |
+| MCP 服务器 | profile 的 `cordis.patch.yml` 里 `@deepseek-ai/dsh-mcp-client` 条目 | 同插件（loader）；配置改的是该条目自己的 `config:` 块 |
 
 每行会说明它是什么、现在开没开、不能开关时为什么不能：
 

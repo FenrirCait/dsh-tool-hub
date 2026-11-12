@@ -14,6 +14,7 @@ It shows up twice, with the same list behind both:
 | --- | --- | --- |
 | Plugin | the host's plugin manager (`pluginManager.listPlugins()`) | writes the profile patch layer, exactly where the Plugins page writes |
 | Skill | `~/.dsh/skills`, `~/.agents/skills` | renames `SKILL.md` to `SKILL.md.disabled` (reversible) |
+| MCP server | `@deepseek-ai/dsh-mcp-client` entries in the profile's `cordis.patch.yml` | the same loader switch as a plugin; the dialog edits only that entry's `config:` block |
 
 Each row says what it is, whether it is on, and why it cannot be switched when it cannot:
 

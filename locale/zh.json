@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "工具总控台",
-    "description": "插件和技能统一分组，整组一键开关，预设存下你要的那一套。",
+    "description": "插件、技能与 MCP 服务器统一分组，整组一键开关，预设存下你要的那一套。",
     "detail": "detail/zh.md"
   }
 }

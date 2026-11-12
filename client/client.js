@@ -91,6 +91,20 @@ window.__ModuleLoader__.load({
                 mcpSave: '保存',
                 mcpSaved: '已写入，等待热加载…',
                 mcpNoConfig: '这一条不在 profile patch 里，配置不能在面板里改。',
+                mcpCreate: '添加服务器',
+                mcpCreateTitle: '添加 MCP 服务器',
+                mcpNameRule: '名字只能是字母、数字、- 和 _，最长 32 个字符。',
+                mcpBadName: '名字不合法：只能是字母、数字、- 和 _，1–32 个字符。',
+                mcpHeaders: '请求头（每行 KEY=VALUE）',
+                mcpAdvanced: '高级设置',
+                mcpReconnect: '自动重连',
+                mcpReconnectInit: '首次重连延迟（毫秒）',
+                mcpReconnectMax: '最大重连延迟（毫秒）',
+                mcpReconnectTries: '最大重连次数',
+                mcpDelete: '删除',
+                mcpDeleteTitle: '删除 MCP 服务器',
+                mcpDeleteBody: '将从 profile 的 cordis.patch.yml 里删掉「{name}」这一条，文件其余部分不动。',
+                mcpDeleteDone: '已删除，等待热加载…',
                 mcpInvalidNumber: '超时要是数字',
                 mcpBadEnv: '这一行不是 KEY=VALUE：{line}',
                 groups: '分组',
@@ -189,6 +203,20 @@ window.__ModuleLoader__.load({
                 mcpSave: 'Save',
                 mcpSaved: 'Written, waiting for the reload…',
                 mcpNoConfig: 'This row is not in the profile patch, so its config cannot be edited here.',
+                mcpCreate: 'Add server',
+                mcpCreateTitle: 'Add an MCP server',
+                mcpNameRule: 'Letters, digits, - and _ only, up to 32 characters.',
+                mcpBadName: 'Invalid name: letters, digits, - and _ only, 1–32 characters.',
+                mcpHeaders: 'Headers (one KEY=VALUE per line)',
+                mcpAdvanced: 'Advanced',
+                mcpReconnect: 'Reconnect automatically',
+                mcpReconnectInit: 'First retry delay (ms)',
+                mcpReconnectMax: 'Max retry delay (ms)',
+                mcpReconnectTries: 'Max attempts',
+                mcpDelete: 'Delete',
+                mcpDeleteTitle: 'Delete an MCP server',
+                mcpDeleteBody: 'Removes the “{name}” entry from the profile cordis.patch.yml and leaves the rest of the file untouched.',
+                mcpDeleteDone: 'Deleted, waiting for the reload…',
                 mcpInvalidNumber: 'The timeout has to be a number.',
                 mcpBadEnv: 'This line is not KEY=VALUE: {line}',
                 groups: 'Groups',
@@ -390,11 +418,11 @@ window.__ModuleLoader__.load({
                     borderRadius: 8,
                     border: `1px solid ${primary ? "transparent" : danger ? T.borderSoft : T.border}`,
                     background,
-                    color: primary ? T.onBrand : danger ? T.danger : T.text,
+                    color: disabled === true ? T.text3 : primary ? T.onBrand : danger ? T.danger : T.text,
                     fontSize: 12.5,
                     fontWeight: primary ? 600 : 500,
                     cursor: disabled === true ? "not-allowed" : "pointer",
-                    opacity: disabled === true ? 0.55 : 1,
+                    opacity: 1,
                     whiteSpace: "nowrap",
                     transition: "background .12s ease",
                     fontFamily: "inherit",
@@ -610,11 +638,6 @@ window.__ModuleLoader__.load({
                 return value;
             }, [plugins, skills]);
 
-            const maxGroupSize = useMemo(
-                () => groups.reduce((top, group) => Math.max(top, group.members.length), 1),
-                [groups],
-            );
-
             const toggleRow = (kind, id, enabled) => act("toggle", { kind, id, enabled }, (result) => {
                 if (result && result.ok === false) flash(result.message || "failed");
                 else if (result && result.application === "restart-required") flash(t("restart"));
@@ -691,6 +714,9 @@ window.__ModuleLoader__.load({
                             h(Badge, { key: "all", tone: "plain" }, fmt(t, "pillAll", { n: counts.plugin[0] + counts.skill[0] + counts.mcp[0] })),
                         ])),
             h("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" } },
+                view === "mcp"
+                    ? h(Button, { onClick: () => setDialog({ kind: "mcpEdit", row: null }), disabled: busy }, t("mcpCreate"))
+                    : null,
                 h(Button, { onClick: openAuto, disabled: busy, title: t("autoHint") }, t("auto")),
                 h(Button, { onClick: openPresets, disabled: busy }, t("preset")),
                 h(Button, { onClick: refresh, disabled: busy }, t("reload"))));
@@ -777,11 +803,11 @@ window.__ModuleLoader__.load({
                     textAlign: "center",
                 },
             }, `${counts.plugin[0] + counts.skill[0]}`)),
-            groups.map((group, index) => h(GroupRow, {
+            groups.map(group => h(GroupRow, {
                 key: group.id,
                 group,
-                accent: accentPalette[index % accentPalette.length],
-                accentDepth: Math.round((0.34 + 0.66 * Math.sqrt(group.members.length / maxGroupSize)) * 100),
+                accent: groupAccent(group.members.length).accent,
+                accentDepth: groupAccent(group.members.length).accentDepth,
                 t,
                 active: groupId === group.id,
                 onSelect: () => {
@@ -830,6 +856,7 @@ window.__ModuleLoader__.load({
                                 },
                                 onToggle: enabled => toggleRow(row.kind, row.id, enabled),
                                 onEdit: (target) => setDialog({ kind: "mcpEdit", row: target }),
+                onDelete: (target) => setDialog({ kind: "mcpDelete", row: target }),
                                 busy,
                             }))));
 
@@ -915,8 +942,17 @@ window.__ModuleLoader__.load({
                 data,
                 onClose: () => setDialog(null),
                 onSaveMcp: async (id, config) => {
-                    await act("mcp.save", { id, config }, () => flash(t("mcpSaved")));
+                    if (id === null) await act("mcp.create", { config }, () => flash(t("mcpSaved")));
+                    else await act("mcp.save", { id, config }, () => flash(t("mcpSaved")));
                     setDialog(null);
+                    // A brand-new entry only becomes a loader row after the host reconciles the
+                    // patch, so look again shortly instead of leaving it as an orphan row.
+                    if (id === null) setTimeout(refresh, 1500);
+                },
+                onDeleteMcp: async (id) => {
+                    await act("mcp.delete", { id }, () => flash(t("mcpDeleteDone")));
+                    setDialog(null);
+                    setTimeout(refresh, 1500);
                 },
                 act,
                 flash,
@@ -1049,7 +1085,14 @@ window.__ModuleLoader__.load({
             }, label);
         }
 
-        const accentPalette = [T.brand, T.success, T.warn, T.danger];
+        // Member count picks the colour band, not the row order: a handful reads brand,
+        // a screenful green, a big group amber, and the largest red. Deeper tint as it grows.
+        function groupAccent(size) {
+            if (size < 5) return { accent: T.text3, accentDepth: 90 };
+            if (size < 20) return { accent: T.brand, accentDepth: 90 };
+            if (size < 60) return { accent: T.warn, accentDepth: 92 };
+            return { accent: T.danger, accentDepth: 95 };
+        }
 
         function GroupRow({ group, t, accent, accentDepth, active, onSelect, onEnable, onRename, onDelete }) {
             const [hover, setHover] = useState(false);
@@ -1145,7 +1188,7 @@ window.__ModuleLoader__.load({
         }
 
 
-        function Row({ row, t, picked, onPick, onToggle, busy, onEdit }) {
+        function Row({ row, t, picked, onPick, onToggle, busy, onEdit, onDelete }) {
             const [hover, setHover] = useState(false);
             const readOnly = row.manageable === false;
             const selfEntry = row.self === true;
@@ -1229,6 +1272,9 @@ window.__ModuleLoader__.load({
             row.mcp === true && row.mcpEditable === true
                 ? h(Button, { small: true, onClick: () => onEdit(row), disabled: busy, title: t("mcpEditHint") }, t("mcpEdit"))
                 : null,
+            row.mcp === true && row.mcpEditable === true
+                ? h(Button, { small: true, tone: "danger", onClick: () => onDelete(row), disabled: busy }, t("mcpDelete"))
+                : null,
             h("span", {
                 style: {
                     flex: "0 0 auto",
@@ -1270,129 +1316,226 @@ window.__ModuleLoader__.load({
             return `${text}`.split("\n").map(line => line.trim()).filter(line => line !== "");
         }
 
+        const NAME_RULE = /^[A-Za-z0-9_-]{1,32}$/;
+
+        function kvToText(map) {
+            if (map === null || typeof map !== "object" || Array.isArray(map)) return "";
+            return Object.entries(map).map(([key, value]) => key + "=" + value).join("\n");
+        }
+
+        function textToKv(text, onBad) {
+            const out = {};
+            for (const line of linesOf(text)) {
+                const cut = line.indexOf("=");
+                if (cut <= 0) {
+                    onBad(line);
+                    return null;
+                }
+                out[line.slice(0, cut).trim()] = line.slice(cut + 1).trim();
+            }
+            return out;
+        }
+
         function McpEditDialog({ row, t, busy, onClose, onSave }) {
-            const config = row.config !== null && typeof row.config === "object" ? row.config : {};
-            const [serverName, setServerName] = useState(typeof config.serverName === "string" ? config.serverName : row.name);
+            const creating = row === null || row === undefined;
+            const config = !creating && row.config !== null && typeof row.config === "object" ? row.config : {};
+            const reconnect = config.reconnect !== null && typeof config.reconnect === "object" ? config.reconnect : {};
+            const [serverName, setServerName] = useState(typeof config.serverName === "string" ? config.serverName : (creating ? "" : row.name));
             const [transport, setTransport] = useState(typeof config.transport === "string" ? config.transport : "stdio");
             const [command, setCommand] = useState(typeof config.command === "string" ? config.command : "");
             const [args, setArgs] = useState(Array.isArray(config.args) ? config.args.join("\n") : "");
             const [cwd, setCwd] = useState(typeof config.cwd === "string" ? config.cwd : "");
-            const [env, setEnv] = useState(
-                config.env !== null && typeof config.env === "object" && !Array.isArray(config.env)
-                    ? Object.entries(config.env).map(([key, value]) => `${key}=${value}`).join("\n")
-                    : "",
-            );
+            const [env, setEnv] = useState(kvToText(config.env));
             const [url, setUrl] = useState(typeof config.url === "string" ? config.url : "");
+            const [headers, setHeaders] = useState(kvToText(config.headers));
             const [timeout, setTimeoutValue] = useState(typeof config.toolCallTimeoutMs === "number" ? String(config.toolCallTimeoutMs) : "");
             const [failFast, setFailFast] = useState(config.failOnStartupError === true);
+            const [reconnectOn, setReconnectOn] = useState(reconnect.enabled === true);
+            const [reconnectInit, setReconnectInit] = useState(typeof reconnect.initialDelayMs === "number" ? String(reconnect.initialDelayMs) : "500");
+            const [reconnectMax, setReconnectMax] = useState(typeof reconnect.maxDelayMs === "number" ? String(reconnect.maxDelayMs) : "30000");
+            const [reconnectTries, setReconnectTries] = useState(typeof reconnect.maxAttempts === "number" ? String(reconnect.maxAttempts) : "10");
+            const [advanced, setAdvanced] = useState(false);
             const [error, setError] = useState(null);
 
-            const submit = () => {
-                const next = {};
-                if (serverName.trim() === "") next.serverName = null;
-                else next.serverName = serverName.trim();
-                next.transport = transport;
-                if (command.trim() === "") next.command = null;
-                else next.command = command.trim();
-                const argLines = linesOf(args);
-                next.args = argLines.length === 0 ? null : argLines;
-                next.cwd = cwd.trim() === "" ? "" : cwd.trim();
-                if (url.trim() === "") next.url = null;
-                else next.url = url.trim();
-                const envLines = linesOf(env);
-                const envObject = {};
-                for (const line of envLines) {
-                    const cut = line.indexOf("=");
-                    if (cut <= 0) {
-                        setError(fmt(t, "mcpBadEnv", { line }));
-                        return;
-                    }
-                    envObject[line.slice(0, cut).trim()] = line.slice(cut + 1).trim();
+            const nameOk = NAME_RULE.test(serverName.trim());
+            const nameTouched = serverName.trim().length > 0;
+            const nameBad = nameTouched && !nameOk;
+            const stdio = transport === "stdio";
+
+            const numberOrNull = (text, onBad) => {
+                const trimmed = text.trim();
+                if (trimmed === "") return null;
+                if (!/^\d+$/.test(trimmed)) {
+                    onBad();
+                    return undefined;
                 }
-                next.env = envLines.length === 0 ? {} : envObject;
-                if (timeout.trim() === "") next.toolCallTimeoutMs = null;
-                else if (!/^\d+$/.test(timeout.trim())) {
-                    setError(t("mcpInvalidNumber"));
-                    return;
-                }
-                else next.toolCallTimeoutMs = Number(timeout.trim());
-                next.failOnStartupError = failFast;
-                onSave(row.mcpPatchId, next);
+                return Number(trimmed);
             };
 
+            const submit = () => {
+                if (!nameOk) {
+                    setError(t("mcpBadName"));
+                    return;
+                }
+                const next = { serverName: serverName.trim(), transport };
+                if (stdio) {
+                    next.command = command.trim() === "" ? null : command.trim();
+                    const argLines = linesOf(args);
+                    next.args = argLines.length === 0 ? null : argLines;
+                    next.cwd = cwd.trim();
+                    const envObject = textToKv(env, line => setError(fmt(t, "mcpBadEnv", { line })));
+                    if (envObject === null) return;
+                    next.env = envObject;
+                    next.url = null;
+                    next.headers = null;
+                }
+                else {
+                    next.url = url.trim() === "" ? null : url.trim();
+                    const headerObject = textToKv(headers, line => setError(fmt(t, "mcpBadEnv", { line })));
+                    if (headerObject === null) return;
+                    next.headers = headerObject;
+                    next.command = null;
+                    next.args = null;
+                    next.cwd = "";
+                    next.env = null;
+                }
+                const timeoutValue = numberOrNull(timeout, () => setError(t("mcpInvalidNumber")));
+                if (timeoutValue === undefined) return;
+                next.toolCallTimeoutMs = timeoutValue;
+                next.failOnStartupError = failFast;
+                if (reconnectOn) {
+                    const initial = numberOrNull(reconnectInit, () => setError(t("mcpInvalidNumber")));
+                    if (initial === undefined) return;
+                    const max = numberOrNull(reconnectMax, () => setError(t("mcpInvalidNumber")));
+                    if (max === undefined) return;
+                    const tries = numberOrNull(reconnectTries, () => setError(t("mcpInvalidNumber")));
+                    if (tries === undefined) return;
+                    next.reconnect = { enabled: true, initialDelayMs: initial, maxDelayMs: max, maxAttempts: tries };
+                }
+                else next.reconnect = null;
+                onSave(creating ? null : row.mcpPatchId, next);
+            };
+
+            const chip = (value, label) => h("button", {
+                key: value,
+                type: "button",
+                onClick: () => setTransport(value),
+                style: {
+                    height: 26,
+                    padding: "0 11px",
+                    borderRadius: 7,
+                    border: "1px solid " + (transport === value ? tint(T.brand, 34) : T.border),
+                    background: transport === value ? tint(T.brand, 12) : "transparent",
+                    color: transport === value ? T.brand : T.text2,
+                    fontSize: 12,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                },
+            }, label);
+
+            const area = (label, value, onChange) => h("div", { style: { marginBottom: 9 } },
+                h("div", { style: { fontSize: 12, color: T.text3, marginBottom: 4 } }, label),
+                h("textarea", { value, onChange: event => onChange(event.target.value), spellCheck: false, style: areaStyle }));
+
+            const numberRow = (label, value, onChange) => h("div", { style: fieldRowStyle },
+                h("span", { style: fieldLabelStyle }, label),
+                h(Input, { value, onChange, grow: true }));
+
             return h(Dialog, {
-                title: t("mcpEditTitle"),
+                title: creating ? t("mcpCreateTitle") : t("mcpEditTitle"),
                 hint: t("mcpEditHint"),
                 width: 560,
                 onClose,
                 footer: [
                     h(Button, { key: "c", onClick: onClose }, t("cancel")),
-                    h(Button, { key: "s", tone: "primary", disabled: busy, onClick: submit }, t("mcpSave")),
+                    h(Button, { key: "s", tone: "primary", disabled: busy || !nameOk, onClick: submit }, t("mcpSave")),
                 ],
             },
             h("div", null,
                 h("div", { style: fieldRowStyle },
                     h("span", { style: fieldLabelStyle }, t("mcpName")),
                     h(Input, { value: serverName, onChange: setServerName, grow: true })),
+                h("div", { style: { marginTop: -4, marginBottom: 8, fontSize: 11, color: nameBad ? T.danger : T.text3 } },
+                    nameBad ? t("mcpBadName") : t("mcpNameRule")),
                 h("div", { style: fieldRowStyle },
                     h("span", { style: fieldLabelStyle }, t("mcpTransport")),
                     h("div", { style: { display: "flex", gap: 6 } },
-                        ["stdio", "sse", "http"].map(kind => h("button", {
-                            key: kind,
-                            type: "button",
-                            onClick: () => setTransport(kind),
-                            style: {
-                                height: 26,
-                                padding: "0 11px",
-                                borderRadius: 7,
-                                border: `1px solid ${transport === kind ? tint(T.brand, 34) : T.border}`,
-                                background: transport === kind ? tint(T.brand, 12) : "transparent",
-                                color: transport === kind ? T.brand : T.text2,
-                                fontSize: 12,
-                                cursor: "pointer",
-                                fontFamily: "inherit",
-                            },
-                        }, kind)))),
-                h("div", { style: fieldRowStyle },
-                    h("span", { style: fieldLabelStyle }, t("mcpCommand")),
-                    h(Input, { value: command, onChange: setCommand, grow: true })),
-                h("div", { style: { marginBottom: 9 } },
-                    h("div", { style: { fontSize: 12, color: T.text3, marginBottom: 4 } }, t("mcpArgs")),
-                    h("textarea", {
-                        value: args,
-                        onChange: event => setArgs(event.target.value),
-                        spellCheck: false,
-                        style: areaStyle,
-                    })),
-                h("div", { style: { marginBottom: 9 } },
-                    h("div", { style: { fontSize: 12, color: T.text3, marginBottom: 4 } }, t("mcpEnv")),
-                    h("textarea", {
-                        value: env,
-                        onChange: event => setEnv(event.target.value),
-                        spellCheck: false,
-                        style: areaStyle,
-                    })),
-                h("div", { style: fieldRowStyle },
-                    h("span", { style: fieldLabelStyle }, t("mcpUrl")),
-                    h(Input, { value: url, onChange: setUrl, grow: true })),
-                h("div", { style: fieldRowStyle },
-                    h("span", { style: fieldLabelStyle }, t("mcpCwd")),
-                    h(Input, { value: cwd, onChange: setCwd, grow: true })),
-                h("div", { style: fieldRowStyle },
-                    h("span", { style: fieldLabelStyle }, t("mcpTimeout")),
-                    h(Input, { value: timeout, onChange: setTimeoutValue, grow: true })),
-                h("div", { style: fieldRowStyle },
-                    h("span", { style: fieldLabelStyle }, t("mcpFailFast")),
-                    h(Switch, { checked: failFast, label: t("mcpFailFast"), onChange: setFailFast })),
+                        chip("stdio", "stdio"),
+                        chip("sse", "SSE"),
+                        chip("streamable-http", "HTTP"))),
+                stdio
+                    ? h("div", null,
+                        h("div", { style: fieldRowStyle },
+                            h("span", { style: fieldLabelStyle }, t("mcpCommand")),
+                            h(Input, { value: command, onChange: setCommand, grow: true })),
+                        area(t("mcpArgs"), args, setArgs),
+                        area(t("mcpEnv"), env, setEnv),
+                        h("div", { style: fieldRowStyle },
+                            h("span", { style: fieldLabelStyle }, t("mcpCwd")),
+                            h(Input, { value: cwd, onChange: setCwd, grow: true })))
+                    : h("div", null,
+                        h("div", { style: fieldRowStyle },
+                            h("span", { style: fieldLabelStyle }, t("mcpUrl")),
+                            h(Input, { value: url, onChange: setUrl, grow: true })),
+                        area(t("mcpHeaders"), headers, setHeaders)),
+                h("button", {
+                    type: "button",
+                    onClick: () => setAdvanced(!advanced),
+                    style: {
+                        marginTop: 2,
+                        marginBottom: advanced ? 8 : 2,
+                        padding: 0,
+                        border: "none",
+                        background: "transparent",
+                        color: T.text3,
+                        fontSize: 12,
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                    },
+                }, (advanced ? "▾ " : "▸ ") + t("mcpAdvanced")),
+                advanced
+                    ? h("div", null,
+                        numberRow(t("mcpTimeout"), timeout, setTimeoutValue),
+                        h("div", { style: fieldRowStyle },
+                            h("span", { style: fieldLabelStyle }, t("mcpFailFast")),
+                            h(Switch, { checked: failFast, label: t("mcpFailFast"), onChange: setFailFast })),
+                        h("div", { style: fieldRowStyle },
+                            h("span", { style: fieldLabelStyle }, t("mcpReconnect")),
+                            h(Switch, { checked: reconnectOn, label: t("mcpReconnect"), onChange: setReconnectOn })),
+                        reconnectOn
+                            ? h("div", null,
+                                numberRow(t("mcpReconnectInit"), reconnectInit, setReconnectInit),
+                                numberRow(t("mcpReconnectMax"), reconnectMax, setReconnectMax),
+                                numberRow(t("mcpReconnectTries"), reconnectTries, setReconnectTries))
+                            : null)
+                    : null,
                 error === null ? null : h("div", { style: { marginTop: 4, fontSize: 12, color: T.danger } }, error)));
         }
 
-        function DialogHost({ dialog, t, busy, groups, data, onClose, onSaveMcp, act, flash, onApplyAuto, onSaveGroup, onSavePreset, onApplyPreset, onApplyPresetNow, onRunGroupToggle }) {
+        function DialogHost({ dialog, t, busy, groups, data, onClose, onSaveMcp, onDeleteMcp, act, flash, onApplyAuto, onSaveGroup, onSavePreset, onApplyPreset, onApplyPresetNow, onRunGroupToggle }) {
             const [name, setName] = useState(dialog.kind === "rename" ? dialog.group.name : "");
             const foot = (children) => children;
 
             if (dialog.kind === "mcpEdit") {
                 return h(McpEditDialog, { row: dialog.row, t, busy, onClose, onSave: onSaveMcp });
+            }
+
+            if (dialog.kind === "mcpDelete") {
+                return h(Dialog, {
+                    title: t("mcpDeleteTitle"),
+                    hint: fmt(t, "mcpDeleteBody", { name: dialog.row.name }),
+                    width: 460,
+                    onClose,
+                    footer: foot([
+                        h(Button, { key: "c", onClick: onClose }, t("cancel")),
+                        h(Button, {
+                            key: "d",
+                            tone: "danger",
+                            disabled: busy,
+                            onClick: () => onDeleteMcp(dialog.row.mcpPatchId),
+                        }, t("mcpDelete")),
+                    ]),
+                });
             }
 
             if (dialog.kind === "confirmGroup") {
