@@ -1,3 +1,5 @@
+**English** · [简体中文](README.zh.md)
+
 # dsh-tool-hub
 
 One panel that lists the **plugins** and **skills** an installation actually runs, lets you switch
