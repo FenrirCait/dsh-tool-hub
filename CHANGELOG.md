@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.6.6
+
+- Fewer, heavier buckets: a topic with one or two rows is folded into that role's catch-all instead of
+  taking a line of its own, and each role now reads biggest-first.
+- Automatic buckets that collapse to the same role + name are merged on load, so a leftover pair from an
+  earlier apply cannot show up as two identical rows.
+- The rail is resizable — drag the divider (180-460px), double-click to reset; the width survives reloads.
+- Dragging a group shows where it will land: a brand-coloured line on the half of the target row the
+  pointer is over, instead of only dimming the row you picked up.
+- The rail is resizable: drag the divider (180-460px), double-click to reset; the width is remembered
+  across reloads.
+- Dragging a group now shows where it will land — a brand-coloured line on the half of the target row
+  the pointer is over — instead of only dimming the row you picked up.
+
 ## 1.6.2
 
 - Fixed groups disappearing when two of them share a name. Identity is the group id, which matters now

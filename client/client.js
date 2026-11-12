@@ -177,7 +177,8 @@ window.__ModuleLoader__.load({
                 autoHint: '按规则表分组，还没生效。确认后再写。',
                 autoApply: '应用到分组',
                 autoEmpty: '没有可自动分组的条目',
-                roleBase: '常开底座',
+                resizeRail: '拖动调整左栏宽度，双击复位',
+            roleBase: '常开底座',
             toggleBaseOff: '这是常开底座，关掉可能连累整条链（会先确认）',
             roleTask: '专项任务',
             roleSkill: '技能',
@@ -324,7 +325,8 @@ window.__ModuleLoader__.load({
                 autoHint: 'Grouped by the rule table. Nothing is written until you confirm.',
                 autoApply: 'Apply to groups',
                 autoEmpty: 'Nothing to auto group',
-                roleBase: 'ALWAYS ON',
+                resizeRail: 'Drag to resize the rail, double-click to reset',
+            roleBase: 'ALWAYS ON',
             toggleBaseOff: 'This is the always-on layer; switching it off can break the chain (asks first)',
             roleTask: 'PER TASK',
             roleSkill: 'SKILLS',
@@ -634,24 +636,71 @@ window.__ModuleLoader__.load({
 
             const groups = data === null ? [] : data.groups;
         const [dragId, setDragId] = useState(null);
+        const [dropAt, setDropAt] = useState(null);
+        const [railWidth, setRailWidth] = useState(() => {
+            try {
+                const stored = Number(window.localStorage.getItem("toolHubRailWidth"));
+                return Number.isFinite(stored) && stored >= 180 && stored <= 460 ? stored : 220;
+            }
+            catch {
+                return 220;
+            }
+        });
+        const [resizing, setResizing] = useState(false);
+        const railDrag = useRef(null);
+        // The rail keeps its width across reloads because the number is the only thing a window
+        // resize should not decide; 180-460 keeps both columns usable.
+        const startResize = event => {
+            event.preventDefault();
+            railDrag.current = { x: event.clientX, width: railWidth };
+            setResizing(true);
+            const move = ev => {
+                const start = railDrag.current;
+                if (start === null) return;
+                setRailWidth(Math.max(180, Math.min(460, start.width + (ev.clientX - start.x))));
+            };
+            const finish = () => {
+                railDrag.current = null;
+                setResizing(false);
+                window.removeEventListener("pointermove", move);
+                window.removeEventListener("pointerup", finish);
+                setRailWidth(current => {
+                    try { window.localStorage.setItem("toolHubRailWidth", String(current)); }
+                    catch { /* storage may be unavailable; the width simply will not persist */ }
+                    return current;
+                });
+            };
+            window.addEventListener("pointermove", move);
+            window.addEventListener("pointerup", finish);
+        };
         const roleSections = [
             { role: "base", key: "roleBase" },
             { role: "task", key: "roleTask" },
             { role: "skill", key: "roleSkill" },
         ];
+        // Display order is weight, not the order rows happened to be written in: a rail that reads
+        // biggest-first stays readable even when the stored order predates the last grouping change.
         const sections = roleSections
-            .map(section => ({ ...section, list: groups.filter(group => group.role === section.role) }))
+            .map(section => ({
+                ...section,
+                list: groups
+                    .filter(group => group.role === section.role)
+                    .sort((left, right) => (right.members.length - left.members.length) || left.name.localeCompare(right.name, "zh")),
+            }))
             .filter(section => section.list.length > 0);
         const loose = groups.filter(group => group.role !== "base" && group.role !== "task" && group.role !== "skill");
         // Dropping a row moves it in front of the row it was dropped on, across sections too:
         // the order array is the whole rail, so a drag is one op and one write.
-        const reorderGroups = (fromId, toId) => {
+        const reorderGroups = (fromId, toId, after) => {
             if (fromId === "" || fromId === toId) return;
             const ids = groups.map(group => group.id);
             const from = ids.indexOf(fromId);
-            const to = ids.indexOf(toId);
-            if (from < 0 || to < 0) return;
-            ids.splice(to, 0, ids.splice(from, 1)[0]);
+            const target = ids.indexOf(toId);
+            if (from < 0 || target < 0) return;
+            const moved = ids.splice(from, 1)[0];
+            // Re-read the target index: removing the dragged row shifts everything after it.
+            const to = ids.indexOf(toId) + (after === true ? 1 : 0);
+            ids.splice(to, 0, moved);
             void act("group.reorder", { order: ids });
         };
         const groupRow = group => h("div", {
@@ -663,13 +712,28 @@ window.__ModuleLoader__.load({
                 catch { /* some engines refuse to write during a drag */ }
             },
             onDragEnd: () => setDragId(null),
-            onDragOver: event => { event.preventDefault(); },
+            onDragOver: event => {
+                event.preventDefault();
+                const rect = event.currentTarget.getBoundingClientRect();
+                const after = event.clientY > rect.top + rect.height / 2;
+                if (dropAt === null || dropAt.id !== group.id || dropAt.after !== after) setDropAt({ id: group.id, after });
+            },
+            onDragLeave: event => {
+                if (event.currentTarget.contains(event.relatedTarget)) return;
+                if (dropAt !== null && dropAt.id === group.id) setDropAt(null);
+            },
             onDrop: event => {
                 event.preventDefault();
-                reorderGroups(dragId ?? event.dataTransfer.getData("text/plain") ?? "", group.id);
+                const after = dropAt !== null && dropAt.id === group.id ? dropAt.after : false;
+                reorderGroups(dragId ?? event.dataTransfer.getData("text/plain") ?? "", group.id, after);
                 setDragId(null);
+                setDropAt(null);
             },
-            style: dragId === group.id ? { opacity: 0.4 } : null,
+            style: {
+                opacity: dragId === group.id ? 0.4 : 1,
+                borderTop: dropAt !== null && dropAt.id === group.id && dropAt.after === false ? `2px solid ${T.brand}` : "2px solid transparent",
+                borderBottom: dropAt !== null && dropAt.id === group.id && dropAt.after === true ? `2px solid ${T.brand}` : "2px solid transparent",
+            },
         }, h(GroupRow, {
             group,
             accent: groupAccent(group.members.length).accent,
@@ -906,8 +970,8 @@ window.__ModuleLoader__.load({
 
             const rail = h("div", {
                 style: {
-                    width: 196,
-                    flex: "0 0 196px",
+                    width: railWidth,
+                    flex: `0 0 ${railWidth}px`,
                     borderRight: `1px solid ${T.borderSoft}`,
                     padding: "10px 8px",
                     overflow: "auto",
@@ -1086,7 +1150,19 @@ window.__ModuleLoader__.load({
             },
             header,
             tabs,
-            h("div", { style: { display: "flex", flex: 1, minHeight: 0, borderTop: `1px solid ${T.borderSoft}` } }, rail, list),
+            h("div", { style: { display: "flex", flex: 1, minHeight: 0, borderTop: `1px solid ${T.borderSoft}` } }, rail, h("div", {
+                role: "separator",
+                "aria-orientation": "vertical",
+                title: t("resizeRail"),
+                onPointerDown: startResize,
+                onDoubleClick: () => { setRailWidth(220); try { window.localStorage.setItem("toolHubRailWidth", "220"); } catch { /* ignore */ } },
+                style: {
+                    flex: "0 0 7px",
+                    cursor: "col-resize",
+                    background: resizing === true ? tint(T.brand, 30) : tint(T.borderSoft, 60),
+                    transition: "background .12s ease",
+                },
+            }), list),
             selectionBar,
             note === null ? null : h("div", {
                 style: {

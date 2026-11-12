@@ -42,17 +42,21 @@ the plugin hot-loads.
   `SKILL.md` ↔ `SKILL.md.disabled`.
 - **Groups**: create, rename, delete, add the current selection, and flip a whole group on or off.
   Groups over 20 members ask first.
-- **Auto grouping**: one button proposes groups from two axes — role first (always-on layer vs per-task),
-  research / dev / integrations / skills), previewed before anything is written. Applying it replaces
-  then topic. The rail shows the role as a section header, each group carries the tags that decided its
-  bucket, and rows can be dragged to reorder (the order is written to state.json). Applying replaces
-  only the previous automatic groups; hand-made groups are left alone.
+- **Auto grouping**: one button proposes groups from two axes — role first (always-on layer vs per-task
+  vs skills), then topic (context, interface, models, tools, sessions, integrations, media, research,
+  development, …) — previewed before anything is written, with the role badged on every row. Topics with
+  one or two rows fold into that role's catch-all, so the rail stays short and reads biggest-first.
+  Applying it replaces only the previous automatic groups; hand-made groups are left alone.
+- **A rail you can shape**: the role appears as a section header, each group carries the tags that
+  decided its bucket, the divider between rail and list drags from 180 to 460px (double-click resets,
+  the width survives reloads), and dragging a group shows a line where it will land before you drop it
+  (the order is written to state.json).
 - **Presets**: save the current set, then apply it later. `Apply` switches on what the preset lists
   and off what it does not; `Only switch on` never turns anything off. Big changes ask first.- **MCP servers** get their own view: name, transport and command per row, the same switch as every
   other entry, and an edit dialog for that server's `config:` block in the profile's
   `cordis.patch.yml`. Only that entry's bytes are rewritten — the rest of the file is untouched —
   and the host's HMR watcher reloads it on save. A **Test** button in that dialog starts the server
-  as currently typed (saved or not), runs initialize + 	ools/list, reports the tool count and how
+  as currently typed (saved or not), runs initialize + tools/list, reports the tool count and how
   long it took, then kills the process — nothing is registered and nothing is written.
 
 - **Tool-level masking for MCP servers.** Every MCP row has a **Tools** button listing that
