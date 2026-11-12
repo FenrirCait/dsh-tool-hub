@@ -71,6 +71,19 @@ Writes are atomic (temp file + rename), so a crash mid-save cannot leave a half-
 Both are reversible from the same row. A plugin switch can answer `restart-required`, `overridden`,
 or `failed`; the panel reports what the host answered instead of assuming success.
 
+### Testing in a throwaway profile
+
+By default the panel keeps its groups and presets in `<DSH_HOME>/tool-hub/state.json` and switches
+skills under `<DSH_HOME>/skills` and `~/.agents/skills`. A test profile usually wants neither, so two
+environment variables point it somewhere harmless:
+
+```bash
+TOOL_HUB_STATE_FILE=<dir>/tool-hub-state.json     # groups, presets, auto-group records
+TOOL_HUB_SKILL_ROOTS=<dir>/skills;<dir>/skills2   # skill roots, separated by ; on Windows
+```
+
+With both set, trying out a bulk disable in a sandbox touches only the sandbox.
+
 ## Development
 
 ```

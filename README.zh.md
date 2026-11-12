@@ -58,6 +58,18 @@ dsh plugin install ./dsh-tool-hub
 两者都能从同一行改回来。插件开关可能返回 `restart-required`、`overridden`、`failed`，面板照实
 报告宿主的回答，不假定成功。
 
+### 在一次性 profile 里试
+
+默认情况下分组和预设存在 `<DSH_HOME>/tool-hub/state.json`，技能开关落在 `<DSH_HOME>/skills` 与
+`~/.agents/skills`。测试 profile 通常两边都不想要，两个环境变量可以把它们指到无害的地方：
+
+```bash
+TOOL_HUB_STATE_FILE=<目录>/tool-hub-state.json     # 分组、预设、自动分组记录
+TOOL_HUB_SKILL_ROOTS=<目录>/skills;<目录>/skills2  # 技能根，Windows 下用 ; 分隔
+```
+
+两个都设上，沙盒里试「整组禁用」就只动沙盒。
+
 ## 开发
 
 ```
