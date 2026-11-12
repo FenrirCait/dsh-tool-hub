@@ -30,7 +30,7 @@ dsh plugin install ./dsh-tool-hub
 ## 能做什么
 
 - **一个列表**：loader 里的每一条 + 用户技能目录里的每个技能。每行写明类型、是否开启、不能开关
-  的原因。
+  的原因。随客户端一起装的行（`@deepseek-ai/*`、`cordis:*`）带**官方**标记，自带和第三方一眼分得开。
 - **逐项开关**：插件走宿主自己的 pluginManager，写进 profile patch，与插件页写的是同一处；技能靠
   重命名 `SKILL.md` ↔ `SKILL.md.disabled`。
 - **分组**：新建、改名、删除、把当前勾选加入分组，整组一键启停。成员超过 20 个先确认。

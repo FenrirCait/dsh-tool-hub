@@ -37,7 +37,9 @@ the plugin hot-loads.
 ## What it does
 
 - **One list** of every loader entry plus every skill found under the user skill roots. Each row
-  shows what it is, whether it is on, and why it cannot be switched when it cannot.
+  shows what it is, whether it is on, and why it cannot be switched when it cannot. Rows that ship
+  with the client (`@deepseek-ai/*`, `cordis:*`) carry an **Official** badge, so built-in and
+  third-party modules are told apart at a glance.
 - **Per-row switch**. Plugins go through the host's own plugin manager, so enable/disable is written
   to the profile patch exactly as the Plugins page would write it. Skills are switched by renaming
   `SKILL.md` ↔ `SKILL.md.disabled`.

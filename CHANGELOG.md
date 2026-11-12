@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0
+
+- Every row now says where it came from: `@deepseek-ai/*` packages and the loader's own `cordis:`
+  entries carry an `Official` badge, third-party installs do not, so a 200-row list can be read at
+  a glance instead of by module-name guessing. Skills are never official — the panel only scans
+  user roots.
+
 ## 0.2.0
 
 - The panel refuses to switch itself off, and says so on its own row with a `This plugin` badge.
