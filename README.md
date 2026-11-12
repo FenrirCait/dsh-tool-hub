@@ -8,6 +8,12 @@ them on or off one by one, keeps them in **groups** you can flip as a unit, and 
 
 It shows up twice: as a **Hub tab** on the Plugins page, and as a **sidebar panel** of its own.
 
+![The hub tab: one list of plugins and skills, a group rail on the left, per-row switches on the right](assets/hub-groups.png)
+
+![Auto grouping shows its plan before anything is written](assets/auto-groups.png)
+
+![Presets record what is on right now and can be replayed later](assets/presets.png)
+
 ## Why
 
 Disabling a plugin normally means digging through a profile's patch file, and skills are switched
@@ -93,7 +99,7 @@ lib/index.js        host half: snapshot, ops, HTTP routes (/tool-hub/api/*)
 client/client.js    client half: one hand-written ModuleLoader bundle, React only
 locale/{zh,en}.json plugin metadata shown on the Plugins page
 cordis.patch.yml    the bundle insert
-probe/host-smoke.mjs  26 assertions against a temp DSH_HOME and a fake plugin manager
+probe/host-smoke.mjs  28 assertions against a temp DSH_HOME and a fake plugin manager
 ```
 
 ```bash
