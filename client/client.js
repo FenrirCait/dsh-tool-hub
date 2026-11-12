@@ -90,6 +90,11 @@ window.__ModuleLoader__.load({
                 mcpFailFast: '启动失败即报错',
                 mcpSave: '保存',
                 mcpSaved: '已写入，等待热加载…',
+            mcpTest: '测试连接',
+            mcpTesting: '连接中…',
+            mcpTestOk: '连接成功 · {n} 个工具 · {ms}ms',
+            mcpTestFail: '连接失败：{message}',
+            mcpTestAborted: '测试没有完成',
                 mcpNoConfig: '这一条不在 profile patch 里，配置不能在面板里改。',
                 mcpCreate: '添加服务器',
                 mcpCreateTitle: '添加 MCP 服务器',
@@ -216,6 +221,11 @@ window.__ModuleLoader__.load({
                 mcpFailFast: 'Fail when startup fails',
                 mcpSave: 'Save',
                 mcpSaved: 'Written, waiting for the reload…',
+            mcpTest: 'Test',
+            mcpTesting: 'Connecting…',
+            mcpTestOk: 'Connected · {n} tools · {ms}ms',
+            mcpTestFail: 'Failed: {message}',
+            mcpTestAborted: 'The test did not finish',
                 mcpNoConfig: 'This row is not in the profile patch, so its config cannot be edited here.',
                 mcpCreate: 'Add server',
                 mcpCreateTitle: 'Add an MCP server',
@@ -1053,6 +1063,10 @@ window.__ModuleLoader__.load({
                 },
                 onApplyPresetNow: (name, mode) => runPresetApply(name, mode),
                 onRunGroupToggle: (group, enabled) => runGroupToggle(group, enabled),
+                onProbe: async (payload) => {
+                    try { return await runOp("mcp.probe", payload); }
+                    catch (failure) { return { error: failure.message }; }
+                },
             }));
         }
 
@@ -1403,7 +1417,7 @@ window.__ModuleLoader__.load({
             return out;
         }
 
-        function McpEditDialog({ row, t, busy, onClose, onSave }) {
+        function McpEditDialog({ row, t, busy, onClose, onSave, onProbe }) {
             const creating = row === null || row === undefined;
             const config = !creating && row.config !== null && typeof row.config === "object" ? row.config : {};
             const reconnect = config.reconnect !== null && typeof config.reconnect === "object" ? config.reconnect : {};
@@ -1423,6 +1437,8 @@ window.__ModuleLoader__.load({
             const [reconnectTries, setReconnectTries] = useState(typeof reconnect.maxAttempts === "number" ? String(reconnect.maxAttempts) : "10");
             const [advanced, setAdvanced] = useState(false);
             const [error, setError] = useState(null);
+            const [testing, setTesting] = useState(false);
+            const [testResult, setTestResult] = useState(null);
 
             const nameOk = NAME_RULE.test(serverName.trim());
             const nameTouched = serverName.trim().length > 0;
@@ -1439,10 +1455,10 @@ window.__ModuleLoader__.load({
                 return Number(trimmed);
             };
 
-            const submit = () => {
+            const collect = () => {
                 if (!nameOk) {
                     setError(t("mcpBadName"));
-                    return;
+                    return null;
                 }
                 const next = { serverName: serverName.trim(), transport };
                 if (stdio) {
@@ -1451,7 +1467,7 @@ window.__ModuleLoader__.load({
                     next.args = argLines.length === 0 ? null : argLines;
                     next.cwd = cwd.trim();
                     const envObject = textToKv(env, line => setError(fmt(t, "mcpBadEnv", { line })));
-                    if (envObject === null) return;
+                    if (envObject === null) return null;
                     next.env = envObject;
                     next.url = null;
                     next.headers = null;
@@ -1459,7 +1475,7 @@ window.__ModuleLoader__.load({
                 else {
                     next.url = url.trim() === "" ? null : url.trim();
                     const headerObject = textToKv(headers, line => setError(fmt(t, "mcpBadEnv", { line })));
-                    if (headerObject === null) return;
+                    if (headerObject === null) return null;
                     next.headers = headerObject;
                     next.command = null;
                     next.args = null;
@@ -1467,20 +1483,47 @@ window.__ModuleLoader__.load({
                     next.env = null;
                 }
                 const timeoutValue = numberOrNull(timeout, () => setError(t("mcpInvalidNumber")));
-                if (timeoutValue === undefined) return;
+                if (timeoutValue === undefined) return null;
                 next.toolCallTimeoutMs = timeoutValue;
                 next.failOnStartupError = failFast;
                 if (reconnectOn) {
                     const initial = numberOrNull(reconnectInit, () => setError(t("mcpInvalidNumber")));
-                    if (initial === undefined) return;
+                    if (initial === undefined) return null;
                     const max = numberOrNull(reconnectMax, () => setError(t("mcpInvalidNumber")));
-                    if (max === undefined) return;
+                    if (max === undefined) return null;
                     const tries = numberOrNull(reconnectTries, () => setError(t("mcpInvalidNumber")));
-                    if (tries === undefined) return;
+                    if (tries === undefined) return null;
                     next.reconnect = { enabled: true, initialDelayMs: initial, maxDelayMs: max, maxAttempts: tries };
                 }
                 else next.reconnect = null;
-                onSave(creating ? null : row.mcpPatchId, next);
+                return next;
+            };
+
+            const submit = () => {
+                const next = collect();
+                if (next !== null) onSave(creating ? null : row.mcpPatchId, next);
+            };
+
+            // Test the values as they sit in the form, saved or not.
+            const probe = async () => {
+                setError(null);
+                setTestResult(null);
+                const next = collect();
+                if (next === null) return;
+                setTesting(true);
+                try {
+                    const payload = { config: next, timeoutMs: 12000 };
+                    if (!creating) payload.id = row.mcpPatchId;
+                    const out = await onProbe(payload);
+                    if (out === null) setTestResult({ ok: false, text: t("mcpTestAborted") });
+                    else if (out.error !== undefined && out.error !== null) {
+                        setTestResult({ ok: false, text: fmt(t, "mcpTestFail", { message: out.error }) });
+                    }
+                    else setTestResult({ ok: true, text: fmt(t, "mcpTestOk", { n: out.count, ms: out.ms }) });
+                }
+                finally {
+                    setTesting(false);
+                }
             };
 
             const chip = (value, label) => h("button", {
@@ -1514,6 +1557,7 @@ window.__ModuleLoader__.load({
                 width: 560,
                 onClose,
                 footer: [
+                    h(Button, { key: "t", onClick: probe, disabled: testing || busy }, testing ? t("mcpTesting") : t("mcpTest")),
                     h(Button, { key: "c", onClick: onClose }, t("cancel")),
                     h(Button, { key: "s", tone: "primary", disabled: busy || !nameOk, onClick: submit }, t("mcpSave")),
                 ],
@@ -1576,7 +1620,19 @@ window.__ModuleLoader__.load({
                                 numberRow(t("mcpReconnectTries"), reconnectTries, setReconnectTries))
                             : null)
                     : null,
-                error === null ? null : h("div", { style: { marginTop: 4, fontSize: 12, color: T.danger } }, error)));
+                error === null ? null : h("div", { style: { marginTop: 4, fontSize: 12, color: T.danger } }, error),
+                testResult === null ? null : h("div", {
+                    style: {
+                        marginTop: 6,
+                        padding: "6px 9px",
+                        borderRadius: 7,
+                        fontSize: 12,
+                        lineHeight: 1.5,
+                        color: testResult.ok ? T.success : T.danger,
+                        background: tint(testResult.ok ? T.success : T.danger, 10),
+                        border: "1px solid " + tint(testResult.ok ? T.success : T.danger, 30),
+                    },
+                }, testResult.text)));
         }
 
         function ToolEditDialog({ row, tools, t, busy, onClose, onSave }) {
@@ -1652,14 +1708,14 @@ window.__ModuleLoader__.load({
             });
         }
 
-        function DialogHost({ dialog, t, busy, groups, data, onClose, onSaveMcp, onDeleteMcp, onSaveTool, act, flash, onApplyAuto, onSaveGroup, onSavePreset, onApplyPreset, onApplyPresetNow, onRunGroupToggle }) {
+        function DialogHost({ dialog, t, busy, groups, data, onClose, onSaveMcp, onDeleteMcp, onSaveTool, onProbe, act, flash, onApplyAuto, onSaveGroup, onSavePreset, onApplyPreset, onApplyPresetNow, onRunGroupToggle }) {
             const [name, setName] = useState(dialog.kind === "rename" ? dialog.group.name : "");
             const foot = (children) => children;
             const mcpIds = new Set((data === null ? [] : data.plugins).filter(row => row.mcp === true).map(row => row.id));
             const mcpInPreset = (preset) => (preset?.enabled?.plugin ?? []).filter(id => mcpIds.has(id)).length;
 
             if (dialog.kind === "mcpEdit") {
-                return h(McpEditDialog, { row: dialog.row, t, busy, onClose, onSave: onSaveMcp });
+                return h(McpEditDialog, { row: dialog.row, t, busy, onClose, onSave: onSaveMcp, onProbe });
             }
 
             if (dialog.kind === "toolEdit") {

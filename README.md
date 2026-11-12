@@ -50,7 +50,9 @@ the plugin hot-loads.
 - **MCP servers** get their own view: name, transport and command per row, the same switch as every
   other entry, and an edit dialog for that server's `config:` block in the profile's
   `cordis.patch.yml`. Only that entry's bytes are rewritten — the rest of the file is untouched —
-  and the host's HMR watcher reloads it on save.
+  and the host's HMR watcher reloads it on save. A **Test** button in that dialog starts the server
+  as currently typed (saved or not), runs initialize + 	ools/list, reports the tool count and how
+  long it took, then kills the process — nothing is registered and nothing is written.
 
 Everything the panel writes about *groups and presets* lives in one file:
 

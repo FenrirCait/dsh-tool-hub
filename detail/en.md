@@ -23,6 +23,22 @@ Each row says what it is, whether it is on, and why it cannot be switched when i
 - **This plugin** — the panel itself. It refuses to switch itself off; that would be a one-click dead end
 - `#1`, `#2` — the same module mounted more than once by the loader
 
+## MCP servers
+
+An MCP row switches on and off like any other entry (same loader mechanism, applied on save), and
+can be created, edited and deleted from the panel:
+
+- **Edit config** — rewrites only that entry's own `config:` block; every other byte of the file
+  stays, and the host's HMR watcher picks it up
+- **Test** — starts a throwaway client from the values **currently in the dialog** (saved or not),
+  runs `initialize` + `tools/list`, reports the tool count and elapsed time, then kills the process;
+  the timeout is 12 s and it ends the whole process tree
+- **Tools** — unticking a tool removes it from the model-visible tool table of every agent in this
+  install, rather than rejecting the call; that list lives in this panel's own `state.json`
+
+With Skill / MCP panel installed too, the two masks are a union: its entries show read-only here and
+one button imports them, but this panel never writes its file.
+
 ## Groups
 
 A group holds any mix of plugins and skills. With a group selected, two explicit **Enable** /
@@ -60,7 +76,7 @@ TOOL_HUB_SKILL_ROOTS=<dir>/skills:<dir>/skills2   # semicolon on Windows
 
 ## What it does not do
 
-- MCP servers are not listed yet; they are edited in their own config block and are next
 - Only user skill roots are scanned; a workspace's `.dsh/skills` belongs to that workspace, not to
   the installation, and is not switched from here
+- A server on SSE cannot be tested from the panel (stdio and streamable HTTP can)
 - No terminal UI; the panel is a Web / Desktop extension

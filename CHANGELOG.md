@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.3.0
+
+- **Test a server before you trust it.** The MCP edit dialog has a *Test* button: it starts the
+  server exactly as configured, runs `initialize` and `tools/list`, reports how many tools came back
+  and how long it took, then kills the process. It tests the values **as they sit in the form**, so
+  a draft that was never saved can be tried first.
+- **Nothing is registered or written by a test.** The probe is a throwaway client in this plugin; it
+  does not touch the host's MCP client, does not add tools to any session, and does not modify
+  `cordis.patch.yml`.
+- Failures are reported in place, with the reason: a command that cannot start, a server that exits
+  before answering (last lines of stderr included), a server that does not answer within 12 s, or a
+  transport this panel cannot probe (SSE). The process tree is killed on timeout, so a hung `npx`
+  wrapper does not survive the dialog.
+
 ## 1.2.1
 
 - **Per-tool switches for MCP servers.** Each server row now opens a tool list: unchecked tools are

@@ -8,6 +8,7 @@ import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const home = join(tmpdir(), `tool-hub-smoke-${Date.now()}`)
 process.env.DSH_HOME = home
@@ -198,6 +199,17 @@ const deleted = await readFile(patchFile, 'utf8')
 check('mcp delete removes only that entry', !deleted.includes('tool-hub-mcp-fresh') && deleted.includes('- id: panel-mcp-fixture') && deleted.includes('- id: keep-me'))
 check('mcp delete refuses unknown id', (await op('mcp.delete', { id: 'nope' })).ok === false)
 void snap2
+
+// ── 2c2. mcp probe ────────────────────────────────────────────────────────
+const fakeServer = fileURLToPath(new URL('./fake-mcp-server.mjs', import.meta.url))
+r = await op('mcp.probe', { config: { transport: 'stdio', command: process.execPath, args: [fakeServer], toolCallTimeoutMs: 15000 } })
+check('probe reports the tools a server offers', r.ok === true && r.data.count === 2 && r.data.tools.join(',') === 'alpha,beta', JSON.stringify(r))
+check('probe reports how long it took', r.ok === true && Number.isFinite(r.data.ms), JSON.stringify(r.data ?? null))
+r = await op('mcp.probe', { config: { transport: 'stdio', command: 'definitely-not-a-real-binary-xyz' } })
+check('probe surfaces a spawn failure', r.ok === false && r.error.code === 'probe-spawn', JSON.stringify(r))
+r = await op('mcp.probe', { config: { transport: 'sse', url: 'http://127.0.0.1:1/sse' } })
+check('probe refuses a transport it cannot test', r.ok === false && r.error.code === 'probe-unsupported', JSON.stringify(r))
+check('probe refuses an empty payload', (await op('mcp.probe', {})).ok === false)
 
 // ── 2d. per-tool masking ──────────────────────────────────────────────────
 let toolSnap = (await get('/tool-hub/api/snapshot')).data
