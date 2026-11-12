@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.8.1
+
+- A chip that cannot be pressed (the delete button on a built-in preset) now looks inert instead of red: no tinted fill, no tinted border, and the label sits in the quiet text colour.
+
 ## 1.8.0
 
 - Agent presets are now first-class in the panel: a **Presets** view lists every preset the registry knows,
