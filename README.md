@@ -182,6 +182,10 @@ MIT
 - Rows in a group carry a "move out" action (also on the selection bar): it drops the member from that group only, leaving switches and the group itself alone.
 - Presets can be refreshed in place: "Update" overwrites the named preset with what is on right now, after a confirmation.
 
+## Built-in UI rows are read-only
+
+Some official rows ship inside the client's own UI bundle. The client does not let a profile override them, so the panel marks them **Built-in UI** and disables their switch; a direct API call is refused with `builtin-ui` and nothing is written. Everything else official (host-side entries, MCP clients) stays switchable. This only changes what this panel shows and refuses — the client, the profile patch and other tools are untouched.
+
 ## One switch for everything third-party
 
 The toolbar has a red **Turn off third-party** button. It only flips switches - nothing is uninstalled - and it leaves official and host-managed rows alone. Before touching anything it writes a rollback point to `<state dir>/rollback/<timestamp>.json`.

@@ -204,6 +204,9 @@ window.__ModuleLoader__.load({
             thirdOffAck: '我了解界面可能异常，并已保存回滚点',
             thirdOffApply: '全部关闭（{n} 项）',
             thirdWorking: '正在逐项处理…',
+            builtinUiBadge: '内置界面',
+            builtinUiHint: '这个界面插件随客户端一起打包，profile 里没有它的行，改不动；要关只能在 profile 的 cordis.patch.yml 里覆盖。',
+            toggleRefused: '这个开关没有生效：{why}',
             filterLead: '已筛选：',
             filterClear: '清除筛选',
             filterView: '视图 {label}',
@@ -431,6 +434,9 @@ window.__ModuleLoader__.load({
             thirdOffAck: 'I understand the interface may break, and the rollback point is saved',
             thirdOffApply: 'Turn off all ({n})',
             thirdWorking: 'Working…',
+            builtinUiBadge: 'Built-in UI',
+            builtinUiHint: 'This interface plugin ships inside the client bundle and has no profile row to override; disable it in the profile cordis.patch.yml instead.',
+            toggleRefused: 'That switch did not take effect: {why}',
             filterLead: 'Filtered:',
             filterClear: 'Clear filters',
             filterView: 'view {label}',
@@ -841,7 +847,10 @@ window.__ModuleLoader__.load({
                     return result;
                 }
                 catch (failure) {
-                    flash(failure.message);
+                    // The host sends a code with every refusal; a client-bundled UI plugin has
+                    // its own wording so the toast does not read like a crash.
+                    if (failure?.code === "builtin-ui") flash(fmt(t, "toggleRefused", { why: failure.message }));
+                    else flash(failure.message);
                     return null;
                 }
                 finally {
@@ -1294,7 +1303,12 @@ window.__ModuleLoader__.load({
             }, [plugins, skills]);
 
             const toggleRow = (kind, id, enabled) => act("toggle", { kind, id, enabled }, (result) => {
-                if (result && result.ok === false) flash(result.message || "failed");
+                if (result && result.ok === false) {
+                    // The host refuses a client-bundled UI plugin with a reason; print it and
+                    // reload so the switch does not stay in a state the write never reached.
+                    flash(fmt(t, "toggleRefused", { why: result.message || result.code || "failed" }));
+                    if (result.code === "builtin-ui") void refresh();
+                }
                 else if (result && result.application === "restart-required") flash(t("restart"));
             });
 
@@ -2459,6 +2473,7 @@ window.__ModuleLoader__.load({
                     ? h(Badge, { tone: "brand", title: row.mcpPatchId || "" }, t("mcpBadge"))
                     : h(Badge, { tone: row.kind === "plugin" ? "brand" : "warn" }, row.kind === "plugin" ? t("kindPlugin") : t("kindSkill")),
                 row.official === true ? h(Badge, { tone: "success", title: t("officialHint") }, t("officialBadge")) : null,
+                row.builtinUi === true ? h(Badge, { tone: "warn", title: t("builtinUiHint") }, t("builtinUiBadge")) : null,
                 row.dupeLabel === "" ? null : h("span", {
                     title: row.kind === "plugin" ? row.moduleName : row.name,
                     style: { fontSize: 10.5, color: T.text3, flex: "0 0 auto" },
@@ -2518,7 +2533,7 @@ window.__ModuleLoader__.load({
                 : null,
             h(Switch, {
                 checked: row.enabled,
-                disabled: busy || readOnly || selfEntry || String(row.id).startsWith("patch:"),
+                disabled: busy || readOnly || selfEntry || row.builtinUi === true || String(row.id).startsWith("patch:"),
                 label: row.name,
                 onChange: enabled => onToggle(enabled),
             }));

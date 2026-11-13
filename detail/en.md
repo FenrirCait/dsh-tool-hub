@@ -64,6 +64,12 @@ declaration row in the profile `cordis.patch.yml`, not a folder. You can create 
 `plugins` list; entries that were already there keep their original config and comments. Rows the host itself
 write is backed up to `~/.dsh/backups/` and verified against the registry, rolling back on failure.
 
+## Built-in UI and the third-party switch
+
+Official rows that ship inside the client's own UI bundle carry a **Built-in UI** badge and a disabled switch: the client does not let a profile override them, and the panel refuses to write. A refused toggle reports the reason instead of a bare "failed".
+
+**Turn off third-party** only flips switches; it writes a rollback point to `<state dir>/rollback/<timestamp>.json` first, and a **Restore** button appears afterwards.
+
 ## Where state lives
 
 ```

@@ -1,5 +1,50 @@
 # Changelog
 
+## 1.18.4
+
+- **Built-in UI is read-only.** 65 rows ship inside the client's own UI bundle; the client never
+  lets a profile override them, so the switch used to end in a bare `failed`. They now carry a
+  内置界面 badge, their switch is disabled, and a direct API call is refused with
+  `builtin-ui` instead of touching the patch file.
+- **Bulk switches skip them.** Closing a group counts these rows as `skippedBuiltin` instead of
+  spraying one identical failure per row.
+- **Refusals are explained.** A refused toggle now shows "这个开关没有生效：<reason>" rather than
+  "failed".
+
+## 1.18.3
+
+- **Facet chips show what they will do.** Every chip carries the count it would leave:
+  全部 225 / 官方 205 / 第三方 17 / 技能 2 / MCP 1, and 有界面 81 / 纯后端 142.
+- **The selected chip is unmistakable**: solid brand fill, white count, bold label.
+- **A filter summary row** sits above the list ("已筛选：视图 插件 · 来源 官方 · 形态 有界面")
+  with a one-click 清除筛选.
+- **The rail stays visible on every tab**, because the chips live there and a hidden chip row
+  cannot be cleared.
+- **Official manifests are found now.** Official packages live in the client install, not in the
+  profile, so their shape used to read as unknown and every shape filter dropped them. The reader
+  now looks in the client's node_modules and falls back to the module name.
+
+## 1.18.2
+
+- **关闭第三方**: one red switch turns off every enabled third-party plugin, MCP server and skill,
+  after a dialog that lists them and marks the always-on / UI ones in red.
+- **A rollback point is written first** (`tool-hub/rollback/<timestamp>.json`); 恢复 re-opens
+  exactly the rows that were on.
+- Official and host-managed rows are never touched.
+
+## 1.18.1 / 1.18.0
+
+- The dialog openers were declared inside the dialog's props object, so the header buttons did
+  nothing. They are hoisted to the panel now.
+
+## 1.17.4
+
+- **Move out of a group** without deleting the group, plus 从本组移出 in the selection bar.
+- **Update a preset** in place (re-records the current switches) behind a confirmation.
+- The word filter is gone.
+- Two blank panels fixed: a `Remove` button spliced into a module row that had no handler, and a
+  bare `onUpdatePreset,` shorthand pointing at a variable that only existed inside the dialog.
+
 ## 1.16.0
 
 - **Filters that cannot lie.** The rail has three facet rows read straight from the install:
