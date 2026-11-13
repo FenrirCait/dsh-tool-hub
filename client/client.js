@@ -204,6 +204,12 @@ window.__ModuleLoader__.load({
             thirdOffAck: '我了解界面可能异常，并已保存回滚点',
             thirdOffApply: '全部关闭（{n} 项）',
             thirdWorking: '正在逐项处理…',
+            filterLead: '已筛选：',
+            filterClear: '清除筛选',
+            filterView: '视图 {label}',
+            filterOrigin: '来源 {label}',
+            filterShape: '形态 {label}',
+            viewMcpShort: 'MCP',
             thirdOffDone: '已关闭 {n} 项，回滚点 {file}',
             thirdOffBusy: '正在关闭 {n} 项（逐项重启，约 30–60 秒），期间按钮会变灰。',
             thirdOffEmpty: '没有可关闭的第三方功能。',
@@ -425,6 +431,12 @@ window.__ModuleLoader__.load({
             thirdOffAck: 'I understand the interface may break, and the rollback point is saved',
             thirdOffApply: 'Turn off all ({n})',
             thirdWorking: 'Working…',
+            filterLead: 'Filtered:',
+            filterClear: 'Clear filters',
+            filterView: 'view {label}',
+            filterOrigin: 'origin {label}',
+            filterShape: 'shape {label}',
+            viewMcpShort: 'MCP',
             thirdOffDone: 'Turned off {n}, rollback {file}',
             thirdOffBusy: 'Turning off {n} items one by one (~30–60s); the buttons grey out meanwhile.',
             thirdOffEmpty: 'Nothing third-party is on.',
@@ -1075,7 +1087,9 @@ window.__ModuleLoader__.load({
             active: groupId === group.id,
             onSelect: () => {
                 setGroupId(group.id);
+                setView("all");
                 setPicked(new Set());
+                lastPickRef.current = null;
             },
             onEnable: value => enableAllInGroup(group, value),
             onRename: () => setDialog({ kind: "rename", group }),
@@ -1145,6 +1159,43 @@ window.__ModuleLoader__.load({
                 }
                 return map;
             }, [groups]);
+
+        const facetPool = useMemo(() => {
+                const wanted = `${query}`.trim().toLowerCase();
+                const isMcpRow = row => row.mcp === true;
+                let pool = [];
+                if (view !== "skill") pool = pool.concat(plugins);
+                if (view !== "plugin" && view !== "mcp") pool = pool.concat(skills);
+                pool = pool.filter((row) => {
+                    if (wanted !== "") {
+                        const haystack = `${row.name} ${row.moduleName || ""} ${row.description || ""} ${row.serverName || ""} ${row.alias || ""}`.toLowerCase();
+                        if (!haystack.includes(wanted)) return false;
+                    }
+                    if (view === "plugin" && (row.kind !== "plugin" || isMcpRow(row))) return false;
+                    if (view === "mcp" && !isMcpRow(row)) return false;
+                    if (view === "skill" && row.kind !== "skill") return false;
+                    return true;
+                });
+                if (groupId !== null) {
+                    const set = groupMembers.get(groupId);
+                    if (set !== undefined) pool = pool.filter(row => set.has(memberKey(row.kind, row.id)));
+                }
+                return pool;
+            }, [plugins, skills, query, view, groupId, groupMembers]);
+
+        const facetCounts = useMemo(() => {
+                const origin = { all: facetPool.length, official: 0, third: 0, skill: 0, mcp: 0 };
+                const shape = { all: facetPool.length, ui: 0, host: 0 };
+                for (const row of facetPool) {
+                    if (row.mcp === true) origin.mcp += 1;
+                    else if (row.kind === "skill") origin.skill += 1;
+                    else if (row.official === true) origin.official += 1;
+                    else origin.third += 1;
+                    if (row.surface === "ui") shape.ui += 1;
+                    else if (row.surface === "host") shape.host += 1;
+                }
+                return { origin, shape };
+            }, [facetPool]);
 
         const rows = useMemo(() => {
                 const wanted = `${query}`.trim().toLowerCase();
@@ -1435,6 +1486,7 @@ window.__ModuleLoader__.load({
                 onClick: () => {
                     setView(key);
                     setPicked(new Set());
+                    lastPickRef.current = null;
                 },
                 style: {
                     height: 26,
@@ -1452,20 +1504,47 @@ window.__ModuleLoader__.load({
             h("div", { style: { flex: 1 } }),
             h(Input, { value: query, onChange: setQuery, placeholder: t("search") }));
 
-            const chipRow = (label, items, active, onPick) => h("div", {
+            const facetChip = (key, label, active, count, onPick) => h("button", {
+                key,
+                type: "button",
+                "aria-pressed": active,
+                onClick: onPick,
+                style: {
+                    height: 23,
+                    padding: "0 9px",
+                    borderRadius: 999,
+                    border: `1px solid ${active ? T.brand : T.borderSoft}`,
+                    background: active ? T.brand : "transparent",
+                    color: active ? T.onBrand : T.text2,
+                    fontWeight: active ? 700 : 500,
+                    fontSize: 11.5,
+                    lineHeight: 1,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    whiteSpace: "nowrap",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 5,
+                },
+            }, label, h("span", {
+                style: {
+                    fontSize: 10.5,
+                    fontWeight: 600,
+                    color: active ? T.onBrand : T.text3,
+                    opacity: active ? 0.9 : 1,
+                },
+            }, `${count}`));
+
+            const chipRow = (label, items, active, onPick, counts) => h("div", {
                 style: { display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", padding: "0 2px 6px" },
             },
                 h("span", { style: { width: 24, flex: "0 0 auto", fontSize: 10, color: T.text3 } }, label),
-                h(ActionChip, { label: t("lensAll"), tone: active === "all" ? "brand" : "neutral", onClick: () => onPick("all") }),
-                ...items.map(item => h(ActionChip, {
-                    key: item.id,
-                    label: item.label,
-                    tone: active === item.id ? "brand" : "neutral",
-                    onClick: () => onPick(active === item.id ? "all" : item.id),
-                })));
+                facetChip("all", t("lensAll"), active === "all", counts.all, () => onPick("all")),
+                ...items.map(item => facetChip(item.id, item.label, active === item.id, counts[item.id] ?? 0, () => onPick(active === item.id ? "all" : item.id))));
+            const shapeRelevant = view !== "skill" && view !== "mcp";
             const chips = h("div", { style: { padding: "0 2px 2px" } },
-                chipRow(t("facetOrigin"), ORIGINS, origin, setOrigin),
-                chipRow(t("facetShape"), SHAPES, shape, setShape));
+                chipRow(t("facetOrigin"), ORIGINS, origin, setOrigin, facetCounts.origin),
+                shapeRelevant ? chipRow(t("facetShape"), SHAPES, shape, setShape, facetCounts.shape) : null);
 
             // Head and foot stay put; only the drawers scroll, so the two "new" buttons can
             // never be pushed off the bottom by a long list.
@@ -1787,7 +1866,33 @@ window.__ModuleLoader__.load({
                     open ? node.entries.map(entry => rowNode(entry, true)) : null);
             });
 
+            const activeFilters = [];
+            if (view !== "all") activeFilters.push(fmt(t, "filterView", { label: view === "plugin" ? t("viewPlugins") : view === "skill" ? t("viewSkills") : t("viewMcpShort") }));
+            if (origin !== "all") activeFilters.push(fmt(t, "filterOrigin", { label: (ORIGINS.find(item => item.id === origin) ?? {}).label ?? origin }));
+            if (shape !== "all" && shapeRelevant) activeFilters.push(fmt(t, "filterShape", { label: (SHAPES.find(item => item.id === shape) ?? {}).label ?? shape }));
+            const clearAllFilters = () => {
+                setOrigin("all");
+                setShape("all");
+                setQuery("");
+            };
+            const filterBar = activeFilters.length === 0 ? null : h("div", {
+                style: {
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    padding: "6px 12px",
+                    borderBottom: `1px solid ${tint(T.brand, 26)}`,
+                    background: tint(T.brand, 7),
+                    flex: "0 0 auto",
+                },
+            },
+            h("span", { style: { fontSize: 11.5, color: T.text2 } }, t("filterLead")),
+            h("span", { style: { fontSize: 12, fontWeight: 600, color: T.brand } }, activeFilters.join(" · ")),
+            h("div", { style: { flex: 1 } }),
+            h(Button, { tone: "ghost", onClick: clearAllFilters }, t("filterClear")));
+
             const list = h("div", { style: { flex: 1, minWidth: 0, display: "flex", flexDirection: "column" } },
+                filterBar,
                 h("div", { style: { flex: 1, overflow: "auto", padding: "10px 12px 12px" } },
                     data === null
                         ? h("div", { style: emptyStyle }, error === null ? t("loading") : error)
@@ -1888,8 +1993,8 @@ window.__ModuleLoader__.load({
             header,
             tabs,
             h("div", { style: { display: "flex", flex: 1, minHeight: 0, borderTop: `1px solid ${T.borderSoft}` } },
-            view === "all" ? rail : null,
-            view === "all" ? h("div", {
+            rail,
+            h("div", {
                 role: "separator",
                 "aria-orientation": "vertical",
                 title: t("resizeRail"),
@@ -1901,7 +2006,7 @@ window.__ModuleLoader__.load({
                     background: resizing === true ? tint(T.brand, 30) : tint(T.borderSoft, 60),
                     transition: "background .12s ease",
                 },
-            }) : null, list),
+            }), list),
             selectionBar,
             undoBar,
             note === null ? null : h("div", {

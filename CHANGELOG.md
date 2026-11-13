@@ -371,3 +371,12 @@ First stable release: plugins, skills and MCP servers in one panel.
 - 自我排除：`dsh-tool-hub` 自己永不进入关闭清单（否则关完就没人能恢复了）。
 - 冒烟：`probe/host-smoke.mjs` 130/130（第三方判定、off 写快照、只关第三方、status 报快照、restore 回开、二次 off 为 0）。
 - 沙盒实测：18 项 → 已启用 193 → 177（用户下载 0/5），恢复后回到 194 且侧栏条目复现；回滚点文件 720B。
+
+## 1.18.3 — filters you can see, and official rows that answer to shape
+
+- The rail is back on every tab. Filters live in the rail, so hiding it while the filter still applied left lists looking mysteriously short with no way to clear them.
+- Chips now carry counts (`官方 205`, `有界面 81`, ...) and the selected one is a solid brand pill instead of a faint outline.
+- A summary bar above the list spells out exactly what is filtering it (`已筛选：视图 插件 · 来源 官方 · 形态 有界面`) with a one-click `清除筛选`.
+- Shape is only offered where it means something: the skill and MCP tabs keep the origin row and drop the shape row.
+- Official packages live next to the client, not in the profile, so their manifests were never read and every official row fell through both shape filters. `packageMeta` now looks in the profile, the packaged app's `resources/app/dsh/node_modules`, and the source checkout; subpath rows (`billion-context/dsh-compaction-gate`, `@michengai/dsh-codex-ui/theme`) resolve through their package root. Sandbox now reports ui 81 / host 142 / null 0.
+- Clicking a group switches back to the unfiltered view, and switching tabs drops the shift-select anchor.

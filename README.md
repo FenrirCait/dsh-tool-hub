@@ -191,3 +191,11 @@ The confirmation lists every plugin, MCP server and skill that will be turned of
 Afterwards a **Restore** button appears and re-opens exactly what the rollback point recorded (also confirmed once). Switching is per-entry and restarts the host each time, so a full sweep takes 30-60 seconds: the buttons grey out and say "Working..." meanwhile.
 
 The panel never turns itself off, otherwise nothing would be left to restore with.
+
+## Filters that show their work
+
+Every tab keeps the rail, because that is where the filters live. Each chip shows how many rows it would leave (`Official 205`, `With a UI 81`), the active one is a solid pill, and a bar above the list says what is currently narrowing it - `Filtered: view Plugins · origin Official · shape With a UI` - with a `Clear filters` button.
+
+Shape is only offered where it applies: the Skills and MCP tabs keep origin and drop shape.
+
+Official packages ship inside the client rather than a profile, so their manifests were invisible to the panel and every official row vanished under either shape filter. The manifest lookup now covers the profile, the packaged app's own `node_modules`, and a source checkout, and rows that point at a subpath are resolved through their package root.
