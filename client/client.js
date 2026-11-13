@@ -193,6 +193,13 @@ window.__ModuleLoader__.load({
             marketImportMissing: '有 {n} 个包未安装，已跳过',
             marketNoGroups: '没有可导入的分组',
                 presetOnlyOn: '只开启，不关闭',
+                presetUpdate: '更新',
+                presetUpdateTitle: '更新预设',
+                presetUpdateBody: '用当前开关状态覆盖「{name}」？原来的记录会被替换。',
+                presetUpdated: '已更新「{name}」',
+                groupRemove: '移出',
+                groupRemoved: '已从本组移出 {n} 项',
+                removeFromGroup: '从本组移出',
                 auto: '自动分组',
                 autoTitle: '自动分组预览',
                 autoHint: '按规则表分组，还没生效。确认后再写。',
@@ -245,7 +252,6 @@ window.__ModuleLoader__.load({
                 lensMcp: 'MCP',
                 facetOrigin: '来源',
                 facetShape: '形态',
-                facetWord: '词',
                 facetSkill: '技能',
                 facetUi: '有界面',
                 facetHost: '纯后端',
@@ -389,6 +395,13 @@ window.__ModuleLoader__.load({
             marketImportMissing: '{n} packages are not installed and were skipped',
             marketNoGroups: 'Nothing to import',
                 presetOnlyOn: 'Only switch on',
+                presetUpdate: 'Update',
+                presetUpdateTitle: 'Update preset',
+                presetUpdateBody: 'Overwrite "{name}" with what is on right now? The old record is replaced.',
+                presetUpdated: 'Updated "{name}"',
+                groupRemove: 'Remove',
+                groupRemoved: 'Removed {n} from this group',
+                removeFromGroup: 'Remove from group',
                 auto: 'Auto group',
                 autoTitle: 'Auto group preview',
                 autoHint: 'Grouped by the rule table. Nothing is written until you confirm.',
@@ -441,7 +454,6 @@ window.__ModuleLoader__.load({
                 lensMcp: 'MCP',
                 facetOrigin: 'Origin',
                 facetShape: 'Shape',
-                facetWord: 'Word',
                 facetSkill: 'Skill',
                 facetUi: 'Has UI',
                 facetHost: 'Headless',
@@ -840,7 +852,6 @@ window.__ModuleLoader__.load({
         // package.json. Nothing here is inferred from a description.
         const [origin, setOrigin] = useState("all");
         const [shape, setShape] = useState("all");
-        const [kw, setKw] = useState(null);
         const ORIGINS = [
             { id: "official", label: t("lensOfficial") },
             { id: "third", label: t("lensThird") },
@@ -869,8 +880,7 @@ window.__ModuleLoader__.load({
             if (shape === "all") return true;
             return row.surface === shape;
         };
-        const kwMatch = (row) => kw === null || (Array.isArray(row.keywords) && row.keywords.includes(kw));
-        const facetMatch = (row) => originMatch(row) && shapeMatch(row) && kwMatch(row);
+        const facetMatch = (row) => originMatch(row) && shapeMatch(row);
 
         const drawers = collections.map(collection => ({
             collection,
@@ -1017,21 +1027,6 @@ window.__ModuleLoader__.load({
         }));
             const plugins = data === null ? [] : data.plugins;
             const skills = data === null ? [] : data.skills;
-        // Words only become a facet when at least two packages declare them, so the row of words
-        // stays short and every entry on it means something.
-        const kwOptions = useMemo(() => {
-            const counts = new Map();
-            for (const row of [...plugins, ...skills]) {
-                for (const word of Array.isArray(row.keywords) ? row.keywords : []) {
-                    counts.set(word, (counts.get(word) ?? 0) + 1);
-                }
-            }
-            return [...counts.entries()]
-                .filter(entry => entry[1] >= 2)
-                .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
-                .slice(0, 10)
-                .map(entry => ({ word: entry[0], n: entry[1] }));
-        }, [plugins, skills]);
         // How much of each group is actually running. The rail answers "what will I break if I
         // flip this?" — a group whose members are all on is a different thing from a half-on one.
         const liveByMember = useMemo(() => {
@@ -1146,7 +1141,7 @@ window.__ModuleLoader__.load({
                         toolStats: row.mcp === true ? toolStats.get(server) ?? null : null,
                     };
                 });
-            }, [plugins, skills, query, view, groupId, groupMembers, data, origin, shape, kw]);
+            }, [plugins, skills, query, view, groupId, groupMembers, data, origin, shape]);
             const tree = useMemo(() => {
                 const order = [];
                 const byModule = new Map();
@@ -1221,6 +1216,12 @@ window.__ModuleLoader__.load({
                 else next.delete(key);
                 setPicked(next);
                 lastPickRef.current = key;
+            };
+            const removeRowsFromGroup = async (items) => {
+                if (groupId === null || items.length === 0) return;
+                await act("group.remove", { id: groupId, members: items }, (result) => {
+                    flash(fmt(t, "groupRemoved", { n: result?.removed ?? items.length }));
+                });
             };
             const addRowsToGroup = async (group, items) => {
                 await act("group.add", { id: group.id, members: items }, (result) => {
@@ -1397,18 +1398,7 @@ window.__ModuleLoader__.load({
                 })));
             const chips = h("div", { style: { padding: "0 2px 2px" } },
                 chipRow(t("facetOrigin"), ORIGINS, origin, setOrigin),
-                chipRow(t("facetShape"), SHAPES, shape, setShape),
-                kwOptions.length === 0 ? null : h("div", {
-                    style: { display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", padding: "0 2px 6px" },
-                },
-                    h("span", { style: { width: 24, flex: "0 0 auto", fontSize: 10, color: T.text3 } }, t("facetWord")),
-                    h(ActionChip, { label: t("lensAll"), tone: kw === null ? "brand" : "neutral", onClick: () => setKw(null) }),
-                    ...kwOptions.map(item => h(ActionChip, {
-                        key: item.word,
-                        label: `${item.word} ${item.n}`,
-                        tone: kw === item.word ? "brand" : "neutral",
-                        onClick: () => setKw(kw === item.word ? null : item.word),
-                    }))));
+                chipRow(t("facetShape"), SHAPES, shape, setShape));
 
             // Head and foot stay put; only the drawers scroll, so the two "new" buttons can
             // never be pushed off the bottom by a long list.
@@ -1645,6 +1635,7 @@ window.__ModuleLoader__.load({
                     setDragRows(items);
                 },
                 onRowDragEnd: () => setDragRows(null),
+                onRemove: groupId === null ? undefined : () => { void removeRowsFromGroup([{ kind: row.kind, id: row.id }]); },
                 onToggle: enabled => toggleRow(row.kind, row.id, enabled),
                 onEdit: (target) => setDialog({ kind: "mcpEdit", row: target }),
                 onDelete: (target) => setDialog({ kind: "mcpDelete", row: target }),
@@ -1715,7 +1706,7 @@ window.__ModuleLoader__.load({
                     }, node.module),
                     h(Badge, { tone: node.kind === "plugin" ? "brand" : "warn" }, node.kind === "plugin" ? t("kindPlugin") : t("kindSkill")),
                     h(Badge, null, `×${node.entries.length}`)),
-                    h("div", { style: { flex: "0 0 auto", display: "flex", alignItems: "center", gap: 8 } },
+            h("div", { style: { flex: "0 0 auto", display: "flex", alignItems: "center", gap: 8 } },
                         h("span", { style: { fontSize: 11, color: T.text3 } }, `${enabled}/${node.entries.length}`),
                         h(Switch, {
                             checked: allOn,
@@ -1764,6 +1755,12 @@ window.__ModuleLoader__.load({
             h("div", { style: { flex: 1 } }),
             h(ActionChip, { label: t("enable"), tone: "success", onClick: () => togglePicked(true), disabled: busy }),
             h(ActionChip, { label: t("disable"), tone: "danger", onClick: () => togglePicked(false), disabled: busy }),
+            groupId === null ? null : h(ActionChip, {
+                label: t("removeFromGroup"),
+                tone: "danger",
+                onClick: () => { void removeRowsFromGroup(selectedMembers()); },
+                disabled: busy,
+            }),
             h(ActionChip, {
                 label: t("addToGroup"),
                 tone: "brand",
@@ -1902,6 +1899,9 @@ window.__ModuleLoader__.load({
                     await act("preset.save", { name }, () => flash(`${t("presetSave")}: ${name}`));
                     setDialog(null);
                 },
+                onUpdatePreset: async (name) => {
+                    await act("preset.update", { name }, () => flash(fmt(t, "presetUpdated", { name })));
+                },
                 onApplyPreset: (name, mode) => {
                     const preset = (data?.presets ?? []).find(entry => entry.name === name);
                     const want = new Set([
@@ -1930,6 +1930,7 @@ window.__ModuleLoader__.load({
                     void runPresetApply(name, mode);
                 },
                 onApplyPresetNow: (name, mode) => runPresetApply(name, mode),
+                onAskPresetUpdate: (name) => setDialog({ kind: "presetUpdate", name }),
                 onRunGroupToggle: (group, enabled, skipShared) => runGroupToggle(group, enabled, skipShared),
                 onProbe: async (payload) => {
                     try { return await runOp("mcp.probe", payload); }
@@ -2204,7 +2205,7 @@ window.__ModuleLoader__.load({
         }
 
 
-        function Row({ row, t, picked, onPick, onToggle, busy, onEdit, onDelete, onTools, nested, failed, dragEnabled, onRowDragStart, onRowDragEnd }) {
+        function Row({ row, t, picked, onPick, onToggle, busy, onEdit, onDelete, onTools, nested, failed, dragEnabled, onRowDragStart, onRowDragEnd, onRemove }) {
             const [hover, setHover] = useState(false);
             const readOnly = row.manageable === false;
             const selfEntry = row.self === true;
@@ -2299,6 +2300,22 @@ window.__ModuleLoader__.load({
             row.mcp === true && row.mcpEditable === true
                 ? h(Button, { small: true, tone: "danger", onClick: () => onDelete(row), disabled: busy }, t("mcpDelete"))
                 : null,
+            onRemove === undefined ? null : h("button", {
+                type: "button",
+                onClick: onRemove,
+                title: t("removeFromGroup"),
+                style: {
+                    flex: "0 0 auto",
+                    padding: "2px 7px",
+                    borderRadius: 6,
+                    border: `1px solid ${T.border}`,
+                    background: "transparent",
+                    color: T.text3,
+                    fontSize: 11,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                },
+            }, t("groupRemove")),
             h("span", {
                 style: {
                     flex: "0 0 auto",
@@ -2665,7 +2682,7 @@ function McpEditDialog({ row, t, busy, onClose, onSave, onProbe }) {
 
         const RowMemo = React.memo(Row);
 
-        function DialogHost({ dialog, t, busy, groups, data, onClose, onSaveMcp, onDeleteMcp, onSaveTool, onProbe, act, flash, onImportMarket, onApplyAuto, onSaveGroup, onSaveCollection, onDeleteCollection, onSavePreset, onApplyPreset, onApplyPresetNow, onRunGroupToggle }) {
+        function DialogHost({ dialog, t, busy, groups, data, onClose, onSaveMcp, onDeleteMcp, onSaveTool, onProbe, act, flash, onImportMarket, onApplyAuto, onSaveGroup, onSaveCollection, onDeleteCollection, onSavePreset, onApplyPreset, onApplyPresetNow, onUpdatePreset, onAskPresetUpdate, onRunGroupToggle }) {
             const [name, setName] = useState(dialog.kind === "rename" ? dialog.group.name : "");
             const foot = (children) => children;
             const mcpIds = new Set((data === null ? [] : data.plugins).filter(row => row.mcp === true).map(row => row.id));
@@ -3008,7 +3025,18 @@ function McpEditDialog({ row, t, busy, onClose, onSave, onProbe }) {
                         fmt(t, "marketImportRow", { members: entry.members, packages: entry.packages }))))));
             }
 
-            if (dialog.kind === "presets") {
+            if (dialog.kind === "presetUpdate") {
+            return h(Dialog, {
+                title: t("presetUpdateTitle"),
+                hint: fmt(t, "presetUpdateBody", { name: dialog.name }),
+                onClose,
+                footer: [
+                    h(Button, { key: "c", onClick: onClose }, t("cancel")),
+                    h(Button, { key: "u", tone: "primary", disabled: busy, onClick: () => { onClose(); void onUpdatePreset(dialog.name); } }, t("presetUpdate")),
+                ],
+            });
+        }
+        if (dialog.kind === "presets") {
                 const presets = data === null ? [] : data.presets;
                 const enabledCount = data === null ? 0 : data.plugins.filter(row => row.enabled).length + data.skills.filter(row => row.enabled).length;
                 return h(Dialog, {
@@ -3045,6 +3073,7 @@ function McpEditDialog({ row, t, busy, onClose, onSave, onProbe }) {
                         h("div", { style: { fontSize: 11, color: T.text3 } },
                             fmt(t, "membersCount", { n: preset.enabled.plugin.length + preset.enabled.skill.length })
                             + (mcpInPreset(preset) === 0 ? "" : " · " + fmt(t, "presetMcpCount", { n: mcpInPreset(preset) })))),
+                    h(Button, { small: true, disabled: busy, onClick: () => onAskPresetUpdate(preset.name) }, t("presetUpdate")),
                     h(Button, { small: true, disabled: busy, onClick: () => onApplyPreset(preset.name, "exact") }, t("presetApply")),
                     h(Button, { small: true, disabled: busy, onClick: () => onApplyPreset(preset.name, "only-enable") }, t("presetOnlyOn")),
                     h(Button, {

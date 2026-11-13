@@ -355,3 +355,9 @@ First stable release: plugins, skills and MCP servers in one panel.
 
 - One list for plugins and skills, per-row switches, groups with bulk enable/disable,
   presets, rule-based auto grouping, and two entry points (Plugins tab + sidebar panel).
+## 1.17.4
+
+- 筛选回到两根轴：来源（官方 / 第三方 / 技能 / MCP）与形态（有界面 / 纯后端）。第三行「词」连同 `kw` 状态、`kwMatch`、`kwOptions` 一起删掉 —— 关键词能描述标签，但描述不了「这一组该不该开」。
+- 分组多了一个「移出」：组内每一行右侧有「移出」，勾选多条时选择条里也有「从本组移出」（`group.remove`，只删成员，不碰开关，也不删组）。
+- 预设可以原地更新：预设行多了「更新」，先弹确认再 `preset.update` 用当前开关状态覆盖，不用重打名字再存一遍。
+- 修两处白屏：①「移出」按钮一度被插进模块父行（那里没有 `onRemove`），渲染即抛 ReferenceError；②DialogHost 的 props 里残留一行 `onUpdatePreset,` 简写，指到一个不存在的变量 —— 任何对话框打开时都会炸。现在两个都只改到正确的位置，并且 `node --check` + 冒烟 125/125 都过。

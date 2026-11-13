@@ -179,3 +179,5 @@ and `POST /tool-hub/api/op` — guarded by the same origin check the bundled mar
 ## License
 
 MIT
+- Rows in a group carry a "move out" action (also on the selection bar): it drops the member from that group only, leaving switches and the group itself alone.
+- Presets can be refreshed in place: "Update" overwrites the named preset with what is on right now, after a confirmation.
