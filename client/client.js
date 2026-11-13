@@ -237,6 +237,7 @@ window.__ModuleLoader__.load({
                 confirmExact: '应用将同时关闭 {off} 个当前启用的条目。继续？',
                 applyAnyway: '继续应用',
                 membersCount: '{n} 项',
+            statHint: "已启用 {on} 个 · 未启用 {off} 个",
                 kindPlugin: '插件',
                 kindSkill: '技能',
                 skillRoots: '技能目录',
@@ -404,6 +405,7 @@ window.__ModuleLoader__.load({
                 confirmExact: 'Applying also switches off {off} rows that are on now. Continue?',
                 applyAnyway: 'Apply anyway',
                 membersCount: '{n} items',
+            statHint: "{on} on · {off} off",
                 kindPlugin: 'Plugin',
                 kindSkill: 'Skill',
                 skillRoots: 'Skill folders',
@@ -882,6 +884,7 @@ window.__ModuleLoader__.load({
             },
         }, h(GroupRow, {
             group,
+            stats: groupStats.get(group.id) ?? null,
             accent: groupAccent(group.members.length).accent,
             accentDepth: groupAccent(group.members.length).accentDepth,
             t,
@@ -898,6 +901,33 @@ window.__ModuleLoader__.load({
         }));
             const plugins = data === null ? [] : data.plugins;
             const skills = data === null ? [] : data.skills;
+        // How much of each group is actually running. The rail answers "what will I break if I
+        // flip this?" — a group whose members are all on is a different thing from a half-on one.
+        const liveByMember = useMemo(() => {
+            const map = new Map();
+            for (const row of plugins) map.set(`plugin:${row.id}`, row.enabled === true);
+            for (const row of skills) map.set(`skill:${row.id}`, row.enabled === true);
+            return map;
+        }, [plugins, skills]);
+        const groupStats = useMemo(() => {
+            const out = new Map();
+            for (const group of groups) {
+                let on = 0;
+                for (const member of group.members) if (liveByMember.get(`${member.kind}:${member.id}`) === true) on += 1;
+                out.set(group.id, { on, total: group.members.length });
+            }
+            return out;
+        }, [groups, liveByMember]);
+        const sumStats = list => list.reduce((acc, group) => {
+            const stat = groupStats.get(group.id);
+            if (stat !== undefined) {
+                acc.on += stat.on;
+                acc.total += stat.total;
+            }
+            return acc;
+        }, { on: 0, total: 0 });
+        const statText = stat => (stat.total === 0 ? "0" : `${stat.on}/${stat.total}`);
+
 
             const memberKey = (kind, id) => `${kind}:${id}`;
 
@@ -1231,7 +1261,10 @@ window.__ModuleLoader__.load({
                         style: { minWidth: 0, fontSize: 11.5, letterSpacing: "0.04em", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
                         title: drawer.collection.name,
                     }, drawer.collection.name),
-                    h("span", { style: { fontSize: 10.5, color: T.text3 } }, `${drawer.list.length}`)),
+                    h("span", {
+                        title: fmt(t, "statHint", { on: sumStats(drawer.list).on, off: sumStats(drawer.list).total - sumStats(drawer.list).on }),
+                        style: { fontSize: 10.5, color: T.text3, fontVariantNumeric: "tabular-nums" },
+                    }, statText(sumStats(drawer.list)))),
                     drawer.collection.id === "default"
                         ? null
                         : h(MiniIcon, {
@@ -1725,9 +1758,12 @@ window.__ModuleLoader__.load({
             return { accent: T.danger, accentDepth: 95 };
         }
 
-        function GroupRow({ group, t, accent, accentDepth, active, onSelect, onEnable, onRename, onDelete, onMoveUp, onMoveDown }) {
+        function GroupRow({ group, stats, t, accent, accentDepth, active, onSelect, onEnable, onRename, onDelete, onMoveUp, onMoveDown }) {
             const [hover, setHover] = useState(false);
             const count = group.members.length;
+            const live = stats ?? { on: 0, total: count };
+            const allOn = live.total > 0 && live.on === live.total;
+            const noneOn = live.on === 0;
             return h("div", {
                 onMouseEnter: () => setHover(true),
                 onMouseLeave: () => setHover(false),
@@ -1798,18 +1834,24 @@ window.__ModuleLoader__.load({
             }),
             group.stale > 0 ? h("span", { title: fmt(t, "stale", { n: group.stale }), style: { color: T.warn, fontSize: 11, fontWeight: 700 } }, "!") : null,
             h("span", {
+                title: fmt(t, "statHint", { on: live.on, off: live.total - live.on }),
                 style: {
-                    minWidth: 22,
+                    minWidth: 26,
                     padding: "1px 6px",
                     borderRadius: 999,
-                    background: tint(accent ?? T.brand, Math.round((accentDepth ?? 40) * 0.16)),
-                    color: T.text2,
+                    background: allOn
+                        ? tint(T.success, 16)
+                        : noneOn
+                            ? tint(T.text3, 12)
+                            : tint(accent ?? T.brand, Math.round((accentDepth ?? 40) * 0.16)),
+                    color: allOn ? T.success : noneOn ? T.text3 : T.text2,
                     fontSize: 11,
                     fontWeight: 600,
                     textAlign: "center",
                     flex: "0 0 auto",
+                    fontVariantNumeric: "tabular-nums",
                 },
-            }, `${count}`)),
+            }, live.total === 0 ? "0" : `${live.on}/${live.total}`)),
             Array.isArray(group.tags) && group.tags.filter(tag => tag !== "base" && tag !== "task" && tag !== "skill").length > 0
                 ? h("div", { style: { display: "flex", gap: 4, flexWrap: "wrap", marginTop: -2 } },
                     group.tags.filter(tag => tag !== "base" && tag !== "task" && tag !== "skill").slice(0, 4).map(tag => h("span", {

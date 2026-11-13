@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.14.0
+
+- **The rail tells you what is actually running**: every group shows `on/total` (`5/8`), green when
+  the whole group is live, grey when nothing is; the drawer header sums its groups. Hovering any
+  count spells it out ("3 on · 5 off").
+
 ## 1.13.0
 
 - **Tags come from the package, or not at all.** Group labels are now exactly the `keywords` a

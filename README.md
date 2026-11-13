@@ -47,6 +47,8 @@ the plugin hot-loads.
 - **The rail shows on 全部 only**: picking 插件 / 技能 / MCP gives the list the full width.
 - **Labels are the package's own `keywords`**, up to four. Nothing inferred is shown as a label;
   the topic words we guess only make rows findable in search.
+- **Live counts**: every group shows `on/total`, and the drawer header sums its groups, so you can
+  see at a glance whether flipping a group would change anything.
 - **Groups**: create, rename, delete, add the current selection, and flip a whole group on or off.
   Groups over 20 members ask first.
 - **Auto grouping**: one button proposes exactly four buckets — **官方** (ships with the client),
