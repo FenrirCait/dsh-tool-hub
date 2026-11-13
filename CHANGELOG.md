@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.10.0
+
+- **Removed the agent-preset editor.** Writing preset declaration rows from the panel kept producing
+  states the registry accepted but did not compose, and the host's own rules (`resolve()` succeeding,
+  `register()` tolerating a broken record, per-layer shadowing) made every half-fix worse. The feature
+  is gone; the panel no longer touches `cordis.patch.yml` for presets, and no preset row it wrote
+  remains on this machine.
+- **Automatic grouping is four buckets**: 官方 / MCP 服务器 / 通用 / 用户下载, decided in that order
+  from the module name, the row meta and the description keywords. MCP rows are claimed before the
+  official prefix swallows them, which is why they finally have their own bucket.
+- **Collections**: hand-made groups sit in drawers. One 默认分组群 exists from the start, more can be
+  added from the rail, and each can be renamed or deleted; deleting one moves its groups back to the
+  default drawer instead of deleting them.
+- An empty group keeps its rename/delete controls; only 启用/禁用 are greyed out, because there is
+  nothing to switch.
+
 ## 1.9.2
 
 - Preset contents are now editable from the panel: **Choose contents** lists every plugin and MCP server the installation runs, ticks what the preset declares, and rewrites only that row's `plugins` list. Entries that were already declared keep their original lines, so hand-written config and `!!js` expressions survive.

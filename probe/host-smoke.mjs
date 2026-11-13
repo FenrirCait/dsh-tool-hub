@@ -9,7 +9,6 @@ import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { parsePresetRows } from '../lib/presets.js'
 
 const home = join(tmpdir(), `tool-hub-smoke-${Date.now()}`)
 process.env.DSH_HOME = home
@@ -127,21 +126,6 @@ const ctx = {
     if (name === 'profileContext') return { dir: profileDir }
     // The registry reloads the patch through HMR; reading the file back is the closest the fixture
     // can get to that, and it is what makes "created but broken" observable.
-    if (name === 'agentPresets') {
-      return {
-        async list() {
-          const text = await readFile(join(profileDir, 'cordis.patch.yml'), 'utf8')
-          return parsePresetRows(text).map(row => ({ id: row.id, ...(row.name === '' ? {} : { name: row.name }), order: row.order ?? 100 }))
-        },
-        async resolve(id) {
-          const text = await readFile(join(profileDir, 'cordis.patch.yml'), 'utf8')
-          const row = parsePresetRows(text).find(entry => entry.id === id)
-          if (row === undefined) throw new Error(`Unknown agent preset: ${id}`)
-          if (id.startsWith('broken')) return { id, broken: 'row 1 names no plugin' }
-          return { id }
-        },
-      }
-    }
     if (name === 'tools') return { view: () => ({ knownNames: mcpTools, restrictableNames: mcpTools }) }
     if (name === 'agents') return { list: () => [] }
     return undefined
@@ -332,7 +316,7 @@ check('auto groups in snapshot', snap.data.groups.length >= 2 && snap.data.group
 
 // ── 6. group toggle ────────────────────────────────────────────────────────
 const foundation = snap.data.groups.find(group => group.role === 'base')
-check('auto groups carry role', snap.data.groups.every(group => group.role === 'official' || group.role === 'base' || group.role === 'rest'), snap.data.groups.map(group => `${group.name}:${group.role}`).join(', '))
+check('auto groups carry role', snap.data.groups.every(group => group.role === 'official' || group.role === 'mcp' || group.role === 'base' || group.role === 'rest'), snap.data.groups.map(group => `${group.name}:${group.role}`).join(', '))
 const reordered = await op('group.reorder', { order: [...snap.data.groups].reverse().map(group => group.id) })
 check('reorder persists', reordered.ok === true && reordered.data.order[0] === snap.data.groups[snap.data.groups.length - 1].id, JSON.stringify(reordered.data?.order))
 r = await op('group.toggle', { id: foundation.id, enabled: true })
@@ -395,57 +379,42 @@ check('wrong method refused', wrongMethod.status === 405)
 r = await op('nope', {})
 check('unknown op answers an error', r.ok === false && r.error.code === 'bad-op', JSON.stringify(r.error))
 
-// ── 10. agent presets ─────────────────────────────────────────────────────
-const patch0 = await readFile(join(profileDir, 'cordis.patch.yml'), 'utf8')
-r = await op('presets.list', {})
-check('presets listed', r.ok === true && r.data.rows.some(row => row.id === 'fixture-default'), JSON.stringify(r.error))
-check('preset default known', r.data.defaultId === 'fixture-default', JSON.stringify(r.data))
-check('registry seen', r.data.registry === true)
-r = await op('presets.create', { id: 'probe-one', name: 'Probe one', description: 'written by the smoke test', order: 42 })
-check('preset created', r.ok === true && r.data.ok === true && r.data.verified === true, JSON.stringify(r))
-const patch1 = await readFile(join(profileDir, 'cordis.patch.yml'), 'utf8')
-check('preset row appended', patch1.includes('id: preset-probe-one') && patch1.includes('plugins: []'), patch1.slice(-220))
-check('preset file kept its tail row', patch1.includes('- id: keep-me'))
-check('preset backup written', typeof r.data.backup === 'string' && (await stat(r.data.backup)).size > 0, String(r.data.backup))
-check('preset listed after create', (await op('presets.list', {})).data.rows.some(row => row.id === 'probe-one'))
-check('preset duplicate refused', (await op('presets.create', { id: 'probe-one' })).ok === false)
-check('preset bad id refused', (await op('presets.create', { id: 'Bad Id' })).ok === false)
-r = await op('presets.create', { id: 'broken-one' })
-check('broken preset rolled back', r.ok === false && r.error.code === 'preset-broken', JSON.stringify(r.error))
-check('broken preset left no row', !(await readFile(join(profileDir, 'cordis.patch.yml'), 'utf8')).includes('id: preset-broken-one'))
-check('default preset cannot be deleted', (await op('presets.delete', { id: 'fixture-default' })).ok === false)
+// ── 10. collections and role buckets ──────────────────────────────────────
+r = await op('snapshot', {})
+check('a default collection always exists', JSON.stringify((r.data.collections ?? []).map(entry => entry.id)) === '["default"]', JSON.stringify(r.data.collections))
 
-// The content editor: what a preset may list, and what happens when it lists it.
-r = await op('presets.inventory', {})
-const inventory = r.ok === true ? r.data.rows : []
-check('inventory listed', r.ok === true && inventory.length >= 5, JSON.stringify(r.error))
-check('inventory hides the runtime', inventory.some(row => row.moduleName === 'plugin-manager' && row.selectable === false), JSON.stringify(inventory.map(row => [row.moduleName, row.selectable])))
-check('inventory offers a plugin', inventory.some(row => row.moduleName === 'billion-context' && row.selectable === true))
-check('inventory skips the panel itself', !inventory.some(row => row.moduleName === 'dsh-tool-hub'))
-check('inventory knows MCP rows', inventory.some(row => row.moduleName === '@deepseek-ai/dsh-mcp-client' && row.kind === 'mcp'))
+r = await op('collection.save', { name: '写作' })
+const madeCollection = (r.data.state?.collections ?? []).find(entry => entry.name === '写作')
+check('collection created', r.ok === true && madeCollection !== undefined, JSON.stringify(r.data?.state?.collections ?? r.error))
+check('collection id is slug safe', /^[a-z0-9][a-z0-9_-]{0,31}$/.test(madeCollection?.id ?? ''), String(madeCollection?.id))
 
-r = await op('presets.create', { id: 'content-one', name: 'Content' })
-check('content preset created', r.ok === true && r.data.ok === true, JSON.stringify(r.error))
-r = await op('presets.edit', { id: 'content-one', plugins: ['billion-context', 'ui-theme'] })
-check('preset content saved', r.ok === true && r.data.changed === true && r.data.verified === true, JSON.stringify(r))
-const patch2 = await readFile(join(profileDir, 'cordis.patch.yml'), 'utf8')
-check('preset content written', /plugins:\n\s+- id: billion-context\n\s+name: 'billion-context'/.test(patch2) && patch2.includes("- id: ui-theme"), patch2.slice(-320))
-check('preset content listed', JSON.stringify((await op('presets.list', {})).data.rows.find(row => row.id === 'content-one')?.items?.map(item => item.name)) === '["billion-context","ui-theme"]')
-r = await op('presets.edit', { id: 'content-one', plugins: ['billion-context'] })
-check('preset content shrinks', r.ok === true && !(await readFile(join(profileDir, 'cordis.patch.yml'), 'utf8')).includes("- id: ui-theme"), JSON.stringify(r.error))
-r = await op('presets.edit', { id: 'content-one', plugins: [] })
-check('preset content can be emptied', r.ok === true && /id: preset-content-one[\s\S]*?plugins: \[\]/.test(await readFile(join(profileDir, 'cordis.patch.yml'), 'utf8')), JSON.stringify(r.error))
-check('unknown module refused', (await op('presets.edit', { id: 'content-one', plugins: ['no-such-module'] })).error?.code === 'unknown-module')
-check('runtime module refused', (await op('presets.edit', { id: 'content-one', plugins: ['plugin-manager'] })).error?.code === 'preset-core-module')
-check('content edit kept neighbours', (await readFile(join(profileDir, 'cordis.patch.yml'), 'utf8')).includes('- id: keep-me'))
-r = await op('presets.delete', { id: 'content-one' })
-check('content preset removed', r.ok === true && r.data.ok === true, JSON.stringify(r.error))
+r = await op('collection.save', { id: madeCollection.id, name: '写作与检索' })
+check('collection renamed', r.ok === true && (r.data.state?.collections ?? []).some(entry => entry.id === madeCollection.id && entry.name === '写作与检索'), JSON.stringify(r.data?.state?.collections))
 
-r = await op('presets.delete', { id: 'probe-one' })
-check('preset deleted', r.ok === true && r.data.ok === true, JSON.stringify(r))
-check('preset row gone', !(await readFile(join(profileDir, 'cordis.patch.yml'), 'utf8')).includes('id: preset-probe-one'))
-check('preset delete kept the rest', (await op('presets.list', {})).data.rows.some(row => row.id === 'fixture-default'))
-void patch0
+r = await op('group.save', { name: '检索组', members: [{ kind: 'plugin', id: 'e1' }], collection: madeCollection.id })
+const shelved = (r.data.state?.groups ?? []).find(group => group.name === '检索组')
+check('group lands in the chosen drawer', shelved?.collection === madeCollection.id, JSON.stringify(shelved))
+check('a hand-made group is not an auto group', shelved?.auto === false)
+
+r = await op('group.save', { name: '空分组', members: [], collection: 'no-such-drawer' })
+const emptyGroup = (r.data.state?.groups ?? []).find(group => group.name === '空分组')
+check('unknown drawer falls back to default', emptyGroup?.collection === 'default', JSON.stringify(emptyGroup))
+check('an empty group is allowed', emptyGroup !== undefined && emptyGroup.members.length === 0)
+
+r = await op('collection.delete', { id: 'default' })
+check('default drawer cannot be deleted', r.ok === false && r.error.code === 'default-collection', JSON.stringify(r.error))
+
+r = await op('collection.delete', { id: madeCollection.id })
+const afterDelete = (r.data.state?.groups ?? []).find(group => group.name === '检索组')
+check('deleting a drawer keeps its groups', afterDelete !== undefined, JSON.stringify(r.data?.state?.groups?.map(group => group.name)))
+check('orphans move back to default', afterDelete?.collection === 'default', JSON.stringify(afterDelete))
+
+// auto grouping: four buckets, and MCP servers get their own
+r = await op('auto.preview', {})
+const autoPlan = Array.isArray(r.data.plan) ? r.data.plan : []
+const autoRoles = autoPlan.map(entry => entry.role)
+check('auto groups carry roles', autoRoles.every(role => ['official', 'mcp', 'base', 'rest'].includes(role)), JSON.stringify(autoRoles))
+check('mcp rows are their own bucket', autoPlan.some(entry => entry.role === 'mcp'), JSON.stringify(autoPlan.map(entry => [entry.name, entry.members.length])))
 
 server.close()
 const failed = results.filter(row => row.ok !== true)
@@ -457,3 +426,4 @@ if (failed.length > 0) {
 else {
   console.log(`fixture kept: ${home}`)
 }
+

@@ -74,34 +74,6 @@ window.__ModuleLoader__.load({
                 viewPlugins: '插件',
                 viewSkills: '技能',
                 viewMcp: 'MCP · {n}',
-                viewAgent: '模式 · {n}',
-                agentNew: '新建模式',
-                agentNewTitle: '新建 Agent 模式',
-                agentHint: '模式是 profile 的 cordis.patch.yml 里的一条声明行：新行不改动任何既有模式，保存后由 HMR 生效。',
-                agentId: '标识（小写字母、数字、- 和 _）',
-                agentName: '显示名',
-                agentDesc: '说明（可选）',
-                agentPlugins: '{n} 个插件',
-                agentDefault: '默认',
-                agentBroken: '加载失败',
-                agentMissing: '未加载',
-                agentCreate: '创建',
-                agentCreated: '模式「{name}」已就绪',
-                agentDeleted: '已删除 {name}',
-                agentDelete: '删除',
-                agentDeleteTitle: '删除 Agent 模式',
-                agentDeleteBody: '将从 profile 的 cordis.patch.yml 里删掉模式「{name}」这一条声明，文件其余部分不动。',
-                agentEmpty: '还没有可编辑的模式声明。',
-                agentRegistryOff: '宿主没有暴露 agentPresets 服务，只能读文件里已有的声明。',
-                agentBuiltin: '内置',
-                agentBuiltinHint: '这个模式由 bundle 层声明，没有可在 profile 里改的行。',
-                agentContent: '选择内容',
-                agentContentHint: '挑这个模式要带哪些插件与 MCP 服务器。',
-                agentContentTitle: '模式内容',
-                agentContentHint2: '勾选「{name}」要声明的条目，写进它在 profile 里的 plugins 列表。',
-                agentContentCount: '已选 {n} 项',
-                agentContentSaved: '已保存 {n} 项',
-                agentCoreBadge: '宿主必需',
                 pillMcp: '{n} 个 MCP',
                 mcpBadge: 'MCP',
                 mcpEdit: '编辑配置',
@@ -209,10 +181,10 @@ window.__ModuleLoader__.load({
                 autoEmpty: '没有可自动分组的条目',
                 resizeRail: '拖动调整左栏宽度，双击复位',
             roleOfficial: '官方',
-            roleBase: '通用底座',
-            roleRest: '未排序',
+            roleBase: '通用',
+            roleRest: '用户下载',
             toggleBaseOff: '这是常开底座，关掉可能连累整条链（会先确认）',
-            roleTask: '专项任务',
+            roleMcp: 'MCP 服务器',
             roleSkill: '技能',
             roleLoose: '手动分组',
             railEmptyTitle: '还没有分组',
@@ -223,6 +195,15 @@ window.__ModuleLoader__.load({
                 close: '关闭',
                 save: '保存',
                 groupName: '分组名称',
+            collectionNew: '新建分组群',
+            collectionHint: '分组群只是把分组收在一起，不改变分组的开关行为。',
+            collectionName: '分组群名称',
+            collectionAddGroup: '在这个分组群里新建分组',
+            collectionRename: '重命名分组群',
+            collectionDelete: '删除分组群',
+            collectionDeleteTitle: '删除分组群',
+            collectionDeleteBody: '「{name}」会被删掉，里面的分组移到默认分组群，分组本身不会消失。',
+            collectionDeleted: '分组群已删除',
                 stale: '{n} 个成员已不在清单里',
                 moved: '{n} 项已更新',
                 failed: '{n} 项失败',
@@ -254,34 +235,6 @@ window.__ModuleLoader__.load({
                 viewPlugins: 'Plugins',
                 viewSkills: 'Skills',
                 viewMcp: 'MCP · {n}',
-                viewAgent: 'Presets · {n}',
-                agentNew: 'New preset',
-                agentNewTitle: 'New agent preset',
-                agentHint: 'A preset is one declaration row in the profile cordis.patch.yml. A new row leaves every existing preset untouched, and HMR applies it.',
-                agentId: 'Id (lowercase letters, digits, - and _)',
-                agentName: 'Display name',
-                agentDesc: 'Description (optional)',
-                agentPlugins: '{n} plugins',
-                agentDefault: 'default',
-                agentBroken: 'broken',
-                agentMissing: 'not loaded',
-                agentCreate: 'Create',
-                agentCreated: 'Preset "{name}" is ready',
-                agentDeleted: 'Deleted {name}',
-                agentDelete: 'Delete',
-                agentDeleteTitle: 'Delete agent preset',
-                agentDeleteBody: 'Removes the "{name}" declaration from the profile cordis.patch.yml; the rest of the file stays as it is.',
-                agentEmpty: 'No preset declarations to edit yet.',
-                agentRegistryOff: 'The host exposes no agentPresets service, so only declarations already in the file can be read.',
-                agentBuiltin: 'built-in',
-                agentBuiltinHint: 'This preset is declared by a bundle, so there is no profile row to edit.',
-                agentContent: 'Contents',
-                agentContentHint: 'Pick which plugins and MCP servers this preset declares.',
-                agentContentTitle: 'Preset contents',
-                agentContentHint2: 'Checked entries go into the plugins list of "{name}" in the profile patch.',
-                agentContentCount: '{n} selected',
-                agentContentSaved: 'Saved {n} entries',
-                agentCoreBadge: 'runtime',
                 pillMcp: '{n} MCP',
                 mcpBadge: 'MCP',
                 mcpEdit: 'Edit config',
@@ -389,10 +342,10 @@ window.__ModuleLoader__.load({
                 autoEmpty: 'Nothing to auto group',
                 resizeRail: 'Drag to resize the rail, double-click to reset',
             roleOfficial: 'OFFICIAL',
-            roleBase: 'BASE LAYER',
-            roleRest: 'UNSORTED',
+            roleBase: 'GENERAL',
+            roleRest: 'DOWNLOADED',
             toggleBaseOff: 'This is the always-on layer; switching it off can break the chain (asks first)',
-            roleTask: 'PER TASK',
+            roleMcp: 'MCP SERVERS',
             roleSkill: 'SKILLS',
             roleLoose: 'MANUAL',
             railEmptyTitle: 'No groups yet',
@@ -403,6 +356,15 @@ window.__ModuleLoader__.load({
                 close: 'Close',
                 save: 'Save',
                 groupName: 'Group name',
+            collectionNew: 'New collection',
+            collectionHint: 'A collection only shelves groups together; it does not change what they switch.',
+            collectionName: 'Collection name',
+            collectionAddGroup: 'New group in this collection',
+            collectionRename: 'Rename collection',
+            collectionDelete: 'Delete collection',
+            collectionDeleteTitle: 'Delete collection',
+            collectionDeleteBody: '“{name}” goes away and its groups move to the default collection. The groups themselves stay.',
+            collectionDeleted: 'Collection deleted',
                 stale: '{n} members are no longer listed',
                 moved: '{n} updated',
                 failed: '{n} failed',
@@ -435,10 +397,9 @@ window.__ModuleLoader__.load({
         // are migrated to "rest" on load, but the label stays readable if one slips through.
         function roleLabel(t, role) {
             const key = role === "official" ? "roleOfficial"
-                : role === "base" ? "roleBase"
-                    : role === "task" ? "roleTask"
-                        : role === "skill" ? "roleSkill"
-                            : "roleRest";
+                : role === "mcp" ? "roleMcp"
+                    : role === "base" ? "roleBase"
+                        : "roleRest";
             return t(key);
         }
 
@@ -710,27 +671,6 @@ window.__ModuleLoader__.load({
             }, [refresh, flash]);
 
             const groups = data === null ? [] : data.groups;
-        const [agentInfo, setAgentInfo] = useState(null);
-        const [agentError, setAgentError] = useState(null);
-        const loadAgents = useCallback(async () => {
-            try {
-                const result = await runOp("presets.list", {});
-                setAgentInfo(result);
-                setAgentError(null);
-            }
-            catch (failure) {
-                setAgentError(failure.message);
-            }
-        }, []);
-        useEffect(() => {
-            if (view === "agent" && agentInfo === null && agentError === null) void loadAgents();
-        }, [view, agentInfo, agentError, loadAgents]);
-        useEffect(() => {
-            if (view !== "agent" && (agentInfo !== null || agentError !== null)) {
-                setAgentInfo(null);
-                setAgentError(null);
-            }
-        }, [view, agentInfo, agentError]);
         const [dragId, setDragId] = useState(null);
         const [dropAt, setDropAt] = useState(null);
         const [railWidth, setRailWidth] = useState(() => {
@@ -771,6 +711,7 @@ window.__ModuleLoader__.load({
         };
         const roleSections = [
             { role: "official", key: "roleOfficial" },
+            { role: "mcp", key: "roleMcp" },
             { role: "base", key: "roleBase" },
             { role: "rest", key: "roleRest" },
         ];
@@ -783,12 +724,21 @@ window.__ModuleLoader__.load({
                 list: groups.filter(group => group.role === section.role),
             }))
             .filter(section => section.list.length > 0);
-        const loose = groups.filter(group => group.role !== "official" && group.role !== "base" && group.role !== "rest");
+        // Hand-made groups live in drawers. The default drawer always exists; the rest are the
+        // user's own, so a fresh install shows one section called 默认分组群 rather than a
+        // scattering of one-off groups.
+        const collections = (data?.collections ?? []).slice();
+        if (collections.length === 0) collections.push({ id: "default", name: "默认分组群", order: 0 });
+        const drawers = collections.map(collection => ({
+            collection,
+            list: groups.filter(group => group.role === null && (group.collection ?? "default") === collection.id),
+        }));
+        const sectionKey = group => (group.role === null ? `col:${group.collection ?? "default"}` : `role:${group.role}`);
         // The order array has to be the order on screen, or the move is computed against a list the
         // user cannot see; flatten the rail first, then move inside that array.
         const railIds = () => [
             ...sections.flatMap(section => section.list.map(group => group.id)),
-            ...loose.map(group => group.id),
+            ...drawers.flatMap(drawer => drawer.list.map(group => group.id)),
         ];
         // Dropping a row moves it in front of the row it was dropped on. A group belongs to a role
         // section, so a move within the section is meaningful; a drop from one section onto another
@@ -799,7 +749,7 @@ window.__ModuleLoader__.load({
             const fromGroup = groups.find(group => group.id === fromId);
             const toGroup = groups.find(group => group.id === toId);
             if (fromGroup === undefined || toGroup === undefined) return;
-            if ((fromGroup.role ?? null) !== (toGroup.role ?? null)) return;
+            if (sectionKey(fromGroup) !== sectionKey(toGroup)) return;
             const ids = railIds();
             const from = ids.indexOf(fromId);
             if (from < 0 || ids.indexOf(toId) < 0) return;
@@ -817,7 +767,7 @@ window.__ModuleLoader__.load({
             if (group === undefined) return;
             // Same-section neighbours only: the section a group belongs to is part of its identity,
             // so "move up" past the section header would land in an order the renderer re-sorts away.
-            const siblings = groups.filter(entry => (entry.role ?? null) === (group.role ?? null)).map(entry => entry.id);
+            const siblings = groups.filter(entry => sectionKey(entry) === sectionKey(group)).map(entry => entry.id);
             const at = siblings.indexOf(id);
             const next = at + delta;
             if (at < 0 || next < 0 || next >= siblings.length) return;
@@ -1027,21 +977,6 @@ window.__ModuleLoader__.load({
 
             const openPresets = () => setDialog({ kind: "presets" });
 
-            /** Load what a preset could contain, then open the checklist on top of it. */
-            const openPresetContent = async (row) => {
-                setBusy(true);
-                try {
-                    const result = await runOp("presets.inventory", {});
-                    setDialog({ kind: "agentContent", row, inventory: result.rows });
-                }
-                catch (failure) {
-                    flash(failure.message);
-                }
-                finally {
-                    setBusy(false);
-                }
-            };
-
             const runGroupToggle = async (group, enabled) => {
                 await act("group.toggle", { id: group.id, enabled }, (result) => {
                     const failed = result.results.filter(row => row.ok !== true).length;
@@ -1092,13 +1027,6 @@ window.__ModuleLoader__.load({
                 view === "mcp"
                     ? h(Button, { onClick: () => setDialog({ kind: "mcpEdit", row: null }), disabled: busy }, t("mcpCreate"))
                     : null,
-                view === "agent"
-                    ? h(Button, {
-                        onClick: () => setDialog({ kind: "agentNew" }),
-                        disabled: busy,
-                        title: t("agentHint"),
-                    }, t("agentNew"))
-                    : null,
                 view === "mcp" && (data?.panelDeny ?? []).length > 0
                     ? h(Button, {
                         onClick: () => { void act("tool.import", {}, result => flash(fmt(t, "toolsImported", { n: result.added }))); },
@@ -1120,7 +1048,7 @@ window.__ModuleLoader__.load({
             const tabs = h("div", {
                 style: { display: "flex", gap: 4, padding: "0 16px 10px", alignItems: "center" },
             },
-            [["all", t("viewAll")], ["plugin", t("viewPlugins")], ["skill", t("viewSkills")], ["mcp", fmt(t, "viewMcp", { n: counts.mcp[0] })], ["agent", fmt(t, "viewAgent", { n: agentInfo === null ? 0 : agentInfo.rows.length })]].map(([key, label]) => h("button", {
+            [["all", t("viewAll")], ["plugin", t("viewPlugins")], ["skill", t("viewSkills")], ["mcp", fmt(t, "viewMcp", { n: counts.mcp[0] })]].map(([key, label]) => h("button", {
                 key,
                 type: "button",
                 onClick: () => {
@@ -1164,7 +1092,7 @@ window.__ModuleLoader__.load({
             h("button", {
                 type: "button",
                 title: t("newGroup"),
-                onClick: () => setDialog({ kind: "newGroup" }),
+                onClick: () => setDialog({ kind: "newGroup", collection: "default" }),
                 style: {
                     width: 20,
                     height: 20,
@@ -1212,13 +1140,55 @@ window.__ModuleLoader__.load({
                 }, t(section.key)),
                 ...section.list.map(group => groupRow(group)),
             ]),
-            loose.length > 0
-                ? h("div", {
-                    key: "role-loose",
-                    style: { margin: "10px 4px 3px", fontSize: 10.5, letterSpacing: "0.04em", color: T.text3, fontWeight: 600 },
-                }, t("roleLoose"))
-                : null,
-            loose.map(group => groupRow(group)),
+            ...drawers.flatMap(drawer => [
+                h("div", {
+                    key: `drawer-${drawer.collection.id}`,
+                    style: { display: "flex", alignItems: "center", gap: 5, margin: "12px 4px 3px" },
+                },
+                h("span", {
+                    style: { flex: 1, minWidth: 0, fontSize: 11.5, letterSpacing: "0.04em", color: T.text2, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+                    title: drawer.collection.name,
+                }, drawer.collection.name),
+                h("span", { style: { fontSize: 10.5, color: T.text3 } }, `${drawer.list.length}`),
+                h(MiniIcon, {
+                    label: "+",
+                    title: t("collectionAddGroup"),
+                    onClick: () => setDialog({ kind: "newGroup", collection: drawer.collection.id }),
+                }),
+                drawer.collection.id === "default"
+                    ? null
+                    : h(MiniIcon, {
+                        label: "✎",
+                        title: t("collectionRename"),
+                        onClick: () => setDialog({ kind: "renameCollection", collection: drawer.collection }),
+                    }),
+                drawer.collection.id === "default"
+                    ? null
+                    : h(MiniIcon, {
+                        label: "✕",
+                        title: t("collectionDelete"),
+                        danger: true,
+                        onClick: () => setDialog({ kind: "deleteCollection", collection: drawer.collection }),
+                    })),
+                ...drawer.list.map(group => groupRow(group)),
+            ]),
+            h("button", {
+                key: "new-collection",
+                type: "button",
+                onClick: () => setDialog({ kind: "newCollection" }),
+                style: {
+                    marginTop: 8,
+                    width: "100%",
+                    padding: "6px 8px",
+                    borderRadius: 8,
+                    border: `1px dashed ${T.border}`,
+                    background: "transparent",
+                    color: T.text3,
+                    fontSize: 11.5,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                },
+            }, `+ ${t("collectionNew")}`),
             groups.length === 0
                 ? h("div", {
                     style: {
@@ -1237,59 +1207,11 @@ window.__ModuleLoader__.load({
                     h(Button, { small: true, onClick: () => { void openAuto(); }, disabled: busy || data === null }, t("railEmptyAction")))
                 : null);
 
-            const agentCard = row => h("div", {
-                key: row.rowId === null || row.rowId === undefined ? `agent:${row.id === undefined ? row.name : row.id}` : row.rowId,
-                style: {
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                    padding: "9px 12px",
-                    borderRadius: 9,
-                    border: `1px solid ${T.borderSoft}`,
-                    background: T.card,
-                    marginBottom: 7,
-                },
-            },
-            h("div", { style: { flex: 1, minWidth: 0 } },
-                h("div", { style: { display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" } },
-                    h("span", { style: { fontSize: 13, fontWeight: 600 } }, row.name === "" ? row.id : row.name),
-                    row.id === agentInfo.defaultId ? h(Badge, { tone: "warn" }, t("agentDefault")) : null,
-                    row.broken !== null ? h(Badge, { tone: "danger", title: row.broken }, t("agentBroken")) : null,
-                    row.loaded !== true ? h(Badge, { tone: "plain" }, t("agentMissing")) : null,
-                    row.editable === false ? h(Badge, { tone: "plain" }, t("agentBuiltin")) : null,
-                    h("code", { style: { fontSize: 11.5, color: T.text3 } }, row.id),
-                    row.plugins === null ? null : h("span", { style: { fontSize: 11.5, color: T.text3 } }, fmt(t, "agentPlugins", { n: row.plugins }))),
-                row.description === "" ? null : h("div", { style: { marginTop: 3, fontSize: 12, color: T.text3 } }, row.description)),
-            h(ActionChip, {
-                label: t("agentContent"),
-                tone: "brand",
-                disabled: busy || row.editable === false,
-                title: row.editable === false ? t("agentBuiltinHint") : t("agentContentHint"),
-                onClick: () => { void openPresetContent(row); },
-            }),
-            h(ActionChip, {
-                label: t("agentDelete"),
-                tone: "danger",
-                disabled: busy || row.editable === false,
-                title: row.editable === false ? t("agentBuiltinHint") : undefined,
-                onClick: () => setDialog({ kind: "agentDelete", row }),
-            }));
-
-            const agentList = agentError !== null
-                ? h("div", { style: emptyStyle }, agentError)
-                : agentInfo === null
-                    ? h("div", { style: emptyStyle }, t("loading"))
-                    : agentInfo.rows.length === 0
-                        ? h("div", { style: emptyStyle }, t("agentEmpty"))
-                        : agentInfo.rows.map(agentCard);
-
             const list = h("div", { style: { flex: 1, minWidth: 0, display: "flex", flexDirection: "column" } },
                 h("div", { style: { flex: 1, overflow: "auto", padding: "10px 12px 12px" } },
                     data === null
                         ? h("div", { style: emptyStyle }, error === null ? t("loading") : error)
-                        : view === "agent"
-                            ? h("div", { key: "agent-view" }, agentList)
-                            : rows.length === 0
+                        : rows.length === 0
                             ? h("div", { style: emptyStyle }, groupId === null ? t("empty") : t("emptyGroup"))
                             : h("div", { key: "row-view" }, rows.map(row => h(Row, {
                                 key: memberKey(row.kind, row.id),
@@ -1403,18 +1325,6 @@ window.__ModuleLoader__.load({
                 groups,
                 data,
                 onClose: () => setDialog(null),
-                onAgentsChanged: () => {
-                    setAgentInfo(null);
-                    setAgentError(null);
-                },
-                onSavePresetContent: async (row, names) => {
-                    await act("presets.edit", { id: row.id, plugins: names }, (result) => {
-                        flash(fmt(t, "agentContentSaved", { n: result.plugins.length }));
-                    });
-                    setDialog(null);
-                    setAgentInfo(null);
-                    setAgentError(null);
-                },
                 onSaveMcp: async (id, config) => {
                     if (id === null) await act("mcp.create", { config }, () => flash(t("mcpSaved")));
                     else await act("mcp.save", { id, config }, () => flash(t("mcpSaved")));
@@ -1445,8 +1355,16 @@ window.__ModuleLoader__.load({
                     await act("auto.apply", {}, (result) => flash(fmt(t, "autoDone", { n: result.groups })));
                     setDialog(null);
                 },
-                onSaveGroup: async (name, members, id) => {
-                    await act("group.save", { name, members, id });
+                onSaveGroup: async (name, members, id, collection) => {
+                    await act("group.save", { name, members, id, collection });
+                    setDialog(null);
+                },
+                onSaveCollection: async (name, id) => {
+                    await act("collection.save", { name, id });
+                    setDialog(null);
+                },
+                onDeleteCollection: async (id) => {
+                    await act("collection.delete", { id }, () => flash(t("collectionDeleted")));
                     setDialog(null);
                 },
                 onSavePreset: async (name) => {
@@ -1700,12 +1618,19 @@ window.__ModuleLoader__.load({
                         },
                     }, tag)))
                 : null,
-            count === 0 ? null : h("div", { style: { display: "flex", alignItems: "center", gap: 4, flexWrap: "nowrap", minWidth: 0 } },
-                h(ActionChip, { label: t("enable"), title: t("toggleGroupOn"), tone: "success", onClick: () => onEnable(true) }),
+            h("div", { style: { display: "flex", alignItems: "center", gap: 4, flexWrap: "nowrap", minWidth: 0 } },
+                h(ActionChip, {
+                    label: t("enable"),
+                    title: t("toggleGroupOn"),
+                    tone: "success",
+                    disabled: count === 0,
+                    onClick: () => onEnable(true),
+                }),
                 h(ActionChip, {
                     label: t("disable"),
                     title: group.role === "base" ? t("toggleBaseOff") : t("toggleGroupOff"),
                     tone: group.role === "base" ? "danger" : "neutral",
+                    disabled: count === 0,
                     onClick: () => onEnable(false),
                 }),
                 h("div", { style: { flex: 1 } }),
@@ -1875,87 +1800,6 @@ window.__ModuleLoader__.load({
  * into that preset's `plugins:` block. Rows the runtime owns stay visible but disabled —
  * hiding them would make the list look incomplete rather than bounded.
  */
-function AgentContentDialog({ row, inventory, t, busy, onClose, onSave }) {
-    const presetName = row.name === "" ? row.id : row.name;
-    const initial = new Set(((row.items ?? []).map(item => item.name)).filter(name => typeof name === "string" && name !== ""));
-    const [checked, setChecked] = useState(initial);
-    const [filter, setFilter] = useState("");
-    const needle = filter.trim().toLowerCase();
-    const visible = needle === ""
-        ? inventory
-        : inventory.filter(entry => entry.moduleName.toLowerCase().includes(needle) || entry.title.toLowerCase().includes(needle));
-    const selectable = visible.filter(entry => entry.selectable === true);
-    const chosenCount = inventory.filter(entry => entry.selectable === true && checked.has(entry.moduleName)).length;
-    const toggle = (moduleName) => {
-        const next = new Set(checked);
-        if (next.has(moduleName)) next.delete(moduleName);
-        else next.add(moduleName);
-        setChecked(next);
-    };
-    return h(Dialog, {
-        title: t("agentContentTitle"),
-        hint: fmt(t, "agentContentHint2", { name: presetName }),
-        width: 620,
-        onClose,
-        footer: [
-            h(Button, { key: "c", onClick: onClose }, t("cancel")),
-            h(Button, {
-                key: "s",
-                tone: "primary",
-                disabled: busy,
-                onClick: () => onSave(inventory.filter(entry => entry.selectable === true && checked.has(entry.moduleName)).map(entry => entry.moduleName)),
-            }, t("save")),
-        ],
-    },
-    h("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 8 } },
-        h(Input, { grow: true, value: filter, onChange: setFilter, placeholder: t("toolsSearch") }),
-        h(Button, {
-            small: true,
-            disabled: busy || selectable.length === 0,
-            onClick: () => {
-                const next = new Set(checked);
-                for (const entry of selectable) next.add(entry.moduleName);
-                setChecked(next);
-            },
-        }, t("toolsAll")),
-        h(Button, {
-            small: true,
-            disabled: busy || selectable.length === 0,
-            onClick: () => {
-                const next = new Set(checked);
-                for (const entry of selectable) next.delete(entry.moduleName);
-                setChecked(next);
-            },
-        }, t("toolsNone"))),
-    h("div", { style: { maxHeight: 360, overflow: "auto", border: `1px solid ${T.borderSoft}`, borderRadius: 8 } },
-        visible.length === 0
-            ? h("div", { style: { padding: "14px 12px", fontSize: 12, color: T.text3 } }, t("toolsEmpty"))
-            : visible.map(entry => h("div", {
-                key: entry.moduleName,
-                style: {
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 9,
-                    padding: "7px 10px",
-                    borderTop: `1px solid ${T.borderSoft}`,
-                },
-            },
-            h("input", {
-                type: "checkbox",
-                checked: entry.selectable === true && checked.has(entry.moduleName),
-                disabled: busy || entry.selectable !== true,
-                onChange: () => toggle(entry.moduleName),
-                style: { accentColor: T.brand, cursor: entry.selectable === true ? "pointer" : "default" },
-            }),
-            h("div", { style: { flex: 1, minWidth: 0 } },
-                h("div", { style: { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" } },
-                    h("span", { style: { fontSize: 12.5, fontWeight: 550 } }, entry.title),
-                    h(Badge, { tone: entry.kind === "mcp" ? "brand" : "plain" }, entry.kind === "mcp" ? t("mcpBadge") : t("kindPlugin")),
-                    entry.official === true ? h(Badge, { tone: "success" }, t("officialBadge")) : null,
-                    entry.selectable !== true ? h(Badge, { tone: "warn", title: entry.reason ?? undefined }, t("agentCoreBadge")) : null),
-                h("code", { style: { fontSize: 11, color: T.text3 } }, entry.moduleName))))),
-    h("div", { style: { marginTop: 7, fontSize: 11.5, color: T.text3 } }, fmt(t, "agentContentCount", { n: chosenCount })));
-}
 
 function McpEditDialog({ row, t, busy, onClose, onSave, onProbe }) {
             const creating = row === null || row === undefined;
@@ -2248,13 +2092,8 @@ function McpEditDialog({ row, t, busy, onClose, onSave, onProbe }) {
             });
         }
 
-        function DialogHost({ dialog, t, busy, groups, data, onClose, onAgentsChanged, onSavePresetContent, onSaveMcp, onDeleteMcp, onSaveTool, onProbe, act, flash, onImportMarket, onApplyAuto, onSaveGroup, onSavePreset, onApplyPreset, onApplyPresetNow, onRunGroupToggle }) {
+        function DialogHost({ dialog, t, busy, groups, data, onClose, onSaveMcp, onDeleteMcp, onSaveTool, onProbe, act, flash, onImportMarket, onApplyAuto, onSaveGroup, onSaveCollection, onDeleteCollection, onSavePreset, onApplyPreset, onApplyPresetNow, onRunGroupToggle }) {
             const [name, setName] = useState(dialog.kind === "rename" ? dialog.group.name : "");
-            const [agentId, setAgentId] = useState("");
-            const [agentName, setAgentName] = useState("");
-            const [agentDesc, setAgentDesc] = useState("");
-            const [agentError, setAgentError] = useState(null);
-            const agentIdOk = /^[a-z0-9][a-z0-9_-]{0,31}$/.test(agentId);
             const foot = (children) => children;
             const mcpIds = new Set((data === null ? [] : data.plugins).filter(row => row.mcp === true).map(row => row.id));
             const mcpInPreset = (preset) => (preset?.enabled?.plugin ?? []).filter(id => mcpIds.has(id)).length;
@@ -2333,81 +2172,6 @@ function McpEditDialog({ row, t, busy, onClose, onSave, onProbe }) {
                 });
             }
 
-            if (dialog.kind === "agentNew") {
-                const submit = async () => {
-                    setAgentError(null);
-                    try {
-                        await act("presets.create", { id: agentId, name: agentName, description: agentDesc }, result => {
-                            flash(fmt(t, "agentCreated", { name: result.name || result.id }));
-                        });
-                        onAgentsChanged();
-                        onClose();
-                    }
-                    catch (failure) {
-                        setAgentError(failure.message);
-                    }
-                };
-                return h(Dialog, {
-                    title: t("agentNewTitle"),
-                    hint: t("agentHint"),
-                    width: 520,
-                    onClose,
-                    footer: foot([
-                        h(Button, { key: "c", onClick: onClose }, t("cancel")),
-                        h(Button, {
-                            key: "s",
-                            tone: "primary",
-                            disabled: !agentIdOk || busy,
-                            onClick: () => { void submit(); },
-                        }, t("agentCreate")),
-                    ]),
-                },
-                h("div", { style: { display: "flex", flexDirection: "column", gap: 9 } },
-                    h("label", { style: { fontSize: 12, color: T.text2 } }, t("agentId")),
-                    h(Input, { value: agentId, onChange: setAgentId, placeholder: "writing", autoFocus: true, grow: true }),
-                    !agentIdOk && agentId !== "" ? h("div", { style: { fontSize: 11.5, color: T.danger } }, t("agentId")) : null,
-                    h("label", { style: { fontSize: 12, color: T.text2 } }, t("agentName")),
-                    h(Input, { value: agentName, onChange: setAgentName, placeholder: agentId, grow: true }),
-                    h("label", { style: { fontSize: 12, color: T.text2 } }, t("agentDesc")),
-                    h(Input, { value: agentDesc, onChange: setAgentDesc, grow: true }),
-                    agentError === null ? null : h("div", { style: { fontSize: 12, color: T.danger, lineHeight: 1.5 } }, agentError)));
-            }
-
-            if (dialog.kind === "agentDelete") {
-                return h(Dialog, {
-                    title: t("agentDeleteTitle"),
-                    hint: fmt(t, "agentDeleteBody", { name: dialog.row.name === "" ? dialog.row.id : dialog.row.name }),
-                    width: 460,
-                    onClose,
-                    footer: foot([
-                        h(Button, { key: "c", onClick: onClose }, t("cancel")),
-                        h(Button, {
-                            key: "d",
-                            tone: "danger",
-                            disabled: busy,
-                            onClick: () => {
-                                void act("presets.delete", { id: dialog.row.id }, () => flash(fmt(t, "agentDeleted", { name: dialog.row.id }))).then(() => {
-                                    // The registry drops the record only after the patch reloads.
-                                    setTimeout(onAgentsChanged, 1200);
-                                    onClose();
-                                });
-                            },
-                        }, t("agentDelete")),
-                    ]),
-                }, h("code", { style: { fontSize: 12, color: T.text3 } }, dialog.row.rowId));
-            }
-
-            if (dialog.kind === "agentContent") {
-                return h(AgentContentDialog, {
-                    row: dialog.row,
-                    inventory: dialog.inventory,
-                    t,
-                    busy,
-                    onClose,
-                    onSave: names => onSavePresetContent(dialog.row, names),
-                });
-            }
-
             if (dialog.kind === "newGroup") {
                 return h(Dialog, {
                     title: t("newGroup"),
@@ -2419,12 +2183,57 @@ function McpEditDialog({ row, t, busy, onClose, onSave, onProbe }) {
                             key: "s",
                             tone: "primary",
                             disabled: name.trim() === "" || busy,
-                            onClick: () => onSaveGroup(name.trim(), [], undefined),
+                            onClick: () => onSaveGroup(name.trim(), [], undefined, dialog.collection ?? "default"),
                         }, t("save")),
                     ]),
                 }, h(Input, { value: name, onChange: setName, placeholder: t("groupName"), autoFocus: true, onEnter: () => {
-                    if (name.trim() !== "") onSaveGroup(name.trim(), [], undefined);
+                    if (name.trim() !== "") onSaveGroup(name.trim(), [], undefined, dialog.collection ?? "default");
                 } }));
+            }
+
+            if (dialog.kind === "newCollection" || dialog.kind === "renameCollection") {
+                const renaming = dialog.kind === "renameCollection";
+                const submit = () => onSaveCollection(name.trim(), renaming ? dialog.collection.id : undefined);
+                return h(Dialog, {
+                    title: renaming ? t("collectionRename") : t("collectionNew"),
+                    hint: t("collectionHint"),
+                    onClose,
+                    footer: foot([
+                        h(Button, { key: "c", onClick: onClose }, t("cancel")),
+                        h(Button, {
+                            key: "s",
+                            tone: "primary",
+                            disabled: name.trim() === "" || busy,
+                            onClick: submit,
+                        }, t("save")),
+                    ]),
+                }, h(Input, {
+                    value: name,
+                    onChange: setName,
+                    placeholder: t("collectionName"),
+                    autoFocus: true,
+                    onEnter: () => {
+                        if (name.trim() !== "") submit();
+                    },
+                }));
+            }
+
+            if (dialog.kind === "deleteCollection") {
+                return h(Dialog, {
+                    title: t("collectionDeleteTitle"),
+                    hint: fmt(t, "collectionDeleteBody", { name: dialog.collection.name }),
+                    width: 460,
+                    onClose,
+                    footer: foot([
+                        h(Button, { key: "c", onClick: onClose }, t("cancel")),
+                        h(Button, {
+                            key: "d",
+                            tone: "danger",
+                            disabled: busy,
+                            onClick: () => onDeleteCollection(dialog.collection.id),
+                        }, t("delete")),
+                    ]),
+                });
             }
 
             if (dialog.kind === "rename") {
@@ -2438,7 +2247,7 @@ function McpEditDialog({ row, t, busy, onClose, onSave, onProbe }) {
                             key: "s",
                             tone: "primary",
                             disabled: name.trim() === "" || busy,
-                            onClick: () => onSaveGroup(name.trim(), dialog.group.members, dialog.group.id),
+                            onClick: () => onSaveGroup(name.trim(), dialog.group.members, dialog.group.id, dialog.group.collection ?? "default"),
                         }, t("save")),
                     ]),
                 }, h(Input, { value: name, onChange: setName, autoFocus: true }));
@@ -2515,7 +2324,12 @@ function McpEditDialog({ row, t, busy, onClose, onSave, onProbe }) {
                         h(Button, { key: "a", tone: "primary", disabled: busy, onClick: onApplyAuto }, t("autoApply")),
                     ]),
                 }, h("div", { style: { fontSize: 12, color: T.text3, marginBottom: 8 } }, fmt(t, "membersCount", { n: total })),
-                dialog.plan.map(entry => h("div", {
+                dialog.plan.map(entry => {
+                    const label = roleLabel(t, entry.role);
+                    // The generated name is usually the role's own label. Printing "官方 官方" reads
+                    // like a bug, so the badge only shows up when the name says something extra.
+                    const showBadge = entry.name !== label;
+                    return h("div", {
                     key: `${entry.role}-${entry.name}`,
                     style: {
                         display: "flex",
@@ -2525,12 +2339,15 @@ function McpEditDialog({ row, t, busy, onClose, onSave, onProbe }) {
                         borderBottom: `1px solid ${T.borderSoft}`,
                     },
                 },
-                h("span", { style: { flex: "0 0 auto" } }, h(Badge, {
-                    tone: entry.role === "official" ? "warn" : (entry.role === "base" ? "danger" : "brand"),
-                    title: roleLabel(t, entry.role),
-                }, roleLabel(t, entry.role))),
+                showBadge
+                    ? h("span", { style: { flex: "0 0 auto" } }, h(Badge, {
+                        tone: entry.role === "official" ? "warn" : (entry.role === "base" ? "danger" : "brand"),
+                        title: label,
+                    }, label))
+                    : null,
                 h("span", { style: { flex: 1 } }, entry.name),
-                h("span", { style: { fontSize: 11.5, color: T.text3 } }, fmt(t, "membersCount", { n: entry.members.length })))));
+                h("span", { style: { fontSize: 11.5, color: T.text3 } }, fmt(t, "membersCount", { n: entry.members.length })));
+                }));
             }
 
             if (dialog.kind === "marketImport") {

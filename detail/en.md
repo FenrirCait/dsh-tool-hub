@@ -50,22 +50,18 @@ then topic (context, interface, media, research,
 dev, integrations, skills. It previews the plan before writing anything, and re-running it replaces
 only the groups it generated — hand-made groups stay as they are.
 
-## Presets
 
-A preset stores the set you have switched on. Applying one has two modes:
 
 - **Apply** — turns on what it lists and off what it does not
 - **Only switch on** — adds, never removes
 
 Changes over 10 rows ask first.
 
-## Agent presets
 
 **Modes** are a different thing: they decide which entries a new session is assembled from, and the unit is a
 declaration row in the profile `cordis.patch.yml`, not a folder. You can create one, delete one, or press
 **Choose contents** to tick the plugins and MCP servers it should declare. The write touches only that row's
 `plugins` list; entries that were already there keep their original config and comments. Rows the host itself
-provides are listed but cannot be ticked — a preset declaring a host entry of the same name would collide. Each
 write is backed up to `~/.dsh/backups/` and verified against the registry, rolling back on failure.
 
 ## Where state lives
@@ -75,7 +71,6 @@ write is backed up to `~/.dsh/backups/` and verified against the registry, rolli
 ```
 
 Writes are atomic (temp file + rename), so a crash mid-save cannot leave a half-written state.
-Deleting the file clears groups and presets; it does not touch plugin or skill switches.
 
 A sandbox or test profile can keep everything disposable:
 
@@ -98,3 +93,5 @@ TOOL_HUB_SKILL_ROOTS=<dir>/skills:<dir>/skills2   # semicolon on Windows
 ## Living next to dsh-skill-mcp-panel
 
 Both panels read the same truth — skills are files, MCP servers are rows in the patch — so state does not need syncing; writing at the same time is the real risk. When that panel is installed and enabled, this one takes the same `<patch>.panel.lock` before rewriting the patch (exclusive create, 30s stale takeover, 5s wait) and shows a **Compat** badge in the header. Its tool deny list is merged read-only (union) and its file is never written. Reads never take the lock, so listing and the snapshot stay wait-free.
+
+Hand-made groups live in collections: one 默认分组群 exists from the start, the rail bottom adds more, each can be renamed or deleted, and deleting one moves its groups back to the default drawer. Auto grouping produces four buckets: 官方 / MCP 服务器 / 通用 / 用户下载.

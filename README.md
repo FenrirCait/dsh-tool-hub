@@ -80,31 +80,18 @@ Everything the panel writes about *groups and presets* lives in one file:
 
 Writes are atomic (temp file + rename), so a crash mid-save cannot leave a half-written state.
 
-## Agent presets
+## Collections
 
-The **Presets** view lists what the `agentPresets` registry knows: the built-ins (`standard`, `ptc`,
-`minimal`, `cordis`) plus every declaration row in the profile `cordis.patch.yml`. A preset is not a
-folder — since DSH 0.2.x nothing reads `~/.dsh/.agent-presets/<id>/` any more; the unit is the row:
+Hand-made groups live in **collections**. A fresh install has one, **默认分组群** (default); the
+**+ 新建分组群** button at the bottom of the rail adds more, and each one can be renamed or deleted from
+its header. A collection only shelves groups — switching a group still switches exactly its members.
+Deleting a collection moves its groups back to the default one instead of destroying them.
 
-```yaml
-- insert:
-    - id: preset-writing
-      name: '@deepseek-ai/dsh-agent-preset'
-      config: { id: writing, name: "Writing", order: 12, plugins: [] }
-```
-
-Creating one appends exactly that block and leaves the rest of the file byte-for-byte alone. The write is
-verified rather than assumed: the registry is asked to resolve the id, and a missing or `broken` record
-rolls the row back and reports why. Deleting refuses the current default preset and waits until the
-registry really drops the record before saying it worked. Every write leaves a timestamped copy in
-`~/.dsh/backups/`.
-
-**Choosing what a preset declares.** A preset's `plugins` list is the set of entries it adds on top of the
-host — not a list of ids to switch on. Press **Choose contents** on a preset you own, tick the plugins and
-MCP servers it should declare, and the row is rewritten in place: entries that were already there keep
-their original lines (config, `!!js` expressions, comments), new ones are added, unchecked ones are
-dropped. Rows the host itself provides are listed but cannot be ticked — a preset that tried to declare
-the agent loop or the tool registry would collide with the host's own entry of the same name.
+**Automatic grouping** now produces four buckets, in this order: **官方** (ships with the client),
+**MCP 服务器** (the client's own MCP entries), **通用** (third-party entries that sit under everything:
+context, memory, market, sidebar…), and **用户下载** (everything else you installed for a job). The role
+is decided from the module name, the row's meta, and the description keywords; ties go to 用户下载, and
+the buckets carry the top topic words as chips so a bucket still says what is inside it.
 
 ## What it does not do
 
