@@ -22,6 +22,25 @@ window.__ModuleLoader__.load({
         // ── theme tokens ────────────────────────────────────────────────────
         // Only aliases the shell publishes; each carries a literal fallback so
         // the panel still reads on an older shell.
+        // Motion lives in one <style> inside our own tree: a few milliseconds of feedback, and
+        // nothing when the system asks for less motion.
+        const HUB_CSS = `
+            @keyframes hub-in { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
+            @keyframes hub-pop { from { opacity: 0; transform: translateY(6px) scale(.985); } to { opacity: 1; transform: none; } }
+            @keyframes hub-fade { from { opacity: 0; } to { opacity: 1; } }
+            .hub-row { transition: background-color .12s ease, border-color .12s ease, opacity .12s ease; animation: hub-in .16s ease-out; }
+            .hub-row:active { transform: scale(.997); }
+            .hub-swatch { transition: background-color .12s ease, color .12s ease, border-color .12s ease, transform .08s ease; }
+            .hub-swatch:active { transform: scale(.97); }
+            .hub-card { animation: hub-in .18s ease-out; }
+            .hub-pop { animation: hub-pop .16s ease-out; }
+            .hub-scrim { animation: hub-fade .12s ease-out; }
+            .hub-switch span { transition: left .16s cubic-bezier(.2,.8,.2,1), background-color .16s ease; }
+            @media (prefers-reduced-motion: reduce) {
+                .hub-row, .hub-card, .hub-pop, .hub-scrim, .hub-swatch, .hub-switch span { animation: none !important; transition: none !important; }
+            }
+        `;
+
         const T = {
             card: "var(--dsw-alias-card-fill, rgba(127,127,127,.07))",
             cardHover: "var(--dsw-alias-card-fill-hover, rgba(127,127,127,.12))",
@@ -204,6 +223,10 @@ window.__ModuleLoader__.load({
             collectionDeleteTitle: '删除分组群',
             collectionDeleteBody: '「{name}」会被删掉，里面的分组移到默认分组群，分组本身不会消失。',
             collectionDeleted: '分组群已删除',
+            collectionCollapse: '收起这个分组群',
+            collectionExpand: '展开这个分组群',
+            looseTitle: '未入群',
+            looseHint: '不属于任何分组群的分组；把分组拖到某个分组群上可以放进去，拖回这里则移出来。',
                 stale: '{n} 个成员已不在清单里',
                 moved: '{n} 项已更新',
                 failed: '{n} 项失败',
@@ -365,6 +388,10 @@ window.__ModuleLoader__.load({
             collectionDeleteTitle: 'Delete collection',
             collectionDeleteBody: '“{name}” goes away and its groups move to the default collection. The groups themselves stay.',
             collectionDeleted: 'Collection deleted',
+            collectionCollapse: 'Collapse this collection',
+            collectionExpand: 'Expand this collection',
+            looseTitle: 'No collection',
+            looseHint: 'Groups that belong to no collection. Drag a group onto a collection to file it, or back here to take it out.',
                 stale: '{n} members are no longer listed',
                 moved: '{n} updated',
                 failed: '{n} failed',
@@ -445,6 +472,7 @@ window.__ModuleLoader__.load({
                 onClick: () => {
                     if (disabled !== true) onChange(checked !== true);
                 },
+                className: "hub-switch",
                 style: {
                     position: "relative",
                     flex: "0 0 auto",
@@ -574,6 +602,7 @@ window.__ModuleLoader__.load({
                 return () => document.removeEventListener("keydown", onKey);
             }, []);
             return h("div", {
+                className: "hub-scrim",
                 onClick: event => {
                     if (event.target === event.currentTarget) onClose();
                 },
@@ -588,6 +617,7 @@ window.__ModuleLoader__.load({
                     padding: 24,
                 },
             }, h("div", {
+                className: "hub-pop",
                 role: "dialog",
                 "aria-modal": "true",
                 "aria-label": title,
@@ -671,7 +701,33 @@ window.__ModuleLoader__.load({
             }, [refresh, flash]);
 
             const groups = data === null ? [] : data.groups;
+        const collections = data === null ? [] : (data.collections ?? []);
         const [dragId, setDragId] = useState(null);
+        const [expanded, setExpanded] = useState(() => {
+            try {
+                const raw = window.localStorage.getItem("toolHubExpanded");
+                const list = raw === null ? [] : JSON.parse(raw);
+                return new Set(Array.isArray(list) ? list : []);
+            }
+            catch {
+                return new Set();
+            }
+        });
+        const toggleCollapsed = (id) => {
+            setExpanded((current) => {
+                const next = new Set(current);
+                if (next.has(id)) next.delete(id);
+                else next.add(id);
+                try {
+                    window.localStorage.setItem("toolHubExpanded", JSON.stringify([...next]));
+                }
+                catch { /* private mode: the rail simply forgets */ }
+                return next;
+            });
+        };
+        const moveInto = async (groupId, collection) => {
+            await act("group.move", { id: groupId, collection });
+        };
         const [dropAt, setDropAt] = useState(null);
         const [railWidth, setRailWidth] = useState(() => {
             try {
@@ -709,36 +765,23 @@ window.__ModuleLoader__.load({
             window.addEventListener("pointermove", move);
             window.addEventListener("pointerup", finish);
         };
-        const roleSections = [
-            { role: "official", key: "roleOfficial" },
-            { role: "mcp", key: "roleMcp" },
-            { role: "base", key: "roleBase" },
-            { role: "rest", key: "roleRest" },
-        ];
-        // Display order is the stored order. Sorting the rail by weight here would silently undo
-        // every drag (the drop writes an order the list then ignores), so the host orders a fresh
-        // automatic plan instead and this view honours it.
-        const sections = roleSections
-            .map(section => ({
-                ...section,
-                list: groups.filter(group => group.role === section.role),
-            }))
-            .filter(section => section.list.length > 0);
-        // Hand-made groups live in drawers. The default drawer always exists; the rest are the
-        // user's own, so a fresh install shows one section called 默认分组群 rather than a
-        // scattering of one-off groups.
-        const collections = (data?.collections ?? []).slice();
-        if (collections.length === 0) collections.push({ id: "default", name: "默认分组群", order: 0 });
+        // Inside a drawer the three kept-on buckets come first, then whatever was downloaded.
+        const roleRank = { official: 0, mcp: 1, base: 2, rest: 3 };
+        const byRole = (left, right) =>
+            (roleRank[left.role] ?? 9) - (roleRank[right.role] ?? 9) || left.name.localeCompare(right.name);
         const drawers = collections.map(collection => ({
             collection,
-            list: groups.filter(group => group.role === null && (group.collection ?? "default") === collection.id),
+            list: groups.filter(group => group.collection === collection.id).sort(byRole),
         }));
-        const sectionKey = group => (group.role === null ? `col:${group.collection ?? "default"}` : `role:${group.role}`);
+        // Groups that belong to no collection at all. Auto grouping parks 用户下载 here so the
+        // drawers only carry the three things you keep on.
+        const looseGroups = groups.filter(group => (group.collection ?? null) === null).sort(byRole);
+        const sectionKey = group => (group.role !== null ? `role:${group.role}` : `col:${group.collection ?? "loose"}`);
         // The order array has to be the order on screen, or the move is computed against a list the
         // user cannot see; flatten the rail first, then move inside that array.
         const railIds = () => [
-            ...sections.flatMap(section => section.list.map(group => group.id)),
             ...drawers.flatMap(drawer => drawer.list.map(group => group.id)),
+            ...looseGroups.map(group => group.id),
         ];
         // Dropping a row moves it in front of the row it was dropped on. A group belongs to a role
         // section, so a move within the section is meaningful; a drop from one section onto another
@@ -1088,25 +1131,8 @@ window.__ModuleLoader__.load({
                     padding: "0 6px 8px",
                 },
             },
-            h("div", { style: { fontSize: 11, letterSpacing: 0.4, color: T.text3, textTransform: "uppercase" } }, t("groups")),
-            h("button", {
-                type: "button",
-                title: t("newGroup"),
-                onClick: () => setDialog({ kind: "newGroup", collection: "default" }),
-                style: {
-                    width: 20,
-                    height: 20,
-                    borderRadius: 6,
-                    border: `1px solid ${T.border}`,
-                    background: "transparent",
-                    color: T.text2,
-                    cursor: "pointer",
-                    lineHeight: "16px",
-                    fontSize: 13,
-                    padding: 0,
-                    fontFamily: "inherit",
-                },
-            }, "+")),
+            h("div", { style: { fontSize: 11, letterSpacing: 0.4, color: T.text3, textTransform: "uppercase" } }, t("groups"))),
+
             h("button", {
                 type: "button",
                 onClick: () => {
@@ -1127,68 +1153,141 @@ window.__ModuleLoader__.load({
                     textAlign: "center",
                 },
             }, `${counts.plugin[0] + counts.skill[0]}`)),
-            ...sections.flatMap(section => [
-                h("div", {
-                    key: `role-${section.role}`,
-                    style: {
-                        margin: "10px 4px 3px",
-                        fontSize: 10.5,
-                        letterSpacing: "0.04em",
-                        color: T.text3,
-                        fontWeight: 600,
+            ...drawers.flatMap((drawer) => {
+                // Drawers start closed: the rail reads as a table of contents first.
+                const open = expanded.has(drawer.collection.id);
+                return [
+                    h("div", {
+                        key: `drawer-${drawer.collection.id}`,
+                        draggable: false,
+                        onDragOver: (event) => {
+                            event.preventDefault();
+                            event.currentTarget.style.outline = `2px dashed ${T.brand}`;
+                        },
+                        onDragLeave: (event) => {
+                            event.currentTarget.style.outline = "none";
+                        },
+                        onDrop: (event) => {
+                            event.preventDefault();
+                            event.currentTarget.style.outline = "none";
+                            const fromId = dragId ?? event.dataTransfer.getData("text/plain") ?? "";
+                            if (fromId !== "") void moveInto(fromId, drawer.collection.id);
+                            setDragId(null);
+                        },
+                        style: {
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 4,
+                            margin: "12px 2px 3px",
+                            padding: "2px 4px",
+                            borderRadius: 7,
+                        },
                     },
-                }, t(section.key)),
-                ...section.list.map(group => groupRow(group)),
-            ]),
-            ...drawers.flatMap(drawer => [
-                h("div", {
-                    key: `drawer-${drawer.collection.id}`,
-                    style: { display: "flex", alignItems: "center", gap: 5, margin: "12px 4px 3px" },
+                    h("button", {
+                        type: "button",
+                        title: open ? t("collectionCollapse") : t("collectionExpand"),
+                        onClick: () => toggleCollapsed(drawer.collection.id),
+                        style: {
+                            flex: 1,
+                            minWidth: 0,
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 5,
+                            border: "none",
+                            background: "transparent",
+                            padding: 0,
+                            cursor: "pointer",
+                            fontFamily: "inherit",
+                            color: T.text2,
+                        },
+                    },
+                    h("span", { style: { fontSize: 10, color: T.text3, width: 8 } }, open ? "▾" : "▸"),
+                    h("span", {
+                        style: { minWidth: 0, fontSize: 11.5, letterSpacing: "0.04em", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+                        title: drawer.collection.name,
+                    }, drawer.collection.name),
+                    h("span", { style: { fontSize: 10.5, color: T.text3 } }, `${drawer.list.length}`)),
+                    drawer.collection.id === "default"
+                        ? null
+                        : h(MiniIcon, {
+                            label: "✎",
+                            title: t("collectionRename"),
+                            onClick: () => setDialog({ kind: "renameCollection", collection: drawer.collection }),
+                        }),
+                    drawer.collection.id === "default"
+                        ? null
+                        : h(MiniIcon, {
+                            label: "✕",
+                            title: t("collectionDelete"),
+                            danger: true,
+                            onClick: () => setDialog({ kind: "deleteCollection", collection: drawer.collection }),
+                        })),
+                    ...(open ? drawer.list.map(group => groupRow(group)) : []),
+                ];
+            }),
+            h("div", {
+                key: "drawer-loose",
+                onDragOver: (event) => {
+                    event.preventDefault();
+                    event.currentTarget.style.outline = `2px dashed ${T.warn}`;
                 },
-                h("span", {
-                    style: { flex: 1, minWidth: 0, fontSize: 11.5, letterSpacing: "0.04em", color: T.text2, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
-                    title: drawer.collection.name,
-                }, drawer.collection.name),
-                h("span", { style: { fontSize: 10.5, color: T.text3 } }, `${drawer.list.length}`),
-                h(MiniIcon, {
-                    label: "+",
-                    title: t("collectionAddGroup"),
-                    onClick: () => setDialog({ kind: "newGroup", collection: drawer.collection.id }),
-                }),
-                drawer.collection.id === "default"
-                    ? null
-                    : h(MiniIcon, {
-                        label: "✎",
-                        title: t("collectionRename"),
-                        onClick: () => setDialog({ kind: "renameCollection", collection: drawer.collection }),
-                    }),
-                drawer.collection.id === "default"
-                    ? null
-                    : h(MiniIcon, {
-                        label: "✕",
-                        title: t("collectionDelete"),
-                        danger: true,
-                        onClick: () => setDialog({ kind: "deleteCollection", collection: drawer.collection }),
-                    })),
-                ...drawer.list.map(group => groupRow(group)),
-            ]),
-            h("button", {
-                key: "new-collection",
-                type: "button",
-                onClick: () => setDialog({ kind: "newCollection" }),
+                onDragLeave: (event) => {
+                    event.currentTarget.style.outline = "none";
+                },
+                onDrop: (event) => {
+                    event.preventDefault();
+                    event.currentTarget.style.outline = "none";
+                    const fromId = dragId ?? event.dataTransfer.getData("text/plain") ?? "";
+                    if (fromId !== "") void moveInto(fromId, null);
+                    setDragId(null);
+                },
                 style: {
-                    marginTop: 8,
-                    width: "100%",
-                    padding: "6px 8px",
-                    borderRadius: 8,
-                    border: `1px dashed ${T.border}`,
-                    background: "transparent",
-                    color: T.text3,
-                    fontSize: 11.5,
-                    cursor: "pointer",
-                    fontFamily: "inherit",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 5,
+                    margin: "12px 2px 3px",
+                    padding: "2px 4px",
+                    borderRadius: 7,
                 },
-            }, `+ ${t("collectionNew")}`),
+            },
+            h("span", { style: { fontSize: 10, color: T.text3, width: 8 } }, looseGroups.length === 0 ? "·" : "▾"),
+            h("span", {
+                style: { flex: 1, minWidth: 0, fontSize: 11.5, letterSpacing: "0.04em", color: T.text3, fontWeight: 700 },
+                title: t("looseHint"),
+            }, t("looseTitle")),
+            h("span", { style: { fontSize: 10.5, color: T.text3 } }, `${looseGroups.length}`)),
+            ...looseGroups.map(group => groupRow(group)),
+            h("div", { key: "rail-actions", style: { display: "flex", gap: 6, marginTop: 8 } },
+                h("button", {
+                    type: "button",
+                    onClick: () => setDialog({ kind: "newGroup", collection: null }),
+                    style: {
+                        flex: 1,
+                        padding: "6px 8px",
+                        borderRadius: 8,
+                        border: `1px dashed ${T.border}`,
+                        background: "transparent",
+                        color: T.text3,
+                        fontSize: 11.5,
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                    },
+                }, `+ ${t("newGroup")}`),
+                h("button", {
+                    type: "button",
+                    onClick: () => setDialog({ kind: "newCollection" }),
+                    style: {
+                        flex: 1,
+                        padding: "6px 8px",
+                        borderRadius: 8,
+                        border: `1px dashed ${T.border}`,
+                        background: "transparent",
+                        color: T.text3,
+                        fontSize: 11.5,
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                    },
+                }, `+ ${t("collectionNew")}`)),
             groups.length === 0
                 ? h("div", {
                     style: {
@@ -1448,6 +1547,7 @@ window.__ModuleLoader__.load({
             const off = disabled === true;
             return h("button", {
                 type: "button",
+                className: "hub-swatch",
                 title,
                 onClick,
                 disabled: off,
@@ -1646,6 +1746,7 @@ window.__ModuleLoader__.load({
             const readOnly = row.manageable === false;
             const selfEntry = row.self === true;
             return h("div", {
+                className: "hub-row",
                 onMouseEnter: () => setHover(true),
                 onMouseLeave: () => setHover(false),
                 style: {

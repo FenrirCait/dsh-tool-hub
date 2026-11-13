@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.11.0
+
+- **Drawers start closed and fold the auto buckets.** The rail is a table of contents first: each
+  collection is one line you open, and the 官方 / MCP 服务器 / 通用 buckets live inside 默认分组群
+  instead of above it. 用户下载 starts with no collection at all, in the 未入群 pile.
+- **A group belongs to at most one place.** Dragging a group onto a drawer files it there; dragging it
+  back to 未入群 takes it out. 新建分组 lands in 未入群, 新建分组群 adds a drawer; the header "+" that
+  used to create a group in the default drawer is gone, so there is exactly one way to do each thing.
+- **Tags come from the plugin itself.** `package.json` `keywords` (up to three) are shown as the chips
+  under a group name, topped up with the bucket's topic words when a package declares none — the same
+  thing the GitHub plugin page shows, instead of our own invented taxonomy.
+- **Motion.** Rows, switches, chips and dialogs get a short fade/slide, all of it inside
+  `@media (prefers-reduced-motion: reduce)` guard rails.
+
 ## 1.10.0
 
 - **Removed the agent-preset editor.** Writing preset declaration rows from the panel kept producing

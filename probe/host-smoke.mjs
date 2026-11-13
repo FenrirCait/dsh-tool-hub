@@ -415,6 +415,19 @@ const autoPlan = Array.isArray(r.data.plan) ? r.data.plan : []
 const autoRoles = autoPlan.map(entry => entry.role)
 check('auto groups carry roles', autoRoles.every(role => ['official', 'mcp', 'base', 'rest'].includes(role)), JSON.stringify(autoRoles))
 check('mcp rows are their own bucket', autoPlan.some(entry => entry.role === 'mcp'), JSON.stringify(autoPlan.map(entry => [entry.name, entry.members.length])))
+check('the three kept-on buckets land in the default drawer', autoPlan.filter(entry => entry.role !== 'rest').every(entry => entry.collection === 'default'), JSON.stringify(autoPlan.map(entry => [entry.role, entry.collection])))
+check('the downloaded bucket starts outside every drawer', autoPlan.filter(entry => entry.role === 'rest').every(entry => entry.collection === null), JSON.stringify(autoPlan.map(entry => [entry.role, entry.collection])))
+
+// Moving a group between drawers, and out of them.
+r = await op('group.save', { name: '搬家组', members: [{ kind: 'plugin', id: 'e2' }], collection: null })
+const looseGroup = (r.data.state?.groups ?? []).find(group => group.name === '搬家组')
+check('a group can start with no drawer at all', looseGroup?.collection === null, JSON.stringify(looseGroup))
+r = await op('group.move', { id: looseGroup.id, collection: 'default' })
+const filed = (r.data.state?.groups ?? []).find(group => group.id === looseGroup.id)
+check('a group moves into a drawer', filed?.collection === 'default', JSON.stringify(filed))
+r = await op('group.move', { id: looseGroup.id, collection: null })
+check('a group moves back out', (r.data.state?.groups ?? []).find(group => group.id === looseGroup.id)?.collection === null)
+check('moving into a drawer that does not exist is refused', (await op('group.move', { id: looseGroup.id, collection: 'nope' })).ok === false)
 
 server.close()
 const failed = results.filter(row => row.ok !== true)

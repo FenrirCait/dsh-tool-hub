@@ -42,17 +42,22 @@ the plugin hot-loads.
   `SKILL.md` ↔ `SKILL.md.disabled`.
 - **Groups**: create, rename, delete, add the current selection, and flip a whole group on or off.
   Groups over 20 members ask first.
-- **Auto grouping**: one button proposes exactly three buckets — **official** (ships with the client),
-  **always-on base** (third-party rows that read like a layer: context, memory, market, sidebar,
-  runtime…), and **unsorted** (everything else, skills included) — previewed before anything is
-  written. Topic words stay visible as chips on each group; they inform, they do not decide. Applying it
-  replaces only the previous automatic groups (including leftovers from older taxonomies); hand-made
-  groups are left alone.
-- **A rail you can shape**: the role appears as a section header, each group carries its topic chips,
-  the divider between rail and list drags from 180 to 460px (double-click resets, the width survives
-  reloads), dragging a group shows a line where it will land, and ↑ / ↓ move a group inside its section
-  without a pointer. The rail honours the stored order, so a move sticks. Inside a group the list sorts
-  switched-on first, then plugins → MCP servers → skills, then by name.
+- **Auto grouping**: one button proposes exactly four buckets — **官方** (ships with the client),
+  **MCP 服务器**, **通用** (third-party rows that read like a layer: context, memory, market, sidebar,
+  runtime…), and **用户下载** (everything else, skills included) — previewed before anything is written.
+  The first three land inside **默认分组群**; 用户下载 starts with no collection. Chips under a group name
+  are the package's own `keywords` where it declares them, topped up with topic words; they inform, they
+  do not decide. Applying it replaces only the previous automatic groups (including leftovers from older
+  taxonomies); hand-made groups are left alone.
+- **Drawers**: collections are collapsed by default and hold the groups you file into them. Drag a group
+  onto a drawer to file it, drag it onto 未入群 to take it out; 新建分组 lands in 未入群, 新建分组群 adds a
+  drawer. Deleting a drawer moves its groups back to the default one.
+- **A rail you can shape**: the divider between rail and list drags from 180 to 460px (double-click
+  resets, the width survives reloads), dragging a group shows a line where it will land, and ↑ / ↓ move a
+  group inside its drawer without a pointer. The rail honours the stored order, so a move sticks. Inside a
+  group the list sorts switched-on first, then plugins → MCP servers → skills, then by name.
+- **Motion**: rows, switches, chips and dialogs fade in over ~150ms, and every one of those animations is
+  switched off under `prefers-reduced-motion: reduce`.
 - **Presets**: save the current set, then apply it later. `Apply` switches on what the preset lists
   and off what it does not; `Only switch on` never turns anything off. Big changes ask first.- **MCP servers** get their own view: name, transport and command per row, the same switch as every
   other entry, and an edit dialog for that server's `config:` block in the profile's
