@@ -40,6 +40,9 @@ the plugin hot-loads.
 - **Per-row switch**. Plugins go through the host's own plugin manager, so enable/disable is written
   to the profile patch exactly as the Plugins page would write it. Skills are switched by renaming
   `SKILL.md` ↔ `SKILL.md.disabled`.
+- **A tree, not a wall of repeats**: a plugin that mounts several loader entries is one row you unfold;
+  the parent carries the module name, `×n` and a switch that flips the whole set.
+- **The rail shows on 全部 only**: picking 插件 / 技能 / MCP gives the list the full width.
 - **Groups**: create, rename, delete, add the current selection, and flip a whole group on or off.
   Groups over 20 members ask first.
 - **Auto grouping**: one button proposes exactly four buckets — **官方** (ships with the client),

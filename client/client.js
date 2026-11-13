@@ -223,6 +223,8 @@ window.__ModuleLoader__.load({
             collectionDeleteTitle: '删除分组群',
             collectionDeleteBody: '「{name}」会被删掉，里面的分组移到默认分组群，分组本身不会消失。',
             collectionDeleted: '分组群已删除',
+            collapseModule: '收起这个插件的条目',
+            expandModule: '展开这个插件的条目',
             collectionCollapse: '收起这个分组群',
             collectionExpand: '展开这个分组群',
             looseTitle: '未入群',
@@ -388,6 +390,8 @@ window.__ModuleLoader__.load({
             collectionDeleteTitle: 'Delete collection',
             collectionDeleteBody: '“{name}” goes away and its groups move to the default collection. The groups themselves stay.',
             collectionDeleted: 'Collection deleted',
+            collapseModule: 'Collapse these entries',
+            expandModule: 'Expand these entries',
             collectionCollapse: 'Collapse this collection',
             collectionExpand: 'Expand this collection',
             looseTitle: 'No collection',
@@ -729,6 +733,9 @@ window.__ModuleLoader__.load({
             await act("group.move", { id: groupId, collection });
         };
         const [dropAt, setDropAt] = useState(null);
+        // One row per module is the default; a module that mounts several loader entries unfolds
+        // into its entries, so the list reads as a tree instead of the same name eight times.
+        const [openModules, setOpenModules] = useState(() => new Set());
         const [railWidth, setRailWidth] = useState(() => {
             try {
                 const stored = Number(window.localStorage.getItem("toolHubRailWidth"));
@@ -904,7 +911,7 @@ window.__ModuleLoader__.load({
                 return map;
             }, [groups]);
 
-            const rows = useMemo(() => {
+        const rows = useMemo(() => {
                 const wanted = `${query}`.trim().toLowerCase();
                 const isMcp = row => row.mcp === true;
                 const match = (row) => {
@@ -962,6 +969,20 @@ window.__ModuleLoader__.load({
                     };
                 });
             }, [plugins, skills, query, view, groupId, groupMembers, data]);
+            const tree = useMemo(() => {
+                const order = [];
+                const byModule = new Map();
+                for (const row of rows) {
+                const key = row.kind === "plugin" ? row.moduleName : `skill:${row.name}`;
+                    if (!byModule.has(key)) {
+                        byModule.set(key, { key, module: row.kind === "plugin" ? row.moduleName : row.name, kind: row.kind, entries: [] });
+                        order.push(key);
+                    }
+                    byModule.get(key).entries.push(row);
+                }
+                return order.map(key => byModule.get(key));
+        }, [rows]);
+
 
             const counts = useMemo(() => {
                 const value = { plugin: [0, 0], skill: [0, 0], mcp: [0, 0] };
@@ -1306,30 +1327,109 @@ window.__ModuleLoader__.load({
                     h(Button, { small: true, onClick: () => { void openAuto(); }, disabled: busy || data === null }, t("railEmptyAction")))
                 : null);
 
+            const rowNode = (row, nested) => h(Row, {
+                key: memberKey(row.kind, row.id),
+                row,
+                t,
+                nested: nested === true,
+                picked: picked.has(memberKey(row.kind, row.id)),
+                onPick: (value) => {
+                    const next = new Set(picked);
+                    const key = memberKey(row.kind, row.id);
+                    if (value) next.add(key);
+                    else next.delete(key);
+                    setPicked(next);
+                },
+                onToggle: enabled => toggleRow(row.kind, row.id, enabled),
+                onEdit: (target) => setDialog({ kind: "mcpEdit", row: target }),
+                onDelete: (target) => setDialog({ kind: "mcpDelete", row: target }),
+                onTools: (target) => setDialog({ kind: "toolEdit", row: target }),
+                busy,
+            });
+
+            const treeNodes = tree.map(node => {
+                if (node.entries.length === 1) return rowNode(node.entries[0], false);
+                const open = openModules.has(node.key);
+                const enabled = node.entries.filter(entry => entry.enabled === true).length;
+                const allOn = enabled === node.entries.length;
+                const allPicked = node.entries.every(entry => picked.has(memberKey(entry.kind, entry.id)));
+                return h("div", { key: `tree-${node.key}`, className: "hub-card" },
+                    h("div", {
+                        style: {
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            padding: "7px 8px 7px 6px",
+                            borderBottom: `1px solid ${T.borderSoft}`,
+                        },
+                    },
+                    h("input", {
+                        type: "checkbox",
+                        checked: allPicked,
+                        onChange: () => {
+                            const next = new Set(picked);
+                            for (const entry of node.entries) {
+                                const key = memberKey(entry.kind, entry.id);
+                                if (allPicked) next.delete(key);
+                                else next.add(key);
+                            }
+                            setPicked(next);
+                        },
+                        style: { width: 14, height: 14, margin: 0, accentColor: T.brand, flex: "0 0 auto", cursor: "pointer" },
+                    }),
+                    h("button", {
+                        type: "button",
+                        onClick: () => {
+                            setOpenModules((current) => {
+                                const next = new Set(current);
+                                if (next.has(node.key)) next.delete(node.key);
+                                else next.add(node.key);
+                                return next;
+                            });
+                        },
+                        title: open ? t("collapseModule") : t("expandModule"),
+                        style: {
+                            flex: 1,
+                            minWidth: 0,
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 7,
+                            border: "none",
+                            background: "transparent",
+                            padding: 0,
+                            cursor: "pointer",
+                            fontFamily: "inherit",
+                            color: T.text,
+                        },
+                    },
+                    h("span", { style: { fontSize: 10, color: T.text3, width: 9, flex: "0 0 auto" } }, open ? "▾" : "▸"),
+                    h("span", {
+                        style: { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, fontWeight: 600 },
+                        title: node.module,
+                    }, node.module),
+                    h(Badge, { tone: node.kind === "plugin" ? "brand" : "warn" }, node.kind === "plugin" ? t("kindPlugin") : t("kindSkill")),
+                    h(Badge, null, `×${node.entries.length}`)),
+                    h("div", { style: { flex: "0 0 auto", display: "flex", alignItems: "center", gap: 8 } },
+                        h("span", { style: { fontSize: 11, color: T.text3 } }, `${enabled}/${node.entries.length}`),
+                        h(Switch, {
+                            checked: allOn,
+                            disabled: busy || node.entries.every(entry => entry.manageable !== true),
+                            onChange: (value) => {
+                                for (const entry of node.entries) {
+                                    if (entry.manageable === true) void toggleRow(entry.kind, entry.id, value);
+                                }
+                            },
+                        }))),
+                    open ? node.entries.map(entry => rowNode(entry, true)) : null);
+            });
+
             const list = h("div", { style: { flex: 1, minWidth: 0, display: "flex", flexDirection: "column" } },
                 h("div", { style: { flex: 1, overflow: "auto", padding: "10px 12px 12px" } },
                     data === null
                         ? h("div", { style: emptyStyle }, error === null ? t("loading") : error)
                         : rows.length === 0
                             ? h("div", { style: emptyStyle }, groupId === null ? t("empty") : t("emptyGroup"))
-                            : h("div", { key: "row-view" }, rows.map(row => h(Row, {
-                                key: memberKey(row.kind, row.id),
-                                row,
-                                t,
-                                picked: picked.has(memberKey(row.kind, row.id)),
-                                onPick: (value) => {
-                                    const next = new Set(picked);
-                                    const key = memberKey(row.kind, row.id);
-                                    if (value) next.add(key);
-                                    else next.delete(key);
-                                    setPicked(next);
-                                },
-                                onToggle: enabled => toggleRow(row.kind, row.id, enabled),
-                                onEdit: (target) => setDialog({ kind: "mcpEdit", row: target }),
-                                onDelete: (target) => setDialog({ kind: "mcpDelete", row: target }),
-                                onTools: (target) => setDialog({ kind: "toolEdit", row: target }),
-                                busy,
-                            })))));
+                            : h("div", { key: "row-view" }, treeNodes)));
 
             const selectionBar = picked.size === 0 ? null : h("div", {
                 style: {
@@ -1394,7 +1494,9 @@ window.__ModuleLoader__.load({
             },
             header,
             tabs,
-            h("div", { style: { display: "flex", flex: 1, minHeight: 0, borderTop: `1px solid ${T.borderSoft}` } }, rail, h("div", {
+            h("div", { style: { display: "flex", flex: 1, minHeight: 0, borderTop: `1px solid ${T.borderSoft}` } },
+            view === "all" ? rail : null,
+            view === "all" ? h("div", {
                 role: "separator",
                 "aria-orientation": "vertical",
                 title: t("resizeRail"),
@@ -1406,7 +1508,7 @@ window.__ModuleLoader__.load({
                     background: resizing === true ? tint(T.brand, 30) : tint(T.borderSoft, 60),
                     transition: "background .12s ease",
                 },
-            }), list),
+            }) : null, list),
             selectionBar,
             note === null ? null : h("div", {
                 style: {
@@ -1741,7 +1843,7 @@ window.__ModuleLoader__.load({
         }
 
 
-        function Row({ row, t, picked, onPick, onToggle, busy, onEdit, onDelete, onTools }) {
+        function Row({ row, t, picked, onPick, onToggle, busy, onEdit, onDelete, onTools, nested }) {
             const [hover, setHover] = useState(false);
             const readOnly = row.manageable === false;
             const selfEntry = row.self === true;
@@ -1753,7 +1855,8 @@ window.__ModuleLoader__.load({
                     display: "flex",
                     alignItems: "center",
                     gap: 10,
-                    padding: "7px 9px",
+                    // Children of a module row sit under it, so their switch lines up with the parent's name.
+                    padding: nested === true ? "7px 9px 7px 26px" : "7px 9px",
                     borderRadius: 9,
                     border: `1px solid ${picked ? T.border : "transparent"}`,
                     background: picked ? T.card : hover ? T.card : "transparent",

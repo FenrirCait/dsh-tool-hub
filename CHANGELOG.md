@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.12.0
+
+- **The list is a tree.** A plugin that mounts several loader entries is one row that unfolds into its
+  entries; the parent shows `name / kind / ×n` and one switch that flips the whole set. Single-entry
+  modules still render as a plain row, so nothing gets an extra click for no reason.
+- **The rail belongs to 全部.** Switching to 插件 / 技能 / MCP hides the group rail and gives the list the
+  full width; switching back brings it home.
+
 ## 1.11.0
 
 - **Drawers start closed and fold the auto buckets.** The rail is a table of contents first: each
