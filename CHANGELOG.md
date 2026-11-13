@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.15.1
+
+- **A second axis you cannot break anything with.** Lenses (`Official` / `Third-party` /
+  `Always on` / `Per task`) filter the list without owning a switch, so a package can be found as
+  "third-party" and as "always-on" without living in two groups at once.
+- **`通用` is now `第三方底座`.** The old name read like "the user's stuff"; the bucket actually holds
+  third-party packages that everything else sits on.
+- **Bulk flips say what they will touch.** When members of a group also sit in another group, the
+  confirmation names them and offers two honest choices: only the ones this group owns, or all of
+  them. Base and official members turn red with "存在基础插件，禁用可能导致界面异常。"
+- **Undo, for ten seconds.** A group flip leaves an undo bar; one click puts every touched row back.
+- **Refused rows stay marked**, and the toast now reads "x done, y refused by the host" instead of
+  hiding the failures behind a success count.
+- **Stale members are visible and cleanable**: a group that still lists an uninstalled plugin shows
+  `n gone`; clicking it drops those members.
+- **Search opens what it finds**, dragging near the rail edges scrolls it, and rows are memoized so a
+  hundred switches do not re-render the whole list.
+
 ## 1.14.0
 
 - **The rail tells you what is actually running**: every group shows `on/total` (`5/8`), green when

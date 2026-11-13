@@ -445,6 +445,40 @@ r = await op('group.move', { id: looseGroup.id, collection: null })
 check('a group moves back out', (r.data.state?.groups ?? []).find(group => group.id === looseGroup.id)?.collection === null)
 check('moving into a drawer that does not exist is refused', (await op('group.move', { id: looseGroup.id, collection: 'nope' })).ok === false)
 
+// Rows carry the bucket the auto planner would file them under, so the client can filter by role
+// without shipping a second copy of the classifier.
+const roleSnap = await get('/tool-hub/api/snapshot')
+const snapRows = roleSnap.data?.plugins ?? []
+check('plugin rows carry a role', snapRows.every(row => ['official', 'mcp', 'base', 'rest'].includes(row.role)), JSON.stringify(snapRows.slice(0, 3).map(row => [row.moduleName, row.role])))
+check('skill rows carry a role', (roleSnap.data?.skills ?? []).every(row => row.role === 'rest'), JSON.stringify(roleSnap.data?.skills))
+
+// Two groups holding the same member: "only the ones this group owns" must leave the other alone.
+await op('group.save', { name: '共有甲', members: [{ kind: 'plugin', id: 'e2' }, { kind: 'plugin', id: 'e3' }] })
+await op('group.save', { name: '共有乙', members: [{ kind: 'plugin', id: 'e2' }] })
+const sharedSnap = (await get('/tool-hub/api/snapshot')).data
+const sharedGroup = sharedSnap.groups.find(group => group.name === '共有甲')
+const elsewhere = new Set()
+for (const other of sharedSnap.groups) {
+  if (other.id === sharedGroup.id) continue
+  for (const member of other.members) elsewhere.add(member.kind + ':' + member.id)
+}
+r = await op('group.toggle', { id: sharedGroup.id, enabled: false, skipShared: true })
+const expectedSkipped = sharedGroup.members.filter(member => elsewhere.has(member.kind + ':' + member.id)).length
+check('skipShared counts the members other groups also hold', r.ok === true && r.data.skipped === expectedSkipped, JSON.stringify({ got: r.data.skipped, expectedSkipped }))
+check('skipShared leaves those members alone', (await get('/tool-hub/api/snapshot')).data.plugins.find(row => row.id === 'e2')?.enabled === true)
+r = await op('group.toggle', { id: sharedGroup.id, enabled: false, skipShared: false })
+check('without skipShared the shared members switch too', r.ok === true && r.data.skipped === 0 && (await get('/tool-hub/api/snapshot')).data.plugins.find(row => row.id === 'e2')?.enabled === false)
+
+// Members whose plugin was uninstalled stay behind until someone cleans them.
+const stateFile = join(home, 'tool-hub', 'state.json')
+const rawState = JSON.parse(await readFile(stateFile, 'utf8'))
+const cleanTarget = rawState.groups.find(group => group.name === '共有乙')
+cleanTarget.members.push({ kind: 'plugin', id: 'gone-entry' })
+await writeFile(stateFile, JSON.stringify(rawState, null, 2))
+r = await op('group.clean', { id: cleanTarget.id })
+check('cleaning drops members that no longer exist', r.ok === true && r.data.removed === 1, JSON.stringify(r.data))
+
+
 server.close()
 const failed = results.filter(row => row.ok !== true)
 console.log(`\n${results.length - failed.length}/${results.length} passed`)

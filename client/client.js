@@ -241,7 +241,27 @@ window.__ModuleLoader__.load({
                 kindPlugin: '插件',
                 kindSkill: '技能',
                 skillRoots: '技能目录',
-                confirmGroupTitle: '确认整组操作',
+                lensAll: '全部',
+            lensOfficial: '官方',
+            lensThird: '第三方',
+            lensBase: '常开',
+            lensTask: '按需',
+            confirmSharedTitle: '有成员也在别的分组里',
+            confirmSharedBody: '「{name}」里有 {shared} 项同时属于别的分组：{names}。只处理本组独有的 {own} 项，还是连这些一起处理？',
+            confirmOnlyOwn: '只处理本组独有（{own} 项）',
+            confirmAll: '连共有的也一起处理（{all} 项）',
+            baseWarning: '存在基础插件，禁用可能导致界面异常。',
+            undoSaved: '已{action}「{name}」的 {n} 项。',
+            undoActionOff: '禁用',
+            undoActionOn: '启用',
+            failHint: '宿主拒绝了这次操作',
+            undoLabel: '撤销',
+            undoDone: '已撤销',
+            failSummary: '成功 {ok} 项，失败 {failed} 项（被宿主托管拒绝）',
+            staleChip: '{n} 项已失效',
+            staleHint: '这些成员对应的插件已经不在了，点一下从分组里清掉。',
+            staleDone: '已清理 {n} 项失效成员',
+            confirmGroupTitle: '确认整组操作',
                 confirmGroupBody: '将对「{name}」的 {n} 项执行「{action}」。已经写下的状态可以再改回来。',
                 confirmPresetTitle: '确认应用预设',
                 confirmPresetBody: '将开启 {on} 项、关闭 {off} 项。',
@@ -409,7 +429,27 @@ window.__ModuleLoader__.load({
                 kindPlugin: 'Plugin',
                 kindSkill: 'Skill',
                 skillRoots: 'Skill folders',
-                confirmGroupTitle: 'Confirm group action',
+                lensAll: 'All',
+            lensOfficial: 'Official',
+            lensThird: 'Third-party',
+            lensBase: 'Always on',
+            lensTask: 'Per task',
+            confirmSharedTitle: 'Some members live in other groups too',
+            confirmSharedBody: '{shared} of the {all} items in “{name}” are also listed elsewhere: {names}. Handle only the {own} this group owns, or all of them?',
+            confirmOnlyOwn: 'Only this group owns ({own})',
+            confirmAll: 'All of them ({all})',
+            baseWarning: 'Base plugins are in this group; disabling them can break the interface.',
+            undoSaved: '{n} items in “{name}” were switched. ',
+            undoActionOff: '',
+            undoActionOn: '',
+            failHint: 'The host refused this change',
+            undoLabel: 'Undo',
+            undoDone: 'Undone',
+            failSummary: '{ok} done, {failed} refused by the host',
+            staleChip: '{n} gone',
+            staleHint: 'These members no longer exist. Click to drop them from the group.',
+            staleDone: 'Dropped {n} stale members',
+            confirmGroupTitle: 'Confirm group action',
                 confirmGroupBody: 'This will {action} all {n} items in “{name}”. Anything written here can be switched back.',
                 confirmPresetTitle: 'Confirm preset',
                 confirmPresetBody: 'This turns on {on} and turns off {off}.',
@@ -778,6 +818,31 @@ window.__ModuleLoader__.load({
         const roleRank = { official: 0, mcp: 1, base: 2, rest: 3 };
         const byRole = (left, right) =>
             (roleRank[left.role] ?? 9) - (roleRank[right.role] ?? 9) || left.name.localeCompare(right.name);
+        // The buckets answer "may I turn this off?"; the lenses answer "show me only the
+        // official ones / only third-party / only always-on". A lens never owns a switch, so it
+        // cannot flip something a bucket already decided.
+        const [lens, setLens] = useState(null);
+        const LENSES = [
+            { id: "official", label: t("lensOfficial") },
+            { id: "third", label: t("lensThird") },
+            { id: "base", label: t("lensBase") },
+            { id: "task", label: t("lensTask") },
+        ];
+        const [failKeys, setFailKeys] = useState(() => new Set());
+        const [undoInfo, setUndoInfo] = useState(null);
+        useEffect(() => {
+            if (undoInfo === null) return undefined;
+            const timer = setTimeout(() => setUndoInfo(null), 10000);
+            return () => clearTimeout(timer);
+        }, [undoInfo]);
+        const lensMatch = (row) => {
+            if (lens === null) return true;
+            if (lens === "official") return row.official === true;
+            if (lens === "third") return row.official !== true;
+            if (lens === "base") return row.role === "base";
+            return row.role === "rest" || row.role === "mcp";
+        };
+
         const drawers = collections.map(collection => ({
             collection,
             list: groups.filter(group => group.collection === collection.id).sort(byRole),
@@ -896,6 +961,10 @@ window.__ModuleLoader__.load({
             onEnable: value => enableAllInGroup(group, value),
             onRename: () => setDialog({ kind: "rename", group }),
             onDelete: () => setDialog({ kind: "deleteGroup", group }),
+            stale: staleByGroup.get(group.id) ?? 0,
+            onClean: () => {
+                void act("group.clean", { id: group.id }, result => flash(fmt(t, "staleDone", { n: result.removed })));
+            },
             onMoveUp: () => moveGroup(group.id, -1),
             onMoveDown: () => moveGroup(group.id, 1),
         }));
@@ -909,6 +978,22 @@ window.__ModuleLoader__.load({
             for (const row of skills) map.set(`skill:${row.id}`, row.enabled === true);
             return map;
         }, [plugins, skills]);
+        const knownKeys = useMemo(() => {
+            const set = new Set();
+            for (const row of plugins) set.add(`plugin:${row.id}`);
+            for (const row of skills) set.add(`skill:${row.id}`);
+            return set;
+        }, [plugins, skills]);
+        const staleByGroup = useMemo(() => {
+            const out = new Map();
+            for (const group of groups) {
+                let gone = 0;
+                for (const member of group.members) if (!knownKeys.has(`${member.kind}:${member.id}`)) gone += 1;
+                out.set(group.id, gone);
+            }
+            return out;
+        }, [groups, knownKeys]);
+
         const groupStats = useMemo(() => {
             const out = new Map();
             for (const group of groups) {
@@ -958,6 +1043,7 @@ window.__ModuleLoader__.load({
                 if (view !== "skill") combined = combined.concat(plugins);
                 if (view !== "plugin" && view !== "mcp") combined = combined.concat(skills);
                 combined = combined.filter(match);
+                combined = combined.filter(lensMatch);
                 if (groupId !== null) {
                     const set = groupMembers.get(groupId);
                     if (set !== undefined) combined = combined.filter(row => set.has(memberKey(row.kind, row.id)));
@@ -998,7 +1084,7 @@ window.__ModuleLoader__.load({
                         toolStats: row.mcp === true ? toolStats.get(server) ?? null : null,
                     };
                 });
-            }, [plugins, skills, query, view, groupId, groupMembers, data]);
+            }, [plugins, skills, query, view, groupId, groupMembers, data, lens]);
             const tree = useMemo(() => {
                 const order = [];
                 const byModule = new Map();
@@ -1075,10 +1161,17 @@ window.__ModuleLoader__.load({
 
             const openPresets = () => setDialog({ kind: "presets" });
 
-            const runGroupToggle = async (group, enabled) => {
-                await act("group.toggle", { id: group.id, enabled }, (result) => {
-                    const failed = result.results.filter(row => row.ok !== true).length;
-                    flash(failed === 0 ? fmt(t, "moved", { n: result.changed }) : `${fmt(t, "moved", { n: result.changed })} · ${fmt(t, "failed", { n: failed })}`);
+            const runGroupToggle = async (group, enabled, skipShared) => {
+                const before = group.members
+                    .map(member => ({ kind: member.kind, id: member.id, enabled: liveByMember.get(memberKey(member.kind, member.id)) === true }))
+                    .filter(row => row.enabled !== enabled);
+                await act("group.toggle", { id: group.id, enabled, skipShared: skipShared === true }, (result) => {
+                    const bad = result.results.filter(row => row.ok !== true);
+                    const failed = bad.length;
+                    setFailKeys(new Set(bad.map(row => `${row.kind}:${row.id}`)));
+                    if (failed === 0) flash(fmt(t, "moved", { n: result.changed }));
+                    else flash(fmt(t, "failSummary", { ok: result.changed, failed }));
+                    if (enabled === false && before.length > 0) setUndoInfo({ group, rows: before });
                 });
             };
 
@@ -1086,11 +1179,35 @@ window.__ModuleLoader__.load({
             // and show how many rows it actually touches. Switching off part of the
             // always-on layer is confirmed whatever its size: it can take the rest down.
             const enableAllInGroup = async (group, enabled) => {
-                if (group.members.length > 20 || (enabled === false && group.role === "base")) {
-                    setDialog({ kind: "confirmGroup", group, enabled });
+                const own = new Set(group.members.map(member => memberKey(member.kind, member.id)));
+                const shared = [];
+                for (const other of groups) {
+                    if (other.id === group.id) continue;
+                    for (const member of other.members) {
+                        const key = memberKey(member.kind, member.id);
+                        if (own.has(key) && !shared.includes(key)) shared.push(key);
+                    }
+                }
+                const labelOf = (key) => {
+                    const row = [...plugins, ...skills].find(item => memberKey(item.kind, item.id) === key);
+                    return row === undefined ? key : row.name;
+                };
+                const risky = group.members.filter((member) => {
+                    const row = [...plugins, ...skills].find(item => memberKey(item.kind, item.id) === memberKey(member.kind, member.id));
+                    return row !== undefined && (row.role === "base" || row.official === true);
+                });
+                if (group.members.length > 20 || (enabled === false && group.role === "base") || (enabled === false && shared.length > 0)) {
+                    setDialog({
+                        kind: "confirmGroup",
+                        group,
+                        enabled,
+                        shared: shared.map(key => ({ key, name: labelOf(key) })),
+                        riskyNames: risky.slice(0, 8).map(member => labelOf(memberKey(member.kind, member.id))),
+                        riskyCount: risky.length,
+                    });
                     return;
                 }
-                await runGroupToggle(group, enabled);
+                await runGroupToggle(group, enabled, false);
             };
 
             const runPresetApply = async (name, mode) => {
@@ -1169,7 +1286,21 @@ window.__ModuleLoader__.load({
             h("div", { style: { flex: 1 } }),
             h(Input, { value: query, onChange: setQuery, placeholder: t("search") }));
 
+            const chips = h("div", { style: { display: "flex", gap: 4, flexWrap: "wrap", padding: "0 4px 8px" } },
+                h(ActionChip, { key: "all", label: t("lensAll"), tone: lens === null ? "brand" : "neutral", onClick: () => setLens(null) }),
+                ...LENSES.map(item => h(ActionChip, {
+                    key: item.id,
+                    label: item.label,
+                    tone: lens === item.id ? "brand" : "neutral",
+                    onClick: () => setLens(lens === item.id ? null : item.id),
+                })));
+
             const rail = h("div", {
+                onDragOver: (event) => {
+                    const box = event.currentTarget.getBoundingClientRect();
+                    if (event.clientY < box.top + 36) event.currentTarget.scrollTop -= 14;
+                    else if (event.clientY > box.bottom - 36) event.currentTarget.scrollTop += 14;
+                },
                 style: {
                     width: railWidth,
                     flex: `0 0 ${railWidth}px`,
@@ -1187,6 +1318,7 @@ window.__ModuleLoader__.load({
                 },
             },
             h("div", { style: { fontSize: 11, letterSpacing: 0.4, color: T.text3, textTransform: "uppercase" } }, t("groups"))),
+            chips,
 
             h("button", {
                 type: "button",
@@ -1261,10 +1393,7 @@ window.__ModuleLoader__.load({
                         style: { minWidth: 0, fontSize: 11.5, letterSpacing: "0.04em", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
                         title: drawer.collection.name,
                     }, drawer.collection.name),
-                    h("span", {
-                        title: fmt(t, "statHint", { on: sumStats(drawer.list).on, off: sumStats(drawer.list).total - sumStats(drawer.list).on }),
-                        style: { fontSize: 10.5, color: T.text3, fontVariantNumeric: "tabular-nums" },
-                    }, statText(sumStats(drawer.list)))),
+                    ),
                     drawer.collection.id === "default"
                         ? null
                         : h(MiniIcon, {
@@ -1364,12 +1493,13 @@ window.__ModuleLoader__.load({
                     h(Button, { small: true, onClick: () => { void openAuto(); }, disabled: busy || data === null }, t("railEmptyAction")))
                 : null);
 
-            const rowNode = (row, nested) => h(Row, {
+            const rowNode = (row, nested) => h(RowMemo, {
                 key: memberKey(row.kind, row.id),
                 row,
                 t,
                 nested: nested === true,
                 picked: picked.has(memberKey(row.kind, row.id)),
+                failed: failKeys.has(memberKey(row.kind, row.id)),
                 onPick: (value) => {
                     const next = new Set(picked);
                     const key = memberKey(row.kind, row.id);
@@ -1384,9 +1514,10 @@ window.__ModuleLoader__.load({
                 busy,
             });
 
-            const treeNodes = tree.map(node => {
+            const searching = `${query}`.trim() !== "";
+        const treeNodes = tree.map(node => {
                 if (node.entries.length === 1) return rowNode(node.entries[0], false);
-                const open = openModules.has(node.key);
+                const open = searching === true || openModules.has(node.key);
                 const enabled = node.entries.filter(entry => entry.enabled === true).length;
                 const allOn = enabled === node.entries.length;
                 const allPicked = node.entries.every(entry => picked.has(memberKey(entry.kind, entry.id)));
@@ -1503,6 +1634,29 @@ window.__ModuleLoader__.load({
             }),
             h(ActionChip, { label: t("clearSelection"), tone: "neutral", onClick: () => setPicked(new Set()) }));
 
+            const undoBar = undoInfo === null ? null : h("div", {
+                style: {
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    padding: "6px 14px",
+                    borderTop: `1px solid ${T.borderSoft}`,
+                    background: tint(T.warn, 10),
+                    fontSize: 12,
+                    color: T.text2,
+                },
+            },
+            h("span", { style: { flex: 1, minWidth: 0 } }, fmt(t, "undoSaved", { name: undoInfo.group.name, n: undoInfo.rows.length })),
+            h(ActionChip, {
+                label: t("undoLabel"),
+                tone: "brand",
+                onClick: async () => {
+                    const rows = undoInfo.rows;
+                    setUndoInfo(null);
+                    await act("bulk", { items: rows.map(row => ({ kind: row.kind, id: row.id, enabled: row.enabled })) }, () => flash(t("undoDone")));
+                },
+            }));
+
             const footer = data === null ? null : h("div", {
                 style: {
                     display: "flex",
@@ -1547,6 +1701,7 @@ window.__ModuleLoader__.load({
                 },
             }) : null, list),
             selectionBar,
+            undoBar,
             note === null ? null : h("div", {
                 style: {
                     padding: "7px 14px",
@@ -1637,7 +1792,7 @@ window.__ModuleLoader__.load({
                     void runPresetApply(name, mode);
                 },
                 onApplyPresetNow: (name, mode) => runPresetApply(name, mode),
-                onRunGroupToggle: (group, enabled) => runGroupToggle(group, enabled),
+                onRunGroupToggle: (group, enabled, skipShared) => runGroupToggle(group, enabled, skipShared),
                 onProbe: async (payload) => {
                     try { return await runOp("mcp.probe", payload); }
                     catch (failure) { return { error: failure.message }; }
@@ -1758,7 +1913,7 @@ window.__ModuleLoader__.load({
             return { accent: T.danger, accentDepth: 95 };
         }
 
-        function GroupRow({ group, stats, t, accent, accentDepth, active, onSelect, onEnable, onRename, onDelete, onMoveUp, onMoveDown }) {
+        function GroupRow({ group, stats, t, accent, accentDepth, active, onSelect, onEnable, onRename, onDelete, onMoveUp, onMoveDown, stale, onClean }) {
             const [hover, setHover] = useState(false);
             const count = group.members.length;
             const live = stats ?? { on: 0, total: count };
@@ -1832,7 +1987,25 @@ window.__ModuleLoader__.load({
                     flex: "0 0 auto",
                 },
             }),
-            group.stale > 0 ? h("span", { title: fmt(t, "stale", { n: group.stale }), style: { color: T.warn, fontSize: 11, fontWeight: 700 } }, "!") : null,
+            (group.stale ?? stale ?? 0) > 0
+                ? h("button", {
+                    type: "button",
+                    title: t("staleHint"),
+                    onClick: (event) => { event.stopPropagation(); onClean(); },
+                    style: {
+                        border: `1px solid ${tint(T.warn, 34)}`,
+                        background: tint(T.warn, 12),
+                        color: T.warn,
+                        borderRadius: 999,
+                        padding: "0 5px",
+                        fontSize: 10,
+                        fontWeight: 700,
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                        flex: "0 0 auto",
+                    },
+                }, fmt(t, "staleChip", { n: group.stale ?? stale }))
+                : null,
             h("span", {
                 title: fmt(t, "statHint", { on: live.on, off: live.total - live.on }),
                 style: {
@@ -1889,7 +2062,7 @@ window.__ModuleLoader__.load({
         }
 
 
-        function Row({ row, t, picked, onPick, onToggle, busy, onEdit, onDelete, onTools, nested }) {
+        function Row({ row, t, picked, onPick, onToggle, busy, onEdit, onDelete, onTools, nested, failed }) {
             const [hover, setHover] = useState(false);
             const readOnly = row.manageable === false;
             const selfEntry = row.self === true;
@@ -1990,6 +2163,9 @@ window.__ModuleLoader__.load({
                     textAlign: "right",
                 },
             }, row.enabled ? t("enabled") : t("disabled")),
+            failed === true
+                ? h("span", { title: t("failHint"), style: { color: T.danger, fontWeight: 700, fontSize: 11, flex: "0 0 auto" } }, "!")
+                : null,
             h(Switch, {
                 checked: row.enabled,
                 disabled: busy || readOnly || selfEntry || String(row.id).startsWith("patch:"),
@@ -2342,6 +2518,8 @@ function McpEditDialog({ row, t, busy, onClose, onSave, onProbe }) {
             });
         }
 
+        const RowMemo = React.memo(Row);
+
         function DialogHost({ dialog, t, busy, groups, data, onClose, onSaveMcp, onDeleteMcp, onSaveTool, onProbe, act, flash, onImportMarket, onApplyAuto, onSaveGroup, onSaveCollection, onDeleteCollection, onSavePreset, onApplyPreset, onApplyPresetNow, onRunGroupToggle }) {
             const [name, setName] = useState(dialog.kind === "rename" ? dialog.group.name : "");
             const foot = (children) => children;
@@ -2382,24 +2560,68 @@ function McpEditDialog({ row, t, busy, onClose, onSave, onProbe }) {
             }
 
             if (dialog.kind === "confirmGroup") {
-                return h(Dialog, {
-                    title: t("confirmGroupTitle"),
-                    hint: fmt(t, "confirmGroupBody", {
-                        name: dialog.group.name,
-                        n: dialog.group.members.length,
-                        action: dialog.enabled ? t("toggleGroupOn") : t("toggleGroupOff"),
-                    }),
-                    onClose,
-                    footer: foot([
+                const shared = dialog.shared ?? [];
+                const riskyNames = dialog.riskyNames ?? [];
+                const riskyCount = dialog.riskyCount ?? 0;
+                const total = dialog.group.members.length;
+                const body = h("div", { style: { display: "flex", flexDirection: "column", gap: 9 } },
+                    h("div", null, shared.length > 0
+                        ? fmt(t, "confirmSharedBody", {
+                            name: dialog.group.name,
+                            shared: shared.length,
+                            all: total,
+                            own: total - shared.length,
+                            names: shared.slice(0, 4).map(item => item.name).join(", ") + (shared.length > 4 ? "…" : ""),
+                        })
+                        : fmt(t, "confirmGroupBody", {
+                            name: dialog.group.name,
+                            n: total,
+                            action: dialog.enabled ? t("toggleGroupOn") : t("toggleGroupOff"),
+                        })),
+                    riskyCount > 0 && dialog.enabled === false
+                        ? h("div", {
+                            style: {
+                                padding: "7px 10px",
+                                borderRadius: 8,
+                                background: tint(T.danger, 12),
+                                border: `1px solid ${tint(T.danger, 32)}`,
+                                color: T.danger,
+                                fontSize: 12,
+                                fontWeight: 600,
+                                lineHeight: 1.5,
+                            },
+                        }, `${t("baseWarning")} ${riskyNames.join(", ")}${riskyCount > riskyNames.length ? "…" : ""}`)
+                        : null);
+                const actions = shared.length > 0
+                    ? [
+                        h(Button, { key: "c", onClick: onClose }, t("cancel")),
+                        h(Button, {
+                            key: "own",
+                            tone: "primary",
+                            disabled: busy,
+                            onClick: () => { onClose(); void onRunGroupToggle(dialog.group, dialog.enabled, true); },
+                        }, fmt(t, "confirmOnlyOwn", { own: total - shared.length })),
+                        h(Button, {
+                            key: "all",
+                            tone: "danger",
+                            disabled: busy,
+                            onClick: () => { onClose(); void onRunGroupToggle(dialog.group, dialog.enabled, false); },
+                        }, fmt(t, "confirmAll", { all: total })),
+                    ]
+                    : [
                         h(Button, { key: "c", onClick: onClose }, t("cancel")),
                         h(Button, {
                             key: "s",
                             tone: "primary",
                             disabled: busy,
-                            onClick: () => onRunGroupToggle(dialog.group, dialog.enabled),
+                            onClick: () => { onClose(); void onRunGroupToggle(dialog.group, dialog.enabled, false); },
                         }, t("applyNow")),
-                    ]),
-                });
+                    ];
+                return h(Dialog, {
+                    title: shared.length > 0 ? t("confirmSharedTitle") : t("confirmGroupTitle"),
+                    onClose,
+                    footer: foot(actions),
+                }, body);
             }
 
             if (dialog.kind === "confirmPreset") {

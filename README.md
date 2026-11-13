@@ -47,16 +47,24 @@ the plugin hot-loads.
 - **The rail shows on 全部 only**: picking 插件 / 技能 / MCP gives the list the full width.
 - **Labels are the package's own `keywords`**, up to four. Nothing inferred is shown as a label;
   the topic words we guess only make rows findable in search.
-- **Live counts**: every group shows `on/total`, and the drawer header sums its groups, so you can
-  see at a glance whether flipping a group would change anything.
+- **Live counts**: every group shows `on/total`. The drawer header carries no sum on purpose — a
+  package may sit in two groups, and a number that counts it twice is worse than no number.
+- **Lenses**: a second axis above the rail — `Official`, `Third-party`, `Always on`, `Per task`. A
+  lens only filters; it owns no switch, so a package can be found as third-party and as always-on
+  without being flippable from two groups at once.
 - **Groups**: create, rename, delete, add the current selection, and flip a whole group on or off.
-  Groups over 20 members ask first.
+  A bulk flip asks first when the group is large, when it is a base bucket, or when some members
+  also live in another group: it names those members and offers *only what this group owns* or *all
+  of them*. Base and official members turn red with "存在基础插件，禁用可能导致界面异常。"
+- **Undo and failures**: flipping a group off leaves a ten-second undo bar. Rows the host refused
+  keep a red `!`, and the toast reports both numbers instead of only the successes. A group that
+  still lists an uninstalled plugin shows `n gone` and cleans them on click.
 - **Auto grouping**: one button proposes exactly four buckets — **官方** (ships with the client),
-  **MCP 服务器**, **通用** (third-party rows that read like a layer: context, memory, market, sidebar,
-  runtime…), and **用户下载** (everything else, skills included) — previewed before anything is written.
-  The first three land inside **默认分组群**; 用户下载 starts with no collection. Chips under a group name
-  are the package's own `keywords` where it declares them, topped up with topic words; they inform, they
-  do not decide. Applying it replaces only the previous automatic groups (including leftovers from older
+  **MCP 服务器**, **第三方底座** (third-party rows that read like a layer: context, memory, market,
+  sidebar, runtime…), and **用户下载** (everything else, skills included) — previewed before anything
+  is written. The first three land inside **默认分组群**; 用户下载 starts with no collection. Chips under
+  a group name are the package's own `keywords`, and nothing else; no keywords means no chips.
+  Applying it replaces only the previous automatic groups (including leftovers from older
   taxonomies); hand-made groups are left alone.
 - **Drawers**: collections are collapsed by default and hold the groups you file into them. Drag a group
   onto a drawer to file it, drag it onto 未入群 to take it out; 新建分组 lands in 未入群, 新建分组群 adds a
