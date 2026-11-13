@@ -181,3 +181,13 @@ and `POST /tool-hub/api/op` — guarded by the same origin check the bundled mar
 MIT
 - Rows in a group carry a "move out" action (also on the selection bar): it drops the member from that group only, leaving switches and the group itself alone.
 - Presets can be refreshed in place: "Update" overwrites the named preset with what is on right now, after a confirmation.
+
+## One switch for everything third-party
+
+The toolbar has a red **Turn off third-party** button. It only flips switches - nothing is uninstalled - and it leaves official and host-managed rows alone. Before touching anything it writes a rollback point to `<state dir>/rollback/<timestamp>.json`.
+
+The confirmation lists every plugin, MCP server and skill that will be turned off, groups them, and paints always-on or interface-level plugins red with the line "N of them are always-on or interface plugins, so the UI may break." You must tick "I understand the interface may break, and the rollback point is saved" before the button enables.
+
+Afterwards a **Restore** button appears and re-opens exactly what the rollback point recorded (also confirmed once). Switching is per-entry and restarts the host each time, so a full sweep takes 30-60 seconds: the buttons grey out and say "Working..." meanwhile.
+
+The panel never turns itself off, otherwise nothing would be left to restore with.

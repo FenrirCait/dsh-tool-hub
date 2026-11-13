@@ -197,6 +197,25 @@ window.__ModuleLoader__.load({
                 presetUpdateTitle: '更新预设',
                 presetUpdateBody: '用当前开关状态覆盖「{name}」？原来的记录会被替换。',
                 presetUpdated: '已更新「{name}」',
+            thirdOff: '关闭第三方',
+            thirdOffTitle: '关闭所有第三方功能',
+            thirdOffHint: '只关不删：插件与技能会被禁用，官方与宿主托管项不动；按下去之前先写一份回滚点。',
+            thirdOffWarn: '其中 {n} 项是常开底座或界面类插件，关闭后界面可能异常。',
+            thirdOffAck: '我了解界面可能异常，并已保存回滚点',
+            thirdOffApply: '全部关闭（{n} 项）',
+            thirdWorking: '正在逐项处理…',
+            thirdOffDone: '已关闭 {n} 项，回滚点 {file}',
+            thirdOffBusy: '正在关闭 {n} 项（逐项重启，约 30–60 秒），期间按钮会变灰。',
+            thirdOffEmpty: '没有可关闭的第三方功能。',
+            thirdRestore: '恢复',
+            thirdRestoreTitle: '恢复到关闭前',
+            thirdRestoreBody: '按回滚点 {file} 重新打开 {n} 项？',
+            thirdRestoreBusy: '正在恢复 {n} 项（约 30–60 秒），期间按钮会变灰。',
+            thirdRestoreDone: '已恢复 {n} 项',
+            thirdRollback: '回滚点 {file}',
+            thirdKindPlugin: '插件',
+            thirdKindSkill: '技能',
+            thirdKindMcp: 'MCP 服务器',
                 groupRemove: '移出',
                 groupRemoved: '已从本组移出 {n} 项',
                 removeFromGroup: '从本组移出',
@@ -399,6 +418,25 @@ window.__ModuleLoader__.load({
                 presetUpdateTitle: 'Update preset',
                 presetUpdateBody: 'Overwrite "{name}" with what is on right now? The old record is replaced.',
                 presetUpdated: 'Updated "{name}"',
+            thirdOff: 'Third-party off',
+            thirdOffTitle: 'Turn off every third-party feature',
+            thirdOffHint: 'Switches only: nothing is uninstalled. Official and host-managed rows stay; a rollback point is written first.',
+            thirdOffWarn: '{n} of them are always-on or interface plugins, so the UI may break.',
+            thirdOffAck: 'I understand the interface may break, and the rollback point is saved',
+            thirdOffApply: 'Turn off all ({n})',
+            thirdWorking: 'Working…',
+            thirdOffDone: 'Turned off {n}, rollback {file}',
+            thirdOffBusy: 'Turning off {n} items one by one (~30–60s); the buttons grey out meanwhile.',
+            thirdOffEmpty: 'Nothing third-party is on.',
+            thirdRestore: 'Restore',
+            thirdRestoreTitle: 'Restore what was on',
+            thirdRestoreBody: 'Re-open {n} items from {file}?',
+            thirdRestoreBusy: 'Restoring {n} items (~30–60s); the buttons grey out meanwhile.',
+            thirdRestoreDone: 'Restored {n}',
+            thirdRollback: 'rollback {file}',
+            thirdKindPlugin: 'Plugins',
+            thirdKindSkill: 'Skills',
+            thirdKindMcp: 'MCP servers',
                 groupRemove: 'Remove',
                 groupRemoved: 'Removed {n} from this group',
                 removeFromGroup: 'Remove from group',
@@ -737,6 +775,30 @@ window.__ModuleLoader__.load({
             const [dialog, setDialog] = useState(null);
             const dirty = useRef(false);
 
+            const [thirdSnapshot, setThirdSnapshot] = useState(null);
+
+            const loadThird = useCallback(async () => {
+                try {
+                    const result = await runOp("thirdparty.status");
+                    setThirdSnapshot(result.snapshot ?? null);
+                    return result;
+                }
+                catch {
+                    setThirdSnapshot(null);
+                    return { targets: [], snapshot: null };
+                }
+            }, []);
+
+            const openThird = useCallback(async () => {
+                const status = await loadThird();
+                const rows = Array.isArray(status.targets) ? status.targets : [];
+                setDialog({ kind: "thirdOffer", rows, snapshot: status.snapshot ?? null });
+            }, [loadThird]);
+
+            const openRestore = useCallback(() => {
+                setDialog({ kind: "thirdRestore", snapshot: thirdSnapshot });
+            }, [thirdSnapshot]);
+
             const refresh = useCallback(async () => {
                 try {
                     const next = await readSnapshot();
@@ -750,6 +812,7 @@ window.__ModuleLoader__.load({
 
             useEffect(() => {
                 refresh();
+                void loadThird();
             }, []);
 
             const flash = useCallback((message) => {
@@ -1357,6 +1420,10 @@ window.__ModuleLoader__.load({
                     }, fmt(t, "marketImport", { n: data.market.groups.length }))
                     : null,
                 h(Button, { onClick: openPresets, disabled: busy }, t("preset")),
+                h(Button, { tone: "danger", onClick: () => { void openThird(); }, disabled: busy }, busy ? t("thirdWorking") : t("thirdOff")),
+                thirdSnapshot === null
+                    ? null
+                    : h(Button, { onClick: openRestore, disabled: busy, title: fmt(t, "thirdRollback", { file: thirdSnapshot.file }) }, busy ? t("thirdWorking") : t("thirdRestore")),
                 h(Button, { onClick: refresh, disabled: busy }, t("reload"))));
 
             const tabs = h("div", {
@@ -1931,6 +1998,22 @@ window.__ModuleLoader__.load({
                 },
                 onApplyPresetNow: (name, mode) => runPresetApply(name, mode),
                 onAskPresetUpdate: (name) => setDialog({ kind: "presetUpdate", name }),
+                onThirdOff: async () => { await onThirdOff(); },
+                onThirdRestore: async (snapshot) => { await onThirdRestore(snapshot); },
+                onThirdOff: async () => {
+                    const result = await act("thirdparty.off");
+                    if (result !== null && result !== undefined) {
+                        flash(fmt(t, "thirdOffDone", { n: result.disabled, file: result.snapshot ?? "—" }));
+                    }
+                    await loadThird();
+                },
+                onThirdRestore: async (snapshot) => {
+                    const result = await act("thirdparty.restore", { file: snapshot?.file });
+                    if (result !== null && result !== undefined) {
+                        flash(fmt(t, "thirdRestoreDone", { n: result.restored }));
+                    }
+                    await loadThird();
+                },
                 onRunGroupToggle: (group, enabled, skipShared) => runGroupToggle(group, enabled, skipShared),
                 onProbe: async (payload) => {
                     try { return await runOp("mcp.probe", payload); }
@@ -2682,7 +2765,8 @@ function McpEditDialog({ row, t, busy, onClose, onSave, onProbe }) {
 
         const RowMemo = React.memo(Row);
 
-        function DialogHost({ dialog, t, busy, groups, data, onClose, onSaveMcp, onDeleteMcp, onSaveTool, onProbe, act, flash, onImportMarket, onApplyAuto, onSaveGroup, onSaveCollection, onDeleteCollection, onSavePreset, onApplyPreset, onApplyPresetNow, onUpdatePreset, onAskPresetUpdate, onRunGroupToggle }) {
+        function DialogHost({ dialog, t, busy, groups, data, onClose, onSaveMcp, onDeleteMcp, onSaveTool, onProbe, act, flash, onImportMarket, onApplyAuto, onSaveGroup, onSaveCollection, onDeleteCollection, onSavePreset, onApplyPreset, onApplyPresetNow, onUpdatePreset, onAskPresetUpdate, onThirdOff, onThirdRestore, onRunGroupToggle }) {
+            const [thirdAck, setThirdAck] = useState(false);
             const [name, setName] = useState(dialog.kind === "rename" ? dialog.group.name : "");
             const foot = (children) => children;
             const mcpIds = new Set((data === null ? [] : data.plugins).filter(row => row.mcp === true).map(row => row.id));
@@ -3036,6 +3120,98 @@ function McpEditDialog({ row, t, busy, onClose, onSave, onProbe }) {
                 ],
             });
         }
+        if (dialog.kind === "thirdOffer") {
+            const rows = Array.isArray(dialog.rows) ? dialog.rows : [];
+            const plugins = rows.filter(row => row.mcp !== true && row.kind !== "skill");
+            const mcp = rows.filter(row => row.mcp === true);
+            const skills = rows.filter(row => row.kind === "skill");
+            const risky = rows.filter(row => row.role === "base").length;
+            const section = (label, list) => list.length === 0 ? null : h("div", { style: { marginTop: 8 } },
+                h("div", { style: { fontSize: 11.5, color: T.text3, marginBottom: 4 } }, label + " · " + list.length),
+                h("div", { style: { display: "flex", flexWrap: "wrap", gap: 4 } },
+                    list.map(row => h("span", {
+                        key: row.kind + ":" + row.id,
+                        title: row.moduleName ?? row.id,
+                        style: {
+                            fontSize: 11,
+                            padding: "2px 7px",
+                            borderRadius: 6,
+                            border: "1px solid " + (row.role === "base" ? tint(T.danger, 45) : T.borderSoft),
+                            color: row.role === "base" ? T.danger : T.text2,
+                            background: row.role === "base" ? tint(T.danger, 10) : "transparent",
+                        },
+                    }, row.name))));
+            return h(Dialog, {
+                title: t("thirdOffTitle"),
+                hint: t("thirdOffHint"),
+                onClose,
+                width: 560,
+                footer: foot([
+                    h(Button, { key: "c", onClick: onClose }, t("cancel")),
+                    h(Button, {
+                        key: "o",
+                        tone: "danger",
+                        disabled: busy || thirdAck !== true || rows.length === 0,
+                        onClick: () => {
+                            onClose();
+                            flash(fmt(t, "thirdOffBusy", { n: rows.length }));
+                            void onThirdOff();
+                        },
+                    }, fmt(t, "thirdOffApply", { n: rows.length })),
+                ]),
+            },
+            rows.length === 0
+                ? h("div", { style: emptyStyle }, t("thirdOffEmpty"))
+                : h("div", { style: { maxHeight: 280, overflowY: "auto", paddingRight: 4 } },
+                    section(t("thirdKindPlugin"), plugins),
+                    section(t("thirdKindMcp"), mcp),
+                    section(t("thirdKindSkill"), skills)),
+            risky === 0 ? null : h("div", {
+                style: {
+                    marginTop: 10,
+                    padding: "7px 9px",
+                    borderRadius: 7,
+                    border: "1px solid " + tint(T.danger, 42),
+                    background: tint(T.danger, 10),
+                    color: T.danger,
+                    fontSize: 11.5,
+                },
+            }, fmt(t, "thirdOffWarn", { n: risky })),
+            h("label", {
+                style: { display: "flex", alignItems: "center", gap: 7, marginTop: 10, fontSize: 12, color: T.text2, cursor: "pointer" },
+            },
+                h("input", {
+                    type: "checkbox",
+                    checked: thirdAck === true,
+                    onChange: (event) => setThirdAck(event.target.checked === true),
+                }),
+                t("thirdOffAck")));
+        }
+
+        if (dialog.kind === "thirdRestore") {
+            const snapshot = dialog.snapshot ?? {};
+            const count = (Array.isArray(snapshot.plugins) ? snapshot.plugins.length : 0)
+                + (Array.isArray(snapshot.skills) ? snapshot.skills.length : 0);
+            return h(Dialog, {
+                title: t("thirdRestoreTitle"),
+                hint: fmt(t, "thirdRestoreBody", { file: snapshot.file ?? "—", n: count }),
+                onClose,
+                footer: foot([
+                    h(Button, { key: "c", onClick: onClose }, t("cancel")),
+                    h(Button, {
+                        key: "r",
+                        tone: "primary",
+                        disabled: busy || count === 0,
+                        onClick: () => {
+                            onClose();
+                            flash(fmt(t, "thirdRestoreBusy", { n: count }));
+                            void onThirdRestore(snapshot);
+                        },
+                    }, t("thirdRestore")),
+                ]),
+            });
+        }
+
         if (dialog.kind === "presets") {
                 const presets = data === null ? [] : data.presets;
                 const enabledCount = data === null ? 0 : data.plugins.filter(row => row.enabled).length + data.skills.filter(row => row.enabled).length;

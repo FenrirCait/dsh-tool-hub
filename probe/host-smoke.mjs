@@ -506,6 +506,48 @@ check('preset.update rewrites the snapshot in place', r.ok === true && r.data.up
 const missing = await op('preset.update', { name: 'probe-no-such' })
 check('preset.update refuses a name that does not exist', missing.ok === false && missing.error.code === 'no-preset', JSON.stringify(missing.error))
 
+// The third-party sweep: it must see third-party plugins and MCP servers, keep official rows and
+// itself, write a rollback point first, and be able to put everything back afterwards.
+await op('toggle', { kind: 'plugin', id: 'e2', enabled: true })
+await op('toggle', { kind: 'plugin', id: 'e3', enabled: true })
+r = await op('thirdparty.status', {})
+const targets = r.ok === true ? r.data.targets : []
+check('thirdparty.status lists third-party plugins and skips official and self',
+    r.ok === true
+    && targets.some(row => row.id === 'e2')
+    && targets.some(row => row.id === 'e3')
+    && !targets.some(row => row.id === 'e1')
+    && !targets.some(row => row.id === 'e5')
+    && !targets.some(row => row.id === 'e6'),
+    JSON.stringify(targets.map(row => row.id)))
+
+const beforeOff = (await get('/tool-hub/api/snapshot')).data.plugins
+r = await op('thirdparty.off', {})
+const afterOff = (await get('/tool-hub/api/snapshot')).data.plugins
+const offOk = r.ok === true && r.data.disabled > 0 && typeof r.data.snapshot === 'string'
+check('thirdparty.off disables the sweep and writes a rollback file',
+    offOk
+    && afterOff.find(row => row.id === 'e2').enabled === false
+    && afterOff.find(row => row.id === 'e3').enabled === false
+    && afterOff.find(row => row.id === 'e1').enabled === beforeOff.find(row => row.id === 'e1').enabled,
+    JSON.stringify({ disabled: r.data?.disabled, snapshot: r.data?.snapshot, e2: afterOff.find(row => row.id === 'e2')?.enabled, e1: afterOff.find(row => row.id === 'e1')?.enabled }))
+
+const listed = await op('thirdparty.status', {})
+check('thirdparty.status reports the rollback point', listed.ok === true && listed.data.snapshot !== null && Array.isArray(listed.data.snapshot.plugins), JSON.stringify(listed.data?.snapshot?.file))
+
+r = await op('thirdparty.restore', {})
+const afterRestore = (await get('/tool-hub/api/snapshot')).data.plugins
+check('thirdparty.restore turns the same rows back on',
+    r.ok === true && r.data.restored > 0
+    && afterRestore.find(row => row.id === 'e2').enabled === true
+    && afterRestore.find(row => row.id === 'e3').enabled === true,
+    JSON.stringify({ restored: r.data?.restored }))
+
+r = await op('thirdparty.off', {})
+const twice = await op('thirdparty.off', {})
+check('a second sweep finds nothing left to turn off', twice.ok === true && twice.data.disabled === 0, JSON.stringify(twice.data))
+await op('thirdparty.restore', {})
+
 server.close()
 const failed = results.filter(row => row.ok !== true)
 console.log(`\n${results.length - failed.length}/${results.length} passed`)
