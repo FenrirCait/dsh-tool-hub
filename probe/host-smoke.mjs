@@ -478,6 +478,19 @@ await writeFile(stateFile, JSON.stringify(rawState, null, 2))
 r = await op('group.clean', { id: cleanTarget.id })
 check('cleaning drops members that no longer exist', r.ok === true && r.data.removed === 1, JSON.stringify(r.data))
 
+// Dragging rows onto a group files them there; a sub-package drags its parent in too, and the
+// same row dropped twice is not counted twice.
+const addTarget = (await get('/tool-hub/api/snapshot')).data.groups.find(group => group.name === '共有乙')
+r = await op('group.add', { id: addTarget.id, members: [{ kind: 'plugin', id: 'e10' }, { kind: 'plugin', id: 'e10' }] })
+const addedGroup = r.ok === true ? (await get('/tool-hub/api/snapshot')).data.groups.find(group => group.id === addTarget.id) : null
+const addedIds = addedGroup === null ? [] : addedGroup.members.map(member => member.id)
+check('group.add files the whole package and dedupes', r.ok === true && r.data.added === 2 && addedIds.includes('e9') && addedIds.includes('e10'), JSON.stringify({ added: r.data?.added, addedIds }))
+
+// Surface and keywords come from package.json, so a row can be filtered without guessing.
+const everyRow = (await get('/tool-hub/api/snapshot')).data.plugins
+check('rows carry a surface field', everyRow.every(row => Object.prototype.hasOwnProperty.call(row, 'surface')), JSON.stringify(everyRow.slice(0, 2).map(row => row.surface)))
+check('rows carry keywords', everyRow.every(row => Array.isArray(row.keywords)), JSON.stringify(everyRow.slice(0, 2).map(row => row.keywords)))
+
 
 server.close()
 const failed = results.filter(row => row.ok !== true)

@@ -49,9 +49,16 @@ the plugin hot-loads.
   the topic words we guess only make rows findable in search.
 - **Live counts**: every group shows `on/total`. The drawer header carries no sum on purpose — a
   package may sit in two groups, and a number that counts it twice is worse than no number.
-- **Lenses**: a second axis above the rail — `Official`, `Third-party`, `Always on`, `Per task`. A
-  lens only filters; it owns no switch, so a package can be found as third-party and as always-on
-  without being flippable from two groups at once.
+- **Three facet rows**, all read from the install itself: **Origin** (Official / Third-party /
+  Skill / MCP, from the module name), **Shape** (Has UI / Headless, from `dsh.client` and
+  `dsh.bundle` in the package's own `package.json`), and **Word** (only keywords that at least two
+  packages declare). They filter and own no switch, and nothing is inferred from a description, so a
+  package never vanishes because we guessed its topic wrong. Groups no longer carry chips.
+- **A pinned foot**: 新建分组 and 新建分组群 stay at the bottom of the rail; only the middle scrolls.
+- **Shift-click selects a range**, like a file manager, with a collapsed module contributing all of
+  its entries.
+- **Rows drag into groups**: select rows, drop them on a group, and the package tree expansion
+  applies (`group.add`).
 - **Groups**: create, rename, delete, add the current selection, and flip a whole group on or off.
   A bulk flip asks first when the group is large, when it is a base bucket, or when some members
   also live in another group: it names those members and offers *only what this group owns* or *all

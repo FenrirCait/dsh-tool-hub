@@ -1,0 +1,13 @@
+import { readFileSync, writeFileSync } from "node:fs";
+const p = "client/client.js";
+let s = readFileSync(p, "utf8");
+const start = s.indexOf("        // Words only become a facet");
+const end = s.indexOf("        }, [plugins, skills]);", start) + "        }, [plugins, skills]);\n".length;
+if (start < 0 || end <= start) throw new Error("block not found");
+const block = s.slice(start, end);
+s = s.slice(0, start) + s.slice(end);
+const anchor = "            const skills = data === null ? [] : data.skills;\n";
+if (!s.includes(anchor)) throw new Error("anchor missing");
+s = s.replace(anchor, anchor + block);
+writeFileSync(p, s, "utf8");
+console.log("kwOptions moved");

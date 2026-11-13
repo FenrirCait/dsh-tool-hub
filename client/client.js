@@ -242,6 +242,14 @@ window.__ModuleLoader__.load({
                 kindSkill: '技能',
                 skillRoots: '技能目录',
                 lensAll: '全部',
+                lensMcp: 'MCP',
+                facetOrigin: '来源',
+                facetShape: '形态',
+                facetWord: '词',
+                facetSkill: '技能',
+                facetUi: '有界面',
+                facetHost: '纯后端',
+                rowsFiled: '已把 {n} 项加入「{name}」',
             lensOfficial: '官方',
             lensThird: '第三方',
             lensBase: '常开',
@@ -430,6 +438,14 @@ window.__ModuleLoader__.load({
                 kindSkill: 'Skill',
                 skillRoots: 'Skill folders',
                 lensAll: 'All',
+                lensMcp: 'MCP',
+                facetOrigin: 'Origin',
+                facetShape: 'Shape',
+                facetWord: 'Word',
+                facetSkill: 'Skill',
+                facetUi: 'Has UI',
+                facetHost: 'Headless',
+                rowsFiled: 'Filed {n} into "{name}"',
             lensOfficial: 'Official',
             lensThird: 'Third-party',
             lensBase: 'Always on',
@@ -818,15 +834,22 @@ window.__ModuleLoader__.load({
         const roleRank = { official: 0, mcp: 1, base: 2, rest: 3 };
         const byRole = (left, right) =>
             (roleRank[left.role] ?? 9) - (roleRank[right.role] ?? 9) || left.name.localeCompare(right.name);
-        // The buckets answer "may I turn this off?"; the lenses answer "show me only the
-        // official ones / only third-party / only always-on". A lens never owns a switch, so it
-        // cannot flip something a bucket already decided.
-        const [lens, setLens] = useState(null);
-        const LENSES = [
+        // Facets answer "show me only…" and own no switch, so a package can be found as
+        // third-party and as headless without being flippable from two places at once. Every
+        // facet is read from data the package itself declares: its module name or its
+        // package.json. Nothing here is inferred from a description.
+        const [origin, setOrigin] = useState("all");
+        const [shape, setShape] = useState("all");
+        const [kw, setKw] = useState(null);
+        const ORIGINS = [
             { id: "official", label: t("lensOfficial") },
             { id: "third", label: t("lensThird") },
-            { id: "base", label: t("lensBase") },
-            { id: "task", label: t("lensTask") },
+            { id: "skill", label: t("facetSkill") },
+            { id: "mcp", label: t("lensMcp") },
+        ];
+        const SHAPES = [
+            { id: "ui", label: t("facetUi") },
+            { id: "host", label: t("facetHost") },
         ];
         const [failKeys, setFailKeys] = useState(() => new Set());
         const [undoInfo, setUndoInfo] = useState(null);
@@ -835,13 +858,19 @@ window.__ModuleLoader__.load({
             const timer = setTimeout(() => setUndoInfo(null), 10000);
             return () => clearTimeout(timer);
         }, [undoInfo]);
-        const lensMatch = (row) => {
-            if (lens === null) return true;
-            if (lens === "official") return row.official === true;
-            if (lens === "third") return row.official !== true;
-            if (lens === "base") return row.role === "base";
-            return row.role === "rest" || row.role === "mcp";
+        const originMatch = (row) => {
+            if (origin === "all") return true;
+            if (origin === "official") return row.official === true;
+            if (origin === "third") return row.official !== true && row.kind === "plugin";
+            if (origin === "skill") return row.kind === "skill";
+            return row.mcp === true;
         };
+        const shapeMatch = (row) => {
+            if (shape === "all") return true;
+            return row.surface === shape;
+        };
+        const kwMatch = (row) => kw === null || (Array.isArray(row.keywords) && row.keywords.includes(kw));
+        const facetMatch = (row) => originMatch(row) && shapeMatch(row) && kwMatch(row);
 
         const drawers = collections.map(collection => ({
             collection,
@@ -925,6 +954,12 @@ window.__ModuleLoader__.load({
                 clearDropLine();
             },
             onDragOver: event => {
+                // Dragging rows over a group means "file them here", which must not also reorder
+                // groups; the two gestures carry different payloads, so the payload decides.
+                if (dragRows !== null) {
+                    event.preventDefault();
+                    return;
+                }
                 event.preventDefault();
                 const rect = event.currentTarget.getBoundingClientRect();
                 markDropLine(event.currentTarget, event.clientY > rect.top + rect.height / 2);
@@ -934,6 +969,17 @@ window.__ModuleLoader__.load({
                 if (dropLine === event.currentTarget) clearDropLine();
             },
             onDrop: event => {
+                const rowsPayload = event.dataTransfer.getData("application/x-tool-hub-rows");
+                if (rowsPayload !== "" && dragRows !== null) {
+                    event.preventDefault();
+                    clearDropLine();
+                    let items = [];
+                    try { items = JSON.parse(rowsPayload); }
+                    catch { items = []; }
+                    if (Array.isArray(items) && items.length > 0) void addRowsToGroup(group, items);
+                    setDragRows(null);
+                    return;
+                }
                 event.preventDefault();
                 const rect = event.currentTarget.getBoundingClientRect();
                 const after = event.clientY > rect.top + rect.height / 2;
@@ -967,9 +1013,25 @@ window.__ModuleLoader__.load({
             },
             onMoveUp: () => moveGroup(group.id, -1),
             onMoveDown: () => moveGroup(group.id, 1),
+            onDropRows: (items) => { void addRowsToGroup(group, items); },
         }));
             const plugins = data === null ? [] : data.plugins;
             const skills = data === null ? [] : data.skills;
+        // Words only become a facet when at least two packages declare them, so the row of words
+        // stays short and every entry on it means something.
+        const kwOptions = useMemo(() => {
+            const counts = new Map();
+            for (const row of [...plugins, ...skills]) {
+                for (const word of Array.isArray(row.keywords) ? row.keywords : []) {
+                    counts.set(word, (counts.get(word) ?? 0) + 1);
+                }
+            }
+            return [...counts.entries()]
+                .filter(entry => entry[1] >= 2)
+                .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+                .slice(0, 10)
+                .map(entry => ({ word: entry[0], n: entry[1] }));
+        }, [plugins, skills]);
         // How much of each group is actually running. The rail answers "what will I break if I
         // flip this?" — a group whose members are all on is a different thing from a half-on one.
         const liveByMember = useMemo(() => {
@@ -1043,7 +1105,7 @@ window.__ModuleLoader__.load({
                 if (view !== "skill") combined = combined.concat(plugins);
                 if (view !== "plugin" && view !== "mcp") combined = combined.concat(skills);
                 combined = combined.filter(match);
-                combined = combined.filter(lensMatch);
+                combined = combined.filter(facetMatch);
                 if (groupId !== null) {
                     const set = groupMembers.get(groupId);
                     if (set !== undefined) combined = combined.filter(row => set.has(memberKey(row.kind, row.id)));
@@ -1084,7 +1146,7 @@ window.__ModuleLoader__.load({
                         toolStats: row.mcp === true ? toolStats.get(server) ?? null : null,
                     };
                 });
-            }, [plugins, skills, query, view, groupId, groupMembers, data, lens]);
+            }, [plugins, skills, query, view, groupId, groupMembers, data, origin, shape, kw]);
             const tree = useMemo(() => {
                 const order = [];
                 const byModule = new Map();
@@ -1130,6 +1192,42 @@ window.__ModuleLoader__.load({
             const selectedMembers = () => rows
                 .filter(row => picked.has(memberKey(row.kind, row.id)))
                 .map(row => ({ kind: row.kind, id: row.id }));
+
+            // Shift-click works like a file manager: the range takes the state the clicked row is
+            // about to have, and a collapsed module contributes all of its entries, so one shift
+            // grabs the four loader rows of a package together.
+            const lastPickRef = useRef(null);
+            const [dragRows, setDragRows] = useState(null);
+            const selectRange = (row, value, shift) => {
+                const key = memberKey(row.kind, row.id);
+                const anchor = lastPickRef.current;
+                const next = new Set(picked);
+                if (shift === true && anchor !== null && anchor !== key) {
+                    const from = rows.findIndex(item => memberKey(item.kind, item.id) === anchor);
+                    const to = rows.findIndex(item => memberKey(item.kind, item.id) === key);
+                    if (from >= 0 && to >= 0) {
+                        const start = Math.min(from, to);
+                        const end = Math.max(from, to);
+                        for (let index = start; index <= end; index += 1) {
+                            const target = memberKey(rows[index].kind, rows[index].id);
+                            if (value === true) next.add(target);
+                            else next.delete(target);
+                        }
+                        setPicked(next);
+                        return;
+                    }
+                }
+                if (value === true) next.add(key);
+                else next.delete(key);
+                setPicked(next);
+                lastPickRef.current = key;
+            };
+            const addRowsToGroup = async (group, items) => {
+                await act("group.add", { id: group.id, members: items }, (result) => {
+                    flash(fmt(t, "rowsFiled", { n: result?.added ?? items.length, name: group.name }));
+                    setPicked(new Set());
+                });
+            };
 
             const togglePicked = async (enabled) => {
                 const items = selectedMembers();
@@ -1286,29 +1384,35 @@ window.__ModuleLoader__.load({
             h("div", { style: { flex: 1 } }),
             h(Input, { value: query, onChange: setQuery, placeholder: t("search") }));
 
-            const chips = h("div", { style: { display: "flex", gap: 4, flexWrap: "wrap", padding: "0 4px 8px" } },
-                h(ActionChip, { key: "all", label: t("lensAll"), tone: lens === null ? "brand" : "neutral", onClick: () => setLens(null) }),
-                ...LENSES.map(item => h(ActionChip, {
+            const chipRow = (label, items, active, onPick) => h("div", {
+                style: { display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", padding: "0 2px 6px" },
+            },
+                h("span", { style: { width: 24, flex: "0 0 auto", fontSize: 10, color: T.text3 } }, label),
+                h(ActionChip, { label: t("lensAll"), tone: active === "all" ? "brand" : "neutral", onClick: () => onPick("all") }),
+                ...items.map(item => h(ActionChip, {
                     key: item.id,
                     label: item.label,
-                    tone: lens === item.id ? "brand" : "neutral",
-                    onClick: () => setLens(lens === item.id ? null : item.id),
+                    tone: active === item.id ? "brand" : "neutral",
+                    onClick: () => onPick(active === item.id ? "all" : item.id),
                 })));
+            const chips = h("div", { style: { padding: "0 2px 2px" } },
+                chipRow(t("facetOrigin"), ORIGINS, origin, setOrigin),
+                chipRow(t("facetShape"), SHAPES, shape, setShape),
+                kwOptions.length === 0 ? null : h("div", {
+                    style: { display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", padding: "0 2px 6px" },
+                },
+                    h("span", { style: { width: 24, flex: "0 0 auto", fontSize: 10, color: T.text3 } }, t("facetWord")),
+                    h(ActionChip, { label: t("lensAll"), tone: kw === null ? "brand" : "neutral", onClick: () => setKw(null) }),
+                    ...kwOptions.map(item => h(ActionChip, {
+                        key: item.word,
+                        label: `${item.word} ${item.n}`,
+                        tone: kw === item.word ? "brand" : "neutral",
+                        onClick: () => setKw(kw === item.word ? null : item.word),
+                    }))));
 
-            const rail = h("div", {
-                onDragOver: (event) => {
-                    const box = event.currentTarget.getBoundingClientRect();
-                    if (event.clientY < box.top + 36) event.currentTarget.scrollTop -= 14;
-                    else if (event.clientY > box.bottom - 36) event.currentTarget.scrollTop += 14;
-                },
-                style: {
-                    width: railWidth,
-                    flex: `0 0 ${railWidth}px`,
-                    borderRight: `1px solid ${T.borderSoft}`,
-                    padding: "10px 8px",
-                    overflow: "auto",
-                },
-            },
+            // Head and foot stay put; only the drawers scroll, so the two "new" buttons can
+            // never be pushed off the bottom by a long list.
+            const railHead = h("div", { style: { flex: "0 0 auto" } },
             h("div", {
                 style: {
                     display: "flex",
@@ -1340,6 +1444,15 @@ window.__ModuleLoader__.load({
                     textAlign: "center",
                 },
             }, `${counts.plugin[0] + counts.skill[0]}`)),
+            );
+            const railBody = h("div", {
+                onDragOver: (event) => {
+                    const box = event.currentTarget.getBoundingClientRect();
+                    if (event.clientY < box.top + 36) event.currentTarget.scrollTop -= 14;
+                    else if (event.clientY > box.bottom - 36) event.currentTarget.scrollTop += 14;
+                },
+                style: { flex: 1, minHeight: 0, overflowY: "auto", paddingRight: 2 },
+            },
             ...drawers.flatMap((drawer) => {
                 // Drawers start closed: the rail reads as a table of contents first.
                 const open = expanded.has(drawer.collection.id);
@@ -1444,7 +1557,11 @@ window.__ModuleLoader__.load({
             }, t("looseTitle")),
             h("span", { style: { fontSize: 10.5, color: T.text3 } }, `${looseGroups.length}`)),
             ...looseGroups.map(group => groupRow(group)),
-            h("div", { key: "rail-actions", style: { display: "flex", gap: 6, marginTop: 8 } },
+            );
+            const railFoot = h("div", {
+                style: { flex: "0 0 auto", borderTop: `1px solid ${T.borderSoft}`, paddingTop: 8 },
+            },
+            h("div", { key: "rail-actions", style: { display: "flex", gap: 6 } },
                 h("button", {
                     type: "button",
                     onClick: () => setDialog({ kind: "newGroup", collection: null }),
@@ -1492,6 +1609,18 @@ window.__ModuleLoader__.load({
                     h("div", { style: { fontSize: 11.5, lineHeight: 1.55, color: T.text3 } }, t("railEmptyBody")),
                     h(Button, { small: true, onClick: () => { void openAuto(); }, disabled: busy || data === null }, t("railEmptyAction")))
                 : null);
+            const rail = h("div", {
+                style: {
+                    width: railWidth,
+                    flex: `0 0 ${railWidth}px`,
+                    display: "flex",
+                    flexDirection: "column",
+                    minHeight: 0,
+                    overflow: "hidden",
+                    borderRight: `1px solid ${T.borderSoft}`,
+                    padding: "10px 8px",
+                },
+            }, railHead, railBody, railFoot);
 
             const rowNode = (row, nested) => h(RowMemo, {
                 key: memberKey(row.kind, row.id),
@@ -1500,13 +1629,22 @@ window.__ModuleLoader__.load({
                 nested: nested === true,
                 picked: picked.has(memberKey(row.kind, row.id)),
                 failed: failKeys.has(memberKey(row.kind, row.id)),
-                onPick: (value) => {
-                    const next = new Set(picked);
+                onPick: (value, shift) => selectRange(row, value, shift),
+                dragEnabled: true,
+                onRowDragStart: (event) => {
                     const key = memberKey(row.kind, row.id);
-                    if (value) next.add(key);
-                    else next.delete(key);
-                    setPicked(next);
+                    const items = picked.has(key) && picked.size > 1
+                        ? selectedMembers()
+                        : [{ kind: row.kind, id: row.id }];
+                    try {
+                        event.dataTransfer.setData("application/x-tool-hub-rows", JSON.stringify(items));
+                        event.dataTransfer.setData("text/plain", "");
+                        event.dataTransfer.effectAllowed = "copy";
+                    }
+                    catch { /* some engines refuse to write during a drag */ }
+                    setDragRows(items);
                 },
+                onRowDragEnd: () => setDragRows(null),
                 onToggle: enabled => toggleRow(row.kind, row.id, enabled),
                 onEdit: (target) => setDialog({ kind: "mcpEdit", row: target }),
                 onDelete: (target) => setDialog({ kind: "mcpDelete", row: target }),
@@ -1913,15 +2051,33 @@ window.__ModuleLoader__.load({
             return { accent: T.danger, accentDepth: 95 };
         }
 
-        function GroupRow({ group, stats, t, accent, accentDepth, active, onSelect, onEnable, onRename, onDelete, onMoveUp, onMoveDown, stale, onClean }) {
+        function GroupRow({ group, stats, t, accent, accentDepth, active, onSelect, onEnable, onRename, onDelete, onMoveUp, onMoveDown, stale, onClean, onDropRows }) {
             const [hover, setHover] = useState(false);
+            const [rowsOver, setRowsOver] = useState(false);
             const count = group.members.length;
             const live = stats ?? { on: 0, total: count };
             const allOn = live.total > 0 && live.on === live.total;
             const noneOn = live.on === 0;
             return h("div", {
                 onMouseEnter: () => setHover(true),
-                onMouseLeave: () => setHover(false),
+                onMouseLeave: () => { setHover(false); setRowsOver(false); },
+                onDragOver: (event) => {
+                    if (!event.dataTransfer.types.includes("application/x-tool-hub-rows")) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setRowsOver(true);
+                },
+                onDragLeave: () => setRowsOver(false),
+                onDrop: (event) => {
+                    if (!event.dataTransfer.types.includes("application/x-tool-hub-rows")) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setRowsOver(false);
+                    let items = [];
+                    try { items = JSON.parse(event.dataTransfer.getData("application/x-tool-hub-rows")); }
+                    catch { items = []; }
+                    if (Array.isArray(items) && items.length > 0) onDropRows?.(items);
+                },
                 style: {
                     position: "relative",
                     display: "flex",
@@ -1930,7 +2086,7 @@ window.__ModuleLoader__.load({
                     marginBottom: 3,
                     padding: "8px 9px 8px 12px",
                     borderRadius: 9,
-                    border: `1px solid ${active === true ? tint(T.brand, 38) : (hover === true ? T.borderSoft : "transparent")}`,
+                    border: `1px solid ${rowsOver === true ? T.brand : active === true ? tint(T.brand, 38) : (hover === true ? T.borderSoft : "transparent")}`,
                     background: active === true ? groupTint.activeBg : (hover === true ? T.cardHover : "transparent"),
                     transition: "background .12s ease",
                 },
@@ -2025,20 +2181,6 @@ window.__ModuleLoader__.load({
                     fontVariantNumeric: "tabular-nums",
                 },
             }, live.total === 0 ? "0" : `${live.on}/${live.total}`)),
-            Array.isArray(group.tags) && group.tags.filter(tag => tag !== "base" && tag !== "task" && tag !== "skill").length > 0
-                ? h("div", { style: { display: "flex", gap: 4, flexWrap: "wrap", marginTop: -2 } },
-                    group.tags.filter(tag => tag !== "base" && tag !== "task" && tag !== "skill").slice(0, 4).map(tag => h("span", {
-                        key: tag,
-                        style: {
-                            padding: "0 5px",
-                            borderRadius: 4,
-                            border: `1px solid ${T.borderSoft}`,
-                            color: T.text3,
-                            fontSize: 10,
-                            lineHeight: "16px",
-                        },
-                    }, tag)))
-                : null,
             h("div", { style: { display: "flex", alignItems: "center", gap: 4, flexWrap: "nowrap", minWidth: 0 } },
                 h(ActionChip, {
                     label: t("enable"),
@@ -2062,12 +2204,15 @@ window.__ModuleLoader__.load({
         }
 
 
-        function Row({ row, t, picked, onPick, onToggle, busy, onEdit, onDelete, onTools, nested, failed }) {
+        function Row({ row, t, picked, onPick, onToggle, busy, onEdit, onDelete, onTools, nested, failed, dragEnabled, onRowDragStart, onRowDragEnd }) {
             const [hover, setHover] = useState(false);
             const readOnly = row.manageable === false;
             const selfEntry = row.self === true;
             return h("div", {
                 className: "hub-row",
+                draggable: dragEnabled === true,
+                onDragStart: (event) => { if (dragEnabled === true) onRowDragStart?.(event); },
+                onDragEnd: () => { if (dragEnabled === true) onRowDragEnd?.(); },
                 onMouseEnter: () => setHover(true),
                 onMouseLeave: () => setHover(false),
                 style: {
@@ -2087,7 +2232,7 @@ window.__ModuleLoader__.load({
                 role: "checkbox",
                 "aria-checked": picked,
                 "aria-label": row.name,
-                onClick: () => onPick(!picked),
+                onClick: (event) => onPick(!picked, event.shiftKey === true),
                 style: {
                     flex: "0 0 auto",
                     width: 15,
