@@ -95,6 +95,9 @@ const fakePlugins = [
   { entryId: 'e6', moduleName: 'plugin-manager', meta: { title: 'Plugin Manager' }, fiberPhase: 'active', readOnlyReason: 'management-required' },
   { entryId: 'e7', moduleName: '@deepseek-ai/dsh-mcp-client', patchId: 'panel-mcp-fixture', fiberPhase: null },
   { entryId: 'e8', moduleName: 'dsh-skill-mcp-panel', meta: { title: 'Skill / MCP' }, fiberPhase: 'active' },
+  // A package that ships a second loader entry under a path — one install, two rows, one tree.
+  { entryId: 'e9', moduleName: 'fixture-parent', meta: { title: 'Parent' }, fiberPhase: 'active' },
+  { entryId: 'e10', moduleName: 'fixture-parent/child', meta: { title: 'Child' }, fiberPhase: 'active' },
 ]
 const fakeManager = {
   async listPlugins() {
@@ -174,7 +177,7 @@ const op = async (name, payload) => {
 // ── 1. snapshot ────────────────────────────────────────────────────────────
 let snap = await get('/tool-hub/api/snapshot')
 check('snapshot ok', snap.ok === true, snap.error?.message ?? '')
-check('plugins listed', snap.data.plugins.length === 8, `got ${snap.data.plugins.length}`)
+check('plugins listed', snap.data.plugins.length === 10, `got ${snap.data.plugins.length}`)
 check('mcp row named by server', snap.data.plugins.find(row => row.id === 'e7')?.name === 'fixture', JSON.stringify(snap.data.plugins.find(row => row.id === 'e7')))
 check('mcp row editable', snap.data.plugins.find(row => row.id === 'e7')?.mcpEditable === true)
 check('mcp patch path exposed', snap.data.paths.patch === join(profileDir, 'cordis.patch.yml'), snap.data.paths.patch)
@@ -308,7 +311,15 @@ r = await op('auto.preview', {})
 const plan = r.data.plan
 check('auto preview buckets', plan.length >= 2, plan.map(entry => `${entry.name}:${entry.members.length}`).join(', '))
 check('auto preview splits roles', plan.some(entry => entry.role === 'official') && plan.some(entry => entry.role === 'base'), plan.map(entry => `${entry.role}:${entry.name}:${entry.members.length}`).join(', '))
-check('auto preview tags every bucket', plan.every(entry => Array.isArray(entry.tags) && entry.tags.length > 0))
+// Tags must be package keywords only. The fixture packages declare none, so an empty list is
+// the correct answer — a made-up topic word here would be exactly the bug we removed.
+check('auto tags are keywords only', plan.every(entry => Array.isArray(entry.tags) && entry.tags.length === 0), JSON.stringify(plan.map(entry => entry.tags)))
+check('rows carry root and alias', (() => {
+  const parent = snap.data.plugins.find(row => row.id === 'e9')
+  const child = snap.data.plugins.find(row => row.id === 'e10')
+  const context = snap.data.plugins.find(row => row.id === 'e2')
+  return parent.root === 'fixture-parent' && child.root === 'fixture-parent' && typeof context.alias === 'string'
+})(), JSON.stringify(snap.data.plugins.filter(row => row.id === 'e10' || row.id === 'e2').map(row => ({ root: row.root, alias: row.alias }))))
 r = await op('auto.apply', {})
 check('auto applied', r.ok === true && r.data.groups >= 2, JSON.stringify({ groups: r.data?.groups, members: r.data?.members }))
 snap = await get('/tool-hub/api/snapshot')
@@ -400,6 +411,11 @@ r = await op('group.save', { name: '空分组', members: [], collection: 'no-suc
 const emptyGroup = (r.data.state?.groups ?? []).find(group => group.name === '空分组')
 check('unknown drawer falls back to default', emptyGroup?.collection === 'default', JSON.stringify(emptyGroup))
 check('an empty group is allowed', emptyGroup !== undefined && emptyGroup.members.length === 0)
+
+// Picking one row of a package brings the whole package: a group must never hold half a tree.
+r = await op('group.save', { name: '整棵树', members: [{ kind: 'plugin', id: 'e9' }] })
+const treeGroup = (r.data.state?.groups ?? []).find(group => group.name === '整棵树')
+check('group expands to the whole package', JSON.stringify(treeGroup?.members?.map(member => member.id).sort()) === JSON.stringify(['e10', 'e9']), JSON.stringify(treeGroup?.members))
 
 r = await op('collection.delete', { id: 'default' })
 check('default drawer cannot be deleted', r.ok === false && r.error.code === 'default-collection', JSON.stringify(r.error))

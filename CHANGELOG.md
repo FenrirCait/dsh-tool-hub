@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.13.0
+
+- **Tags come from the package, or not at all.** Group labels are now exactly the `keywords` a
+  package declares — nothing inferred is shown. The topic words we guess moved to search only, so
+  `memory` still finds billion-context without putting a made-up label on the group.
+- **A package is one tree.** Sub-packages (`billion-context/dsh-compaction-gate`,
+  `@scope/name/sub`) fold under their parent instead of appearing as separate plugins.
+- **Groups follow the parent.** Picking any row of a package puts the whole package in the group,
+  so a group can never flip half an install; enabling still stays per row.
+
 ## 1.12.0
 
 - **The list is a tree.** A plugin that mounts several loader entries is one row that unfolds into its

@@ -916,7 +916,7 @@ window.__ModuleLoader__.load({
                 const isMcp = row => row.mcp === true;
                 const match = (row) => {
                     if (wanted !== "") {
-                        const haystack = `${row.name} ${row.moduleName || ""} ${row.description || ""} ${row.serverName || ""}`.toLowerCase();
+                        const haystack = `${row.name} ${row.moduleName || ""} ${row.description || ""} ${row.serverName || ""} ${row.alias || ""}`.toLowerCase();
                         if (!haystack.includes(wanted)) return false;
                     }
                     if (view === "plugin" && (row.kind !== "plugin" || isMcp(row))) return false;
@@ -973,9 +973,13 @@ window.__ModuleLoader__.load({
                 const order = [];
                 const byModule = new Map();
                 for (const row of rows) {
-                const key = row.kind === "plugin" ? row.moduleName : `skill:${row.name}`;
+                    // Tree and group membership both key on the package root, so a sub-package
+                    // (`billion-context/dsh-compaction-gate`) sits under its parent instead of
+                    // showing up as an unrelated plugin.
+                    const root = row.kind === "plugin" ? row.root || row.moduleName : row.name;
+                    const key = row.kind === "plugin" ? root : `skill:${row.name}`;
                     if (!byModule.has(key)) {
-                        byModule.set(key, { key, module: row.kind === "plugin" ? row.moduleName : row.name, kind: row.kind, entries: [] });
+                        byModule.set(key, { key, module: root, kind: row.kind, entries: [] });
                         order.push(key);
                     }
                     byModule.get(key).entries.push(row);

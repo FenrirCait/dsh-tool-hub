@@ -40,9 +40,13 @@ the plugin hot-loads.
 - **Per-row switch**. Plugins go through the host's own plugin manager, so enable/disable is written
   to the profile patch exactly as the Plugins page would write it. Skills are switched by renaming
   `SKILL.md` ↔ `SKILL.md.disabled`.
-- **A tree, not a wall of repeats**: a plugin that mounts several loader entries is one row you unfold;
-  the parent carries the module name, `×n` and a switch that flips the whole set.
+- **A tree, not a wall of repeats**: a plugin that mounts several loader entries — or ships a
+  sub-package such as `billion-context/dsh-compaction-gate` — is one row you unfold; the parent
+  carries the module name, `×n` and a switch that flips the whole set. Groups follow the parent,
+  so a group never holds half an install.
 - **The rail shows on 全部 only**: picking 插件 / 技能 / MCP gives the list the full width.
+- **Labels are the package's own `keywords`**, up to four. Nothing inferred is shown as a label;
+  the topic words we guess only make rows findable in search.
 - **Groups**: create, rename, delete, add the current selection, and flip a whole group on or off.
   Groups over 20 members ask first.
 - **Auto grouping**: one button proposes exactly four buckets — **官方** (ships with the client),
