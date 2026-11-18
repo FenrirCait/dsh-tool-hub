@@ -4,3 +4,5 @@ probe/*.log
 probe/*.log.err
 *.tgz
 probe/*-preview.yml
+release-*.md
+!docs/releases/**
