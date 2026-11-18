@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.20.7
+
+- Added: `doctor` now reports a ninth-listed check, `snapshot-profile`, with the per-step timings of the most recent profiled snapshot (or a note that no profile log exists yet).
 ## 1.20.6
 
 - Changed: `thirdparty.status` no longer builds a whole snapshot to answer; it reads the plugin rows and skills it actually filters (1254 ms → 648 ms, most of the rest is the first uncached row read).

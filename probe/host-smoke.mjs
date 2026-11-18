@@ -839,11 +839,11 @@ check('a failing bundle inventory is a bundleError, not a failed snapshot',
 fakeBundlesFail = false
 
 // ── 13. doctor ─────────────────────────────────────────────────────────────
-const DOCTOR_IDS = ['patch-parse', 'state-writable', 'failed-rows', 'stale-lock', 'skill-roots', 'trash', 'hub-tools']
+const DOCTOR_IDS = ['patch-parse', 'state-writable', 'failed-rows', 'stale-lock', 'skill-roots', 'trash', 'hub-tools', 'snapshot-profile']
 r = await op('doctor', {})
 let doctor = new Map((r.data?.checks ?? []).map(row => [row.id, row]))
-check('doctor returns exactly the seven contracted checks',
-  r.ok === true && doctor.size === 7 && DOCTOR_IDS.every(id => doctor.has(id)),
+check('doctor returns exactly the eight contracted checks',
+  r.ok === true && doctor.size === 8 && DOCTOR_IDS.every(id => doctor.has(id)),
   JSON.stringify((r.data?.checks ?? []).map(row => row.id)))
 check('doctor patch-parse passes on a readable patch', doctor.get('patch-parse')?.ok === true, doctor.get('patch-parse')?.detail)
 check('doctor state-writable passes', doctor.get('state-writable')?.ok === true, doctor.get('state-writable')?.detail)
