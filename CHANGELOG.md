@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.0.1
+
+- Fixed: the two HTTP routes now ask the host first — `connection.requestRejection(request)` runs before anything else, so a browser without a DSH session (or a remote session the host policy refuses) gets `401`/`403` instead of reaching the panel API. A gate that throws refuses too (fail closed). Our own same-origin check stays as the second line of defence for hosts that expose no `connection` service.
 ## 1.0.0
 
 The first release meant to be installed by somebody who did not build it. Everything below is in it:

@@ -140,6 +140,10 @@ let fakeRegistry = null
 let fakeSessions = null
 // The host's config editor normally names the patch file; tests move it around on purpose.
 let fakeDocumentPath = null
+// The host's browser gate (`connection.requestRejection`): 401/403 when set,
+// `undefined` means "the host is happy". Missing service must not break routes.
+let fakeRejection = undefined
+let fakeRejectionThrows = false
 const ctx = {
   get(name) {
     if (name === 'webServer') {
@@ -181,6 +185,12 @@ const ctx = {
       register(definition) { registeredTools.push(definition.name); return () => {} },
     }
     if (name === 'agents') return { list: () => [] }
+    if (name === 'connection') return {
+      requestRejection() {
+        if (fakeRejectionThrows) throw new Error('gate exploded')
+        return fakeRejection
+      },
+    }
     return undefined
   },
   on() {
@@ -436,6 +446,25 @@ const evil = await fetch(`${base}/tool-hub/api/op`, {
 check('cross-origin refused', evil.status === 403)
 const wrongMethod = await fetch(`${base}/tool-hub/api/op`, { method: 'GET', headers: { host: `127.0.0.1:${port}` } })
 check('wrong method refused', wrongMethod.status === 405)
+
+// The host gate runs before ours: an unauthenticated browser never reaches `sameOrigin`.
+fakeRejection = 401
+const gated = await fetch(`${base}/tool-hub/api/snapshot`, { headers: { host: `127.0.0.1:${port}` } })
+const gatedBody = await gated.json()
+check('host gate answers 401', gated.status === 401 && gatedBody.error?.code === 'unauthorized', `${gated.status} ${JSON.stringify(gatedBody)}`)
+fakeRejection = 403
+const gatedPost = await fetch(`${base}/tool-hub/api/op`, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json', host: `127.0.0.1:${port}` },
+  body: JSON.stringify({ op: 'snapshot' }),
+})
+check('host gate answers 403 on ops too', gatedPost.status === 403, String(gatedPost.status))
+fakeRejectionThrows = true
+const gateBoom = await fetch(`${base}/tool-hub/api/snapshot`, { headers: { host: `127.0.0.1:${port}` } })
+check('a throwing gate fails closed', gateBoom.status === 403, String(gateBoom.status))
+fakeRejectionThrows = false
+fakeRejection = undefined
+check('open gate lets the snapshot through', (await get('/tool-hub/api/snapshot')).ok === true)
 
 // ── 10. bad op ─────────────────────────────────────────────────────────────
 r = await op('nope', {})
