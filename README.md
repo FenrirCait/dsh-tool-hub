@@ -33,7 +33,7 @@ the plugin hot-loads.
 
 ## What it does
 
-- **One list** of every loader entry plus every skill found under the user skill roots. Each row
+- **One list** of every loader entry plus every skill found under the known skill roots. Each row
   shows what it is, whether it is on, and why it cannot be switched when it cannot. Rows that ship
   with the client (`@deepseek-ai/*`, `cordis:*`) carry an **Official** badge, so built-in and
   third-party modules are told apart at a glance.
@@ -109,6 +109,125 @@ Everything the panel writes about *groups and presets* lives in one file:
 
 Writes are atomic (temp file + rename), so a crash mid-save cannot leave a half-written state.
 
+## Skills
+
+Skills come from three kinds of roots: `~/.dsh/skills` (**全局 · 用户**), `~/.agents/skills`
+(**全局 · 共享**), and every workspace the host knows (**<workspace name>**, from
+`<workspace>/.dsh/skills`). The Skills tab groups its rows by scope, so a workspace skill is never
+mistaken for one that exists everywhere.
+
+`TOOL_HUB_WORKSPACES` pins the workspace list: `;`-separated paths, and `-` turns workspace discovery
+off (the sandbox profile uses that to stay isolated).
+
+- **预览** reads the skill's source file, read-only, first 200 KB.
+- **删除** moves the whole skill folder (or a single `.md`) into
+  `<state dir>/trash/<timestamp>-<name>/`; a `meta.json` records the root and relative path it came
+  from. The toast keeps a **撤销** for ten seconds, and that undo is a move back — nothing is erased.
+- **导入技能** takes a local path: one `.md`, a directory, or a `.zip`. Pick the target root and
+  whether a skill of the same name may be overwritten. The zip reader refuses entries that escape the
+  archive and never follows a link out of it.
+- **移动到…** relocates a skill to another root. A destination that already exists is refused, never
+  merged; the skill's switch is not touched.
+
+## Lazy MCP tools
+
+A server can be marked **Lazy** on its row. Its tools then stay out of the model-visible schema, and a small `hub_tools` tool carries the catalog: `action="list"` shows which servers are lazy and which of their tools are loaded, `action="enable"` takes `names` or a `server` and makes those tools callable from the next turn, and `action="disable"` puts them back. The panel adds one paragraph to the system prompt while any server is lazy, otherwise nothing.
+
+Why client-side: the MCP client always advertises every tool it knows, so the only lever a panel has is the tool mask. Masked tools leave the request entirely (not merely blocked), which is what saves context. Servers that implement lazy startup themselves (for example Computer Use with `WCU_TOOL_MODE=lazy`) do not need this switch.
+
+## MCP servers
+
+- **Secrets stay on the host.** `env` and `headers` values come back empty; `secretKeys` says which
+  keys are set, and the dialog prints "已设置，留空保持不变" under each one. Saving with the field
+  blank keeps the stored value. A blank key that was never set is refused, so a typo cannot create an
+  empty credential.
+- **`${NAME}` templates.** A value written exactly as `${NAME}` is stored as the loader's environment
+  reference (`!!js process.env.NAME`), not as text. The panel never reads or expands it.
+- **查看原文** shows the exact patch fragment for one server, read-only. **高级：直接编辑** replaces
+  that whole entry — indentation, fields and formatting included — after a warning and a save-time
+  parse check.
+- **OAuth 登录** works for a saved HTTP or SSE server. Discovery tries the protected-resource metadata
+  (RFC 9728), then the authorization-server metadata (RFC 8414), then OIDC; an issuer mismatch is
+  refused rather than used. The flow uses PKCE and the RFC 8707 `resource` parameter. The panel shows
+  the authorize URL and asks for the `code` carried by the address the redirect lands on.
+- **Tool-level masking** is unchanged: 工具 lists the server's tools and unticking one removes it from
+  every session of the installation; the deny list stays in the panel's state, never in the server's
+  `config:`.
+
+## CLI
+
+The package ships `dsh-tool-hub`, a Node CLI over the same state and patch files, for scripts and for
+a machine with no panel open:
+
+```bash
+dsh-tool-hub list --json
+dsh-tool-hub plugin disable <entryId>
+dsh-tool-hub group off "写作"
+dsh-tool-hub skill list --workspace .
+dsh-tool-hub mcp raw <serverName>
+dsh-tool-hub config export ./tool-hub-backup.json
+```
+
+- **22 commands** over seven families: `list`; `plugin enable|disable`; `group list|on|off`;
+  `preset list|apply`; `skill list|enable|disable|delete`; `mcp list|enable|disable|raw`;
+  `config export|import`. Every read and write accepts `--json`.
+- `--profile <name>` picks the profile (default `web`); `--workspace <path>` adds that workspace's
+  `.dsh/skills`; `--global` keeps `skill` to the global roots.
+- `preset apply` is exact by default — rows a preset does not name are switched off — and
+  `--only-enable` only turns things on. The panel's own row is never switched off in bulk.
+- `config export` must land inside `$DSH_HOME` or the working directory (no symlink on the way);
+  `--mkdir` creates a missing parent, `--force` widens the roots.
+- `config import` merges by default. `--replace --yes` replaces the whole state, and a backup of the
+  previous state is written first.
+- Exit codes: `0` success, `1` usage, `2` not found, `3` validation failure.
+
+## Diagnostics and history
+
+- A row whose module failed to load carries a red bar down its left edge. **看诊断** opens that row's
+  `diagnostic` text; when the host sent none, the dialog says so instead of showing an empty box, and
+  points at the host log and the patch parse.
+- The `doctor` host op answers six checks, each by trying it: `patch-parse`, `state-writable`,
+  `failed-rows`, `stale-lock`, `skill-roots`, `trash`. One failing probe never hides the others.
+- Every panel op appends one line to `<state dir>/history.jsonl` — timestamp, op, short ids, ok.
+  Payloads are not copied, because a payload can carry skill text, tokens or a whole config. The file
+  is trimmed to its tail once it grows past the cap; **历史** lists the newest entries first.
+
+## Bundle view
+
+**按 bundle** turns the left rail into the bundles the host reports (`pluginManager.listBundles()`),
+each with its own row count. Picking one filters the list to the rows that bundle owns; **全部** drops
+the filter. It is a lens, not a switch: nothing is enabled or disabled, and a host without
+`listBundles` disables the button instead of failing the snapshot.
+
+## Config export and import
+
+**导出配置** downloads one JSON file with `groups`, `collections`, `presets` and `toolDeny` — nothing
+that names a machine path or a credential. **导入配置** merges by default: a group with the same id
+gains the incoming members, a group whose name is already used here is kept as it is, and a preset
+with an existing name is skipped. Replace mode throws the current state away, so it is confirmed
+first. The CLI writes a backup of the previous state; the panel's import does not.
+
+## Row descriptions
+
+**显示简介** adds one line under each row. For plugins and MCP rows the line comes from the first
+source that has one: the row's own `meta.description`, the package's `package.json`, a small
+known-package table, then nothing. The panel records which link answered instead of guessing, so a
+missing line is diagnosable. Skills use their own `description` frontmatter field and nothing else.
+
+## Help drawer
+
+The `?` button opens eight short sections — what it solves, how to use it, one caution.
+It opens by itself the first time (`localStorage toolHubHelpSeen` remembers that it has been seen) and
+only on demand afterwards. Long-form documentation stays on this page; the drawer is the in-place
+reminder.
+
+## Layout
+
+The panel is pinned to the viewport: `maxHeight: calc(100vh - 120px)` and `overflow: hidden` on the
+shell, a header and tab row that stay put, and a rail that is sticky at the top. Only the list
+scrolls, so a long install no longer takes the header, the tabs or the rail out of reach. The
+remembered tab (`localStorage toolHubView`) still decides which tab opens.
+
 ## Collections
 
 Hand-made groups live in **collections**. A fresh install has one, **默认分组群** (default); the
@@ -126,9 +245,9 @@ the buckets carry the top topic words as chips so a bucket still says what is in
 
 - **MCP servers** are supported for the STDIO / SSE / HTTP shape the host's own MCP client uses.
   Anything a server keeps inside its own process is still that server's business.
-- **Skills outside the user roots** (`~/.dsh/skills`, `~/.agents/skills`) are not scanned. Project
-  level `.dsh/skills` folders belong to a workspace, not to an installation, and switching them here
-  would be misleading.
+- **Skills outside the known roots** are not scanned: `~/.dsh/skills`, `~/.agents/skills`, and the
+  `.dsh/skills` folder of each workspace the host reports (or `TOOL_HUB_WORKSPACES` names). A project
+  folder that is not a known workspace is still just a folder.
 - **Host-managed entries** (the plugin manager itself, the timer, the tool registry, …) are shown but
   cannot be switched. The host reports them as `management-required` or `unaddressable`; the row says
   so instead of hiding them.
@@ -147,15 +266,16 @@ or `failed`; the panel reports what the host answered instead of assuming succes
 ### Testing in a throwaway profile
 
 By default the panel keeps its groups and presets in `<DSH_HOME>/tool-hub/state.json` and switches
-skills under `<DSH_HOME>/skills` and `~/.agents/skills`. A test profile usually wants neither, so two
-environment variables point it somewhere harmless:
+skills under `<DSH_HOME>/skills` and `~/.agents/skills`. A test profile usually wants neither, so
+three environment variables point it somewhere harmless:
 
 ```bash
 TOOL_HUB_STATE_FILE=<dir>/tool-hub-state.json     # groups, presets, auto-group records
 TOOL_HUB_SKILL_ROOTS=<dir>/skills;<dir>/skills2   # skill roots, separated by ; on Windows
+TOOL_HUB_WORKSPACES=<dir>;<dir2>                  # workspace roots; "-" disables workspace discovery
 ```
 
-With both set, trying out a bulk disable in a sandbox touches only the sandbox.
+With all three set, trying out a bulk disable in a sandbox touches only the sandbox.
 
 ## Development
 

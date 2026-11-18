@@ -1,5 +1,113 @@
 # Changelog
 
+## 1.20.0
+
+- Added: lazy MCP servers. A server marked lazy keeps every tool out of the model-visible schema; a small `hub_tools` tool lists the catalog and loads names or a whole server back on demand, and a one-paragraph prompt section tells the model the catalog exists.
+- Added: the MCP row has a lazy toggle; the state lives in `tool-hub/state.json` (`lazyServers`, `lazyLoaded`), so a restart keeps the choice.
+- Changed: the snapshot now reports the effective mask, so a tool hidden because its server is lazy reads as disabled instead of looking available.
+## 1.19.10
+
+- Added: `state.reset` needs `confirm: "reset"` and writes a copy of `state.json` to `backups/` first; the copy is pruned to the newest 20.
+- Added: importing a config in replace mode needs `confirm: true` and keeps the same rollback copy; the dialog now shows a red warning and an acknowledgement checkbox before the button enables.
+- Added: the same pruning applies to every state backup, so the folder cannot grow without a bound.
+## 1.19.9
+
+- Fixed: with a dialog open above the help drawer, the drawer still held its Tab trap, so keyboard focus could stay behind the dialog. The drawer now yields both Escape and Tab while a dialog is on top.
+
+## 1.19.8
+
+- Fixed: the confirmation dialog for a bulk selection of more than 20 rows crashed on render (the translated string was passed to `fmt` as the key, so it returned the vars object).
+- Fixed: the help drawer and dialogs shared a z-index and both listened for Escape; the drawer now yields Escape while a dialog is open, sits below it, and traps Tab like the dialogs do.
+- Fixed: the skill preview and MCP raw-text dialogs now reload when their row changes instead of showing the previous skill or patch.
+- Fixed: busy state is an in-flight counter, so a finished request can no longer re-enable switches while another write is still running.
+- Fixed: delete/import dialogs stay open when the host refuses the write, so the reason is not replaced by a vanished dialog.
+- Fixed: host state transactions (group/preset/collection/tool/auto/market) are serialized; concurrent requests can no longer lose an update between load and save.
+- Fixed: a third-party shutdown that turned nothing off no longer leaves a rollback point that restores nothing.
+## 1.19.7
+
+- Fixed: the shell takes a definite viewport height, so a percentage `height: 100%` can no longer collapse into `auto`. Expanding a drawer used to grow the rail past its cap, hide the two buttons under it and leave nothing scrollable.
+- Fixed: the rail no longer fights the page with `position: sticky`; it stretches to the shell and only its middle list scrolls, while the footer stays pinned.
+## 1.19.6
+
+- Fixed: the header count of enabled items now includes MCP servers, so it matches the rows below (194 of 225, not 193).
+- Fixed: dialogs keep keyboard focus inside themselves while open and return it to the button that opened them on close.
+- Changed: transient notices (saved, imported, disabled) sit in a polite aria-live region, so a screen reader announces them instead of dropping them.
+## 1.19.5
+
+- Added: a shift-selection of more than 20 rows now asks before it flips them (group toggles already did).
+- Changed: the delete-group dialog uses a verb for its button and prints the group name once.
+- Changed: a group picker with no groups says so instead of borrowing the preset empty state.
+- Fixed: 加载失败 / 面板已禁用 / 合并 / 替换 and three OAuth failure reasons were literal English inside a Chinese panel.
+- Fixed: 20px icon buttons next to ✕ are now 24px.
+- Fixed: the history dialog says 最近 50 / 共 N 条 instead of silently truncating.
+- Fixed: the footer paths wrap and carry a title instead of being clipped mid-drive.
+## 1.19.4
+
+- Fixed: the snapshot and the third-party status now tell a failed read apart from an empty one (localized panel plus a retry, instead of "读取中…" forever or "nothing to disable").
+- Fixed: a refresh response older than the newest one can no longer overwrite the panel.
+- Fixed: the MCP editor warns once before Escape or an overlay click discards a half-filled form.
+- Fixed: a preset cannot be deleted by a stray click any more; it asks first and confirms after.
+- Fixed: facet labels no longer overlap the first chip in English; the secret placeholder is a value that cannot collide with real text.
+- Fixed: the OAuth module no longer prints endpoint URLs with userinfo, query or fragment into error messages.
+- Fixed: skill-pack refuses symlinked directory sources and duplicate zip entries instead of silently installing less than the user gave.
+- Fixed: two duplicate onThirdOff props that shadowed the working handlers.
+- Testing: probe/host-smoke.mjs 304 checks (rawSave rollback, foreign/lost lock, workspace fallback chain); skill-pack-smoke 73; a passing host run no longer leaves its temp fixture behind.
+
+## 1.19.3
+
+- **The shell has a fixed height.** `maxHeight: calc(100vh - 120px)` plus `overflow: hidden` pins the
+  panel to the viewport, the header and the rail stop moving, and the list becomes the only scroller —
+  a long install no longer scrolls the tabs out of reach.
+- **The remembered tab stays.** 1.19.2's last-view memory (`localStorage toolHubView`) is unchanged:
+  reopening the panel lands on the tab you left.
+
+## 1.19.1
+
+- **Header actions keep their line.** The title block takes `flex: 1 1 260px` and the action row wraps
+  as one unit, so a narrow panel no longer pushes a single button onto a line of its own.
+- **The shared skill root is just a label.** It reads 全局 · 共享 again, without the `#2` ordinal the
+  old label carried.
+- **MCP secret placeholders read the right field.** The edit dialog reads `row.secretKeys` instead of
+  `config.secretKeys`, so "2 keys set" no longer comes out empty.
+
+## 1.19.0
+
+Internal build. The feature set:
+
+- **Skills gained a scope.** Workspace roots (`<workspace>/.dsh/skills`) join the two global roots,
+  and each row knows where it came from. `TOOL_HUB_WORKSPACES` pins the workspace list
+  (`;`-separated; `-` disables workspace discovery).
+- **Preview, delete, restore.** Preview reads a skill's source (first 200 KB, read-only). Delete moves
+  the whole skill into `<state dir>/trash/<timestamp>-<name>/` with a `meta.json` that records its
+  root and relative path; the ten-second undo moves it back. Nothing is erased.
+- **MCP secrets are masked.** `env` and `headers` values never leave the host; `secretKeys` lists the
+  keys that are set, and saving a blank value keeps the stored one.
+- **`${NAME}` templates.** A value written exactly as `${NAME}` becomes a host-side environment
+  reference, so the patch can name a variable instead of holding its value.
+- **Raw MCP source.** 查看原文 shows the exact patch fragment read-only; 高级：直接编辑 replaces the
+  whole entry, after a warning about indentation and formatting.
+- **Skill import and move.** Import one `.md`, a directory, or a zip into any root, with an optional
+  overwrite; move a skill to another root without touching its switch.
+- **MCP OAuth login.** Discovery runs protected-resource metadata (RFC 9728) → authorization-server
+  metadata (RFC 8414) → OIDC; PKCE and the RFC 8707 `resource` parameter are part of the flow. The
+  panel shows the authorize URL and asks for the code the redirect carries.
+- **CLI `dsh-tool-hub`.** 22 commands over `list` / `plugin` / `group` / `preset` / `skill` / `mcp` /
+  `config`, with `--json` on reads and writes.
+- **`doctor`.** Six independent checks — patch parse, state writability, failed rows, stale panel
+  lock, skill roots, trash folder — each answered by doing the thing.
+- **Operation history.** One JSON line per panel op in `<state dir>/history.jsonl`, with the op and
+  short ids only; payloads are never copied, and the file keeps its tail once it passes the cap.
+- **By-bundle view.** A rail lens lists the installed bundles and filters the list to the rows each
+  one owns; 全部 drops the filter.
+- **Failed rows carry a red bar** down the left edge and a 看诊断 action that prints the row's own
+  diagnostic text.
+- **Config export / import.** Groups, collections, presets and the tool deny list move as one JSON
+  file; import merges by default, replace is confirmed first, and the CLI writes a backup.
+- **Row descriptions.** 显示简介 draws one line per row from the row's meta, then the package
+  manifest, then a known-package table, then nothing — the source is recorded, not guessed.
+- **Help drawer.** Eight short sections (what it solves / how to use it / one caution), opened
+  automatically the first time and from the `?` button afterwards.
+
 ## 1.18.4
 
 - **Built-in UI is read-only.** 65 rows ship inside the client's own UI bundle; the client never

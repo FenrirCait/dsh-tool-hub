@@ -12,7 +12,7 @@
 | 行 | 来源 | 开关方式 |
 | --- | --- | --- |
 | 插件 | 宿主的插件管理器（`pluginManager.listPlugins()`） | 写 profile 的补丁层，和「插件」页写的是同一处 |
-| 技能 | `~/.dsh/skills`、`~/.agents/skills` | `SKILL.md` 改名成 `SKILL.md.disabled`（可逆） |
+| 技能 | `~/.dsh/skills`、`~/.agents/skills`，以及宿主报告的工作区 `.dsh/skills` | `SKILL.md` 改名成 `SKILL.md.disabled`（可逆） |
 | MCP 服务器 | profile 的 `cordis.patch.yml` 里 `@deepseek-ai/dsh-mcp-client` 条目 | 同插件（loader）；配置改的是该条目自己的 `config:` 块 |
 
 每行会说明它是什么、现在开没开、不能开关时为什么不能：
@@ -67,7 +67,7 @@ TOOL_HUB_SKILL_ROOTS=<dir>/skills;<dir>/skills2   # Windows 用分号分隔
 
 ## 现在不做的事
 
-- 只扫用户级技能目录，工作区里的 `.dsh/skills` 不属于「这套安装」，不在这里开关
+- 只看已知技能根：`~/.dsh/skills`、`~/.agents/skills`，以及宿主报告（或 `TOOL_HUB_WORKSPACES` 指定）的工作区 `.dsh/skills`
 - SSE 传输的服务器不能在面板里测试连接（stdio 与 streamable HTTP 可以）
 - 没有终端界面，面板是 Web / Desktop 扩展
 
@@ -80,3 +80,19 @@ TOOL_HUB_SKILL_ROOTS=<dir>/skills;<dir>/skills2   # Windows 用分号分隔
 两个面板读的是同一份真值：技能是文件、MCP 是 patch 里的行。所以「同步状态」不是问题，**同时写**才是。装并启用了 dsh-skill-mcp-panel 时，本插件在重写 patch 前会先拿同一个 `<patch>.panel.lock`（独占创建、30 秒陈旧接管、最多等 5 秒），顶栏出现「兼容」徽标；它的工具屏蔽名单在这里只读并入（并集），绝不写它的文件。读操作不拿锁，列表与快照不会被拖慢。
 
 手建分组放在「分组群」里：默认只有一个「默认分组群」，rail 底部能新建，标题上能改名或删除；删掉分组群时里面的分组会挪回默认分组群。自动分组只产出四个桶：官方 / MCP 服务器 / 通用 / 用户下载。
+
+## 1.19 起的几件事
+
+- **技能有作用域**：全局 · 用户（`~/.dsh/skills`）、全局 · 共享（`~/.agents/skills`）、以及宿主报告的每个工作区（`<workspace>/.dsh/skills`）。技能页按作用域分段；`TOOL_HUB_WORKSPACES` 用 `;` 分隔固定列表，写 `-` 关闭工作区发现。
+- **预览 / 删除 / 恢复**：预览只读显示源文件（前 200 KB）。删除把整个技能移进 `<状态目录>/trash/<时间戳>-<名称>/`，`meta.json` 记下原根与相对路径；提示条 10 秒内可撤销，撤销是反向移动。
+- **导入 / 移动**：导入支持单个 `.md`、目录、`.zip`，选目标根与是否覆盖；移动到另一个根，目标已存在则拒绝，开关不动。
+- **MCP 密钥**：`env` / `headers` 的值不离开宿主，`secretKeys` 只报哪些键已设置；留空保存即保留原值。
+- **`${NAME}` 模板**：值恰好写成 `${NAME}` 时落盘为 loader 的环境变量引用（`!!js process.env.NAME`），面板不读取也不展开。
+- **原文与高级编辑**：查看原文只读；高级编辑整条替换，保存前警告并解析一次。
+- **OAuth**：已保存的 HTTP / SSE 服务器可登录；发现链 PRM（RFC 9728）→ AS（RFC 8414）→ OIDC，校验 issuer，PKCE + RFC 8707 `resource`，面板给授权地址并收 `code`。
+- **命令行**：`dsh-tool-hub` 覆盖 list / plugin / group / preset / skill / mcp / config 共 22 条命令，读写都支持 `--json`，例如 `dsh-tool-hub list --json`。
+- **诊断与历史**：`doctor` 六项检查（patch 解析、状态可写、失败行、陈旧锁、技能根、回收站）；失败行带红条与「看诊断」。每次面板操作写一行 `<状态目录>/history.jsonl`，只留 op 与短 id。
+- **按 bundle**：左栏列出宿主报告的 bundle，选中即筛选；只是镜头，不动开关。
+- **配置导入导出**：`groups` / `collections` / `presets` / `toolDeny` 一份 JSON；默认合并，替换需确认；命令行导入先备份。
+- **简介与帮助**：显示简介按 meta → package.json → 已知表 → 空取值；帮助抽屉八节，首次自动展开。
+- **布局**：外壳 `maxHeight: calc(100vh - 120px)` + `overflow: hidden`，页头与左栏固定，只有列表滚动；上次页签仍记在 `localStorage toolHubView`。

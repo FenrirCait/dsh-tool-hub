@@ -26,7 +26,7 @@ dsh plugin install ./dsh-tool-hub
 
 ## 能做什么
 
-- **一个列表**：loader 里的每一条 + 用户技能目录里的每个技能。每行写明类型、是否开启、不能开关
+- **一个列表**：loader 里的每一条 + 已知技能根里的每个技能。每行写明类型、是否开启、不能开关
   的原因。随客户端一起装的行（`@deepseek-ai/*`、`cordis:*`）带**官方**标记，自带和第三方一眼分得开。
 - **逐项开关**：插件走宿主自己的 pluginManager，写进 profile patch，与插件页写的是同一处；技能靠
   重命名 `SKILL.md` ↔ `SKILL.md.disabled`。
@@ -80,6 +80,106 @@ dsh plugin install ./dsh-tool-hub
 
 写入是原子的（临时文件 + rename），保存中途崩掉不会留下半截状态。
 
+## 技能
+
+技能的来源分成三类：`~/.dsh/skills`（**全局 · 用户**）、`~/.agents/skills`（**全局 · 共享**），以及宿主
+知道的每个工作区（**工作区名**，取 `<工作区>/.dsh/skills`）。技能页按作用域分段，工作区技能不会被误当成
+全局技能。
+
+`TOOL_HUB_WORKSPACES` 可以固定工作区列表：`;` 分隔的路径；写 `-` 关闭工作区发现（sandbox profile 就靠它
+保持隔离）。
+
+- **预览**：只读打开技能的源文件，最多显示前 200 KB。
+- **删除**：把整个技能目录（或单个 `.md`）移进 `<状态目录>/trash/<时间戳>-<名称>/`，并写一份 `meta.json`
+  记下它原来属于哪个根、相对路径是什么。提示条留 10 秒**撤销**，撤销就是反向移动——不会真的抹掉文件。
+- **导入技能**：填一个本地路径——单个 `.md`、目录或 `.zip`；选目标根，并决定同名技能是否覆盖。zip 读取
+  会拒绝越出压缩包的条目，也不会跟随链接跑到包外。
+- **移动到…**：把技能挪到另一个根。目标已存在就拒绝，不合并；开关状态不动。
+
+## MCP 懒加载
+
+在某个 MCP 服务器的行上打开 **懒启动** 后，它的工具会整体移出模型可见的工具表，改由一个小工具 `hub_tools` 保管目录：`action="list"` 列出哪些服务器是懒的、各自加载了几个；`action="enable"` 接受 `names` 或 `server`，把工具放回模型（下一轮生效）；`action="disable"` 收回去。只要还有懒启动的服务器，面板会向系统提示词加一段说明；没有时一个字都不加。
+
+为什么做在客户端：MCP 客户端总会把它知道的工具全部广告出来，面板唯一能动的杠杆就是工具掩码。被掩码的工具是**整条从请求里消失**（不只是禁止调用），这才是省上下文的部分。自己就带懒启动的服务（例如 Computer Use 的 `WCU_TOOL_MODE=lazy`）不需要这个开关。
+
+## MCP 服务器
+
+- **密钥留在宿主**：`env` 与 `headers` 的值回传时是空的；`secretKeys` 说明哪些键已设置，对话框在每项
+  下面写「已设置，留空保持不变」。留空保存就是保留原值；一个从来没设置过的键留空会被拒绝，避免拼错
+  键名就造出一个空凭据。
+- **`${NAME}` 模板**：值写成恰好 `${NAME}` 时，落盘的是 loader 的环境变量引用
+  （`!!js process.env.NAME`），不是字面量。面板不读取、也不展开它。
+- **查看原文**：只读显示某台服务器的 patch 片段。**高级：直接编辑**会整条替换——缩进、字段、格式都要
+  自己保证——保存前有警告，保存时还会解析一次。
+- **OAuth 登录**：对已保存的 HTTP 或 SSE 服务器可用。发现顺序是保护资源元数据（RFC 9728）→ 授权服务
+  器元数据（RFC 8414）→ OIDC；issuer 不一致会被拒绝而不是照用。流程使用 PKCE 与 RFC 8707 的
+  `resource` 参数；面板给出授权地址，再让你粘贴跳转回来那条地址里的 `code`。
+- **工具级屏蔽**不变：点「工具」勾选保留项，取消的项会从这套安装的所有会话里消失；屏蔽名单存在面板
+  状态里，绝不写进服务器的 `config:`。
+
+## 命令行
+
+包里带一个 `dsh-tool-hub`，直接读写同一份状态与 patch，供脚本或无面板的机器使用：
+
+```bash
+dsh-tool-hub list --json
+dsh-tool-hub plugin disable <entryId>
+dsh-tool-hub group off "写作"
+dsh-tool-hub skill list --workspace .
+dsh-tool-hub mcp raw <serverName>
+dsh-tool-hub config export ./tool-hub-backup.json
+```
+
+- **22 条命令**，分七组：`list`；`plugin enable|disable`；`group list|on|off`；`preset list|apply`；
+  `skill list|enable|disable|delete`；`mcp list|enable|disable|raw`；`config export|import`。读和写都
+  支持 `--json`。
+- `--profile <名称>` 选 profile（默认 `web`）；`--workspace <路径>` 把该工作区的 `.dsh/skills` 加进来；
+  `--global` 让 `skill` 只走全局根。
+- `preset apply` 默认精确还原——预设没列的会被关掉；`--only-enable` 只补开。面板自己那一行不会被批量
+  关掉。
+- `config export` 的目标必须在 `$DSH_HOME` 或当前工作目录之内（路径上不能有符号链接）；`--mkdir` 建
+  父目录，`--force` 放宽两个根。
+- `config import` 默认合并；`--replace --yes` 整份替换，替换前先备份旧状态。
+- 退出码：`0` 成功、`1` 用法错误、`2` 找不到、`3` 校验失败。
+
+## 诊断与历史
+
+- 模块加载失败的行左侧有一条红条。**看诊断**打开这一行自己的 `diagnostic` 文本；宿主没给诊断时，对话框
+  直说没有，并提示去看宿主日志与 patch 解析结果，而不是显示一个空框。
+- `doctor` 宿主 op 用「实际做一遍」回答六项检查：`patch-parse`、`state-writable`、`failed-rows`、
+  `stale-lock`、`skill-roots`、`trash`。一项失败不会遮住其它项。
+- 每次面板操作往 `<状态目录>/history.jsonl` 追加一行：时间、op、短 id、是否成功。payload 不复制——它
+  可能带着技能正文、令牌或整份配置。文件超过上限后只留尾部；**历史**按最新在前列出。
+
+## 按 bundle 查看
+
+**按 bundle** 把左栏换成宿主报告的 bundle 列表（`pluginManager.listBundles()`），每个带自己的行数。
+选中一个就把列表收窄到它拥有的行；**全部**取消筛选。它只是镜头，不是开关：不会打开或关闭任何东西；
+宿主没有 `listBundles` 时按钮直接禁用，而不是让快照失败。
+
+## 配置导入导出
+
+**导出配置**下载一份 JSON，只有 `groups`、`collections`、`presets`、`toolDeny` 四个键，不含任何机器
+路径或凭据。**导入配置**默认合并：同 id 的分组并入成员，同名分组保留现有的，同名预设跳过。替换模式会
+丢掉当前状态，所以先确认。命令行导入会先备份旧状态；面板导入不备份。
+
+## 每行简介
+
+**显示简介**在每行下面加一行说明。插件与 MCP 行按顺序取第一个有内容的来源：行自己的
+`meta.description` → 包的 `package.json` → 一张已知包表 → 空。面板记录是哪一级回答的，而不是猜——
+缺行时可诊断。技能只用自己 frontmatter 里的 `description`，没有别的来源。
+
+## 帮助抽屉
+
+`?` 打开八节短文——解决什么 / 怎么用 / 一个注意。第一次会自动展开（`localStorage
+toolHubHelpSeen` 记住已看过），之后只在点按时打开。完整文档留在这一页；抽屉只是就地提醒。
+
+## 布局
+
+面板钉在视口里：外壳 `maxHeight: calc(100vh - 120px)` + `overflow: hidden`，页头与标签行固定，左栏
+sticky 在顶部。只有列表内部滚动，所以装了很多东西也不会把页头、标签或左栏滚出视野。上次停留的页签
+（`localStorage toolHubView`）仍然决定打开哪一页。
+
 ## 分组群
 
 手建的分组放在**分组群**里。全新安装只有一个「默认分组群」；rail 底部的「+ 新建分组群」可以再加，
@@ -94,8 +194,8 @@ MCP 条目）、**通用**（第三方里垫在底下的那些：上下文、记
 ## 不做什么
 
 - **MCP 只管宿主 MCP client 那三种形态**（stdio / sse / http）；服务器进程内部自己的事仍归它自己。
-- **不扫描用户技能根之外的技能**：只看 `~/.dsh/skills` 与 `~/.agents/skills`。项目级
-  `.dsh/skills` 属于某个工作区而不是某套安装，列进来会误导。
+- **只看已知技能根**：`~/.dsh/skills`、`~/.agents/skills`，以及宿主报告的每个工作区的 `.dsh/skills`
+  （或用 `TOOL_HUB_WORKSPACES` 指定）。不在其中的项目目录仍然只是一个目录。
 - **宿主托管的条目**（插件管理器本身、定时器、工具注册表等）会显示但不可开关。宿主把它们标成
   `management-required` 或 `unaddressable`，行内直接说明，而不是藏起来。
 - **没有终端界面**：这是 Web / Desktop 扩展。
@@ -113,14 +213,15 @@ MCP 条目）、**通用**（第三方里垫在底下的那些：上下文、记
 ### 在一次性 profile 里试
 
 默认情况下分组和预设存在 `<DSH_HOME>/tool-hub/state.json`，技能开关落在 `<DSH_HOME>/skills` 与
-`~/.agents/skills`。测试 profile 通常两边都不想要，两个环境变量可以把它们指到无害的地方：
+`~/.agents/skills`。测试 profile 通常两边都不想要，三个环境变量可以把它们指到无害的地方：
 
 ```bash
 TOOL_HUB_STATE_FILE=<目录>/tool-hub-state.json     # 分组、预设、自动分组记录
 TOOL_HUB_SKILL_ROOTS=<目录>/skills;<目录>/skills2  # 技能根，Windows 下用 ; 分隔
+TOOL_HUB_WORKSPACES=<目录>;<目录2>                  # 工作区根；写 "-" 关闭工作区发现
 ```
 
-两个都设上，沙盒里试「整组禁用」就只动沙盒。
+三个都设上，沙盒里试「整组禁用」就只动沙盒。
 
 ## 开发
 

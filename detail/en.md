@@ -87,8 +87,8 @@ TOOL_HUB_SKILL_ROOTS=<dir>/skills:<dir>/skills2   # semicolon on Windows
 
 ## What it does not do
 
-- Only user skill roots are scanned; a workspace's `.dsh/skills` belongs to that workspace, not to
-  the installation, and is not switched from here
+- Only known skill roots are scanned: `~/.dsh/skills`, `~/.agents/skills`, and the `.dsh/skills` of
+  each workspace the host reports (or `TOOL_HUB_WORKSPACES` names)
 - A server on SSE cannot be tested from the panel (stdio and streamable HTTP can)
 - No terminal UI; the panel is a Web / Desktop extension
 
@@ -101,3 +101,18 @@ TOOL_HUB_SKILL_ROOTS=<dir>/skills:<dir>/skills2   # semicolon on Windows
 Both panels read the same truth — skills are files, MCP servers are rows in the patch — so state does not need syncing; writing at the same time is the real risk. When that panel is installed and enabled, this one takes the same `<patch>.panel.lock` before rewriting the patch (exclusive create, 30s stale takeover, 5s wait) and shows a **Compat** badge in the header. Its tool deny list is merged read-only (union) and its file is never written. Reads never take the lock, so listing and the snapshot stay wait-free.
 
 Hand-made groups live in collections: one 默认分组群 exists from the start, the rail bottom adds more, each can be renamed or deleted, and deleting one moves its groups back to the default drawer. Auto grouping produces four buckets: 官方 / MCP 服务器 / 通用 / 用户下载.
+
+## Since 1.19
+
+- **Skill scopes**: global user (`~/.dsh/skills`), global shared (`~/.agents/skills`), and each workspace's `.dsh/skills`; `TOOL_HUB_WORKSPACES` pins the list (`;`-separated, `-` disables it).
+- **Preview / delete / restore**: preview is read-only (first 200 KB); delete moves the skill to `<state dir>/trash/<ts>-<name>/` with a `meta.json`, and the 10-second undo moves it back.
+- **Import / move**: import a `.md`, a folder or a `.zip` into a chosen root (optional overwrite); move to another root, refusing an existing destination.
+- **MCP secrets**: `env` / `headers` values never leave the host; `secretKeys` lists what is set, and a blank field keeps the stored value.
+- **`${NAME}` templates**: a value that is exactly `${NAME}` is stored as the loader's `process.env.NAME` reference.
+- **Raw and advanced edit**: the raw view is read-only; advanced edit replaces the whole entry after a warning and a parse check.
+- **OAuth**: for a saved HTTP/SSE server, discovery PRM (RFC 9728) → AS (RFC 8414) → OIDC with PKCE and RFC 8707 `resource`; the panel shows the authorize URL and asks for the code the redirect carries.
+- **CLI**: `dsh-tool-hub` has 22 commands over list / plugin / group / preset / skill / mcp / config, `--json` on reads and writes; `dsh-tool-hub list --json`.
+- **Doctor and history**: six checks (patch parse, state writable, failed rows, stale lock, skill roots, trash); failed rows carry a red bar and 看诊断. Ops append one line to `<state dir>/history.jsonl`.
+- **Bundle view**: the rail lists installed bundles and filters the list to one; a lens, never a switch.
+- **Config export / import**: `groups` / `collections` / `presets` / `toolDeny` as one JSON; merge by default, replace confirmed, CLI backs up first.
+- **Descriptions / help / layout**: meta → package.json → known table → empty; the eight-section help drawer opens once by itself; the shell is `calc(100vh - 120px)` with a fixed header and rail, and the list is the only scroller (`localStorage toolHubView` still remembers the tab).
