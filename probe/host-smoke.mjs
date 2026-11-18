@@ -135,6 +135,7 @@ const routes = new Map()
 let fakeWorkspaces = null
 let fakeWorkspacesExplode = false
 // The two fallbacks behind it, in contract order.
+const registeredTools = []
 let fakeRegistry = null
 let fakeSessions = null
 // The host's config editor normally names the patch file; tests move it around on purpose.
@@ -175,7 +176,10 @@ const ctx = {
     }
     // The registry reloads the patch through HMR; reading the file back is the closest the fixture
     // can get to that, and it is what makes "created but broken" observable.
-    if (name === 'tools') return { view: () => ({ knownNames: mcpTools, restrictableNames: mcpTools }) }
+    if (name === 'tools') return {
+      view: () => ({ knownNames: [...mcpTools, ...registeredTools], restrictableNames: mcpTools }),
+      register(definition) { registeredTools.push(definition.name); return () => {} },
+    }
     if (name === 'agents') return { list: () => [] }
     return undefined
   },
@@ -208,7 +212,8 @@ const port = server.address().port
 const base = `http://127.0.0.1:${port}`
 
 const get = async (path) => {
-  const response = await fetch(`${base}${path}`, { headers: { host: `127.0.0.1:${port}` } })
+  const separator = path.includes("?") ? "&" : "?"
+  const response = await fetch(`${base}${path}${separator}fresh=1`, { headers: { host: `127.0.0.1:${port}` } })
   return await response.json()
 }
 const op = async (name, payload) => {
@@ -834,11 +839,11 @@ check('a failing bundle inventory is a bundleError, not a failed snapshot',
 fakeBundlesFail = false
 
 // ── 13. doctor ─────────────────────────────────────────────────────────────
-const DOCTOR_IDS = ['patch-parse', 'state-writable', 'failed-rows', 'stale-lock', 'skill-roots', 'trash']
+const DOCTOR_IDS = ['patch-parse', 'state-writable', 'failed-rows', 'stale-lock', 'skill-roots', 'trash', 'hub-tools']
 r = await op('doctor', {})
 let doctor = new Map((r.data?.checks ?? []).map(row => [row.id, row]))
-check('doctor returns exactly the six contracted checks',
-  r.ok === true && doctor.size === 6 && DOCTOR_IDS.every(id => doctor.has(id)),
+check('doctor returns exactly the seven contracted checks',
+  r.ok === true && doctor.size === 7 && DOCTOR_IDS.every(id => doctor.has(id)),
   JSON.stringify((r.data?.checks ?? []).map(row => row.id)))
 check('doctor patch-parse passes on a readable patch', doctor.get('patch-parse')?.ok === true, doctor.get('patch-parse')?.detail)
 check('doctor state-writable passes', doctor.get('state-writable')?.ok === true, doctor.get('state-writable')?.detail)

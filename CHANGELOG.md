@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.20.1
+
+- Fixed: `hub_tools` never reached the registry — `register()` requires `output.render`, the registration threw, and the catch had no logger to warn into. It now ships a render function, resolves the service through both property and lookup forms, and falls back to `console.warn` so a failure is visible.
+- Added: `doctor` reports `hub-tools`, so a missing catalog says so instead of failing silently.
+- Fixed: the snapshot is cached for 1.2 s with single-flight, and every write invalidates on entry and exit; a click no longer rebuilds the inventory twice, and three parallel reads cost one build.
+- Added: `GET /tool-hub/api/snapshot?fresh=1` for callers that must bypass the cache.
+- Fixed: the fake MCP probe server answers `tools/call` instead of failing with `-32601`.
 ## 1.20.0
 
 - Added: lazy MCP servers. A server marked lazy keeps every tool out of the model-visible schema; a small `hub_tools` tool lists the catalog and loads names or a whole server back on demand, and a one-paragraph prompt section tells the model the catalog exists.

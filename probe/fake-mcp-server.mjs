@@ -2,7 +2,7 @@
  * Minimal MCP server over stdio, for the sandbox probe only.
  *
  * Just enough of the protocol for the host's client to connect and enumerate tools:
- * `initialize`, `tools/list`, `ping`. Newline-delimited JSON-RPC, no batching, no auth.
+ * `initialize`, `tools/list`, `tools/call`, `ping`. Newline-delimited JSON-RPC, no batching, no auth.
  */
 const out = (payload) => process.stdout.write(`${JSON.stringify(payload)}\n`)
 const tools = [
@@ -46,6 +46,20 @@ function handle(line) {
   }
   if (method === 'tools/list') {
     out({ jsonrpc: '2.0', id, result: { tools } })
+    return
+  }
+  if (method === 'tools/call') {
+    const name = params?.name
+    const known = tools.some(tool => tool.name === name)
+    if (!known) {
+      out({ jsonrpc: '2.0', id, error: { code: -32602, message: `unknown tool: ${String(name)}` } })
+      return
+    }
+    out({
+      jsonrpc: '2.0',
+      id,
+      result: { content: [{ type: 'text', text: `${name} ok ${JSON.stringify(params?.arguments ?? {})}` }], isError: false },
+    })
     return
   }
   if (method === 'ping') {
