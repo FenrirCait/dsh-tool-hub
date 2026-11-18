@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.20.6
+
+- Changed: `thirdparty.status` no longer builds a whole snapshot to answer; it reads the plugin rows and skills it actually filters (1254 ms → 648 ms, most of the rest is the first uncached row read).
+- Added: `pluginManager.listPlugins()` is memoised for 5 s and `listBundles()` for 60 s, both invalidated by writes. A warm snapshot is now 14 ms instead of ~800 ms.
+- Fixed: a write only drops the row cache — the bundle list survives, because flipping a switch never changes which bundles exist. A toggle no longer pays a second 400 ms bundle listing.
+- Added: `TOOL_HUB_PROFILE=1` writes per-step snapshot timings to `<state dir>/snapshot-profile.log`, so the next slow report can be answered with numbers instead of guesses.
+
+Measured on the sandbox profile (33 bundles, 225 rows, Windows): `plugins=408 ms`, `bundles=401 ms`, everything else ≤2 ms; `snapshot?fresh=1` ≈ 800 ms, warm snapshot ≈ 14 ms, `toggle` ≈ 1.6 s (of which ~1.2 s is the host reloading the loader entry, not this plugin).
 ## 1.20.1
 
 - Fixed: `hub_tools` never reached the registry — `register()` requires `output.render`, the registration threw, and the catch had no logger to warn into. It now ships a render function, resolves the service through both property and lookup forms, and falls back to `console.warn` so a failure is visible.
