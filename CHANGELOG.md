@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.0
+
+The first release meant to be installed by somebody who did not build it. Everything below is in it:
+
+- One panel for plugins, skills and MCP servers, reachable from the Plugins page and from the sidebar.
+- Groups with four buckets (official / MCP servers / third-party base / user downloads), collapsible collections, drag order, shift-range selection and drop-to-group.
+- Presets that store the whole switchboard (rows, MCP servers and the tool deny list) and can be applied exactly or additively.
+- MCP servers: create/edit/delete rows in `cordis.patch.yml`, secrets masked and kept on blank, raw editing, a live `测试连接`, and OAuth (discovery, PKCE, resource indicators).
+- Tool-level masking through scoped `tools.restrict`, with the panel's own deny list and a read-only import of the Skill/MCP panel's list.
+- Lazy MCP servers: tools stay hidden until `hub_tools` enables them, with a prompt section that tells the model the catalogue exists.
+- Skills: per-workspace scopes, preview, move, import from `.md`/folder/zip, delete into a trash you can restore from.
+- `dsh-tool-hub` CLI for the same operations outside the panel, `doctor` with eight checks, configuration export/import, bundle view, history, and a kill switch that disables every third-party piece with one rollback point.
+
+Measured on a 225-row, 33-bundle profile: warm snapshot 13–24 ms, `fresh` ≈ 800 ms (two host inventory calls at ~400 ms each), a toggle ≈ 1.6 s of which ~1.2 s is the host reloading the loader entry.
 ## 1.20.7
 
 - Added: `doctor` now reports a ninth-listed check, `snapshot-profile`, with the per-step timings of the most recent profiled snapshot (or a note that no profile log exists yet).
