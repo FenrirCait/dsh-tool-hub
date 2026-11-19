@@ -1,0 +1,16 @@
+# One line ending everywhere.
+#
+# This repository lived with `core.autocrlf=true` and no attributes: the index held LF while a
+# Windows checkout wrote CRLF back into the working tree. That made two things unpredictable —
+# an edit could show up as a whole-file diff after a checkout, and the CRLF in a 264 KB client
+# bundle broke multi-line string anchors in scripts. Declaring the rule here means the index and
+# every checkout agree, on every platform, regardless of a machine's git config.
+* text=auto eol=lf
+
+# Binaries: never converted, never diffed as text.
+*.tgz binary
+*.png binary
+*.ico binary
+*.jpg binary
+*.woff binary
+*.woff2 binary
