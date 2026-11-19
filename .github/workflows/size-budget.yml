@@ -1,0 +1,26 @@
+# The size ratchet. Runs the probes that need no host and no network, then refuses a source file
+# that crossed the hard line or grew past its recorded allowance. See probe/size-budget.mjs.
+name: size-budget
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  probes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: file-size budget
+        run: node probe/size-budget.mjs
+      - name: op-registry reconciliation
+        run: node probe/op-registry-smoke.mjs
+      - name: mount heartbeat
+        run: node probe/mount-heartbeat-smoke.mjs
+      - name: host contract table
+        run: node probe/host-contract-smoke.mjs
+      - name: tool mask
+        run: node probe/mask-probe.mjs

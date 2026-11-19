@@ -22,6 +22,10 @@
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg"
   },
+  "scripts": {
+    "test:size": "node probe/size-budget.mjs",
+    "test:probes": "node probe/host-smoke.mjs && node probe/oauth-smoke.mjs && node probe/skill-pack-smoke.mjs && node probe/cli-smoke.mjs && node probe/mask-probe.mjs && node probe/op-registry-smoke.mjs && node probe/mount-heartbeat-smoke.mjs && node probe/host-contract-smoke.mjs && node probe/size-budget.mjs"
+  },
   "dsh": {
     "client": {
       "platform": "web",
