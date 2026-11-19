@@ -58,7 +58,7 @@ const invalid = (message, code = 'invalid') => new CliFailure(message, EXIT.inva
 
 // ── argv ─────────────────────────────────────────────────────────────────────
 
-const VALUE_FLAGS = new Set(['--profile', '--workspace', '--set'])
+const VALUE_FLAGS = new Set(['--profile', '--workspace', '--set', '--names'])
 
 function parseArgv(argv) {
   const options = {
@@ -128,9 +128,12 @@ function parseArgv(argv) {
         value = argv[index]
         if (value === undefined) throw usage(`${name} needs a value`)
       }
-      if (value === '') throw usage(`${name} needs a value`)
+      // An empty `--names ""` is a real value for `session set`: it means "no names", which
+      // clears that session's overlay. Every other value flag needs something to work with.
+      if (value === '' && name !== '--names') throw usage(`${name} needs a value`)
       if (name === '--profile') options.profile = value
       else if (name === '--workspace') options.workspace = value
+      else if (name === '--names') options.names = value
       else options.set = value
       continue
     }

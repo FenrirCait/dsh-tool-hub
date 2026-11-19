@@ -910,6 +910,44 @@ console.log(`cli  ${CLI}`)
 console.log('')
 
 await resetFixture()
+/**
+ * Session overlays: per-session tool denies that sit on top of the installation list. The CLI
+ * writes the same state file the panel does, so the assertions check the file, not just stdout.
+ */
+async function sessionCommands() {
+  await resetFixture()
+  const statePath = join(home, 'tool-hub', 'state.json')
+
+  const listed = jsonOf(run(['session', 'list', '--json']))
+  check('session list: empty to start', Array.isArray(listed.sessions) && listed.sessions.length === 0, JSON.stringify(listed.sessions))
+
+  const set = jsonOf(run(['session', 'set', 'sess-1', '--names', 'mcp__alpha__one,not_a_tool', '--json']))
+  check('session set: keeps only mcp names', set.sessionId === 'sess-1' && JSON.stringify(set.deny) === '["mcp__alpha__one"]', JSON.stringify(set))
+  check('session set: reports the backup it wrote', typeof set.backup === 'string' && set.backup.length > 0, String(set.backup))
+  const afterSet = JSON.parse(await readFile(statePath, 'utf8'))
+  check('session set: lands in the state file', JSON.stringify(afterSet.sessions?.['sess-1']) === '["mcp__alpha__one"]', JSON.stringify(afterSet.sessions))
+
+  const human = run(['session', 'list']).stdout
+  check('session list: the human output names the session', /sess-1/.test(human), human.trim())
+
+  run(['session', 'set', 'sess-2', '--names', 'mcp__alpha__two'])
+  const two = JSON.parse(await readFile(statePath, 'utf8')).sessions
+  check('session set: two overlays coexist', Object.keys(two).sort().join(',') === 'sess-1,sess-2', JSON.stringify(two))
+
+  run(['session', 'clear', 'sess-1'])
+  const cleared = JSON.parse(await readFile(statePath, 'utf8')).sessions
+  check('session clear: drops one entry only', cleared?.['sess-1'] === undefined && cleared?.['sess-2'] !== undefined, JSON.stringify(cleared))
+
+  run(['session', 'set', 'sess-2', '--names', ''])
+  const emptied = JSON.parse(await readFile(statePath, 'utf8')).sessions
+  check('session set: an empty list removes the entry', emptied?.['sess-2'] === undefined, JSON.stringify(emptied))
+
+  const usage = run(['session', 'set', '--json'], 1)
+  check('session set: refuses a missing sessionId', usage.status === 1, usage.stderr.trim().slice(0, 80))
+  const unknown = run(['session', 'wat', 'sess-1', '--json'], 1)
+  check('session: an unknown action is a usage error', unknown.status === 1)
+}
+
 await test('unit: parseRows', unitParseRows)
 await resetFixture()
 await test('list', listCommands)
@@ -919,6 +957,7 @@ await test('preset', presetCommands)
 await test('skill', skillCommands)
 await test('mcp', mcpCommands)
 await test('config', configCommands)
+await test('session', sessionCommands)
 await test('guard rails', guardRails)
 await test('self row', selfGuard)
 await test('real profile', realProfile)
