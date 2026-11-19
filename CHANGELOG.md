@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.1.0
+
+A maintenance pass: two bugs of our own, three mechanisms borrowed (with their traps written
+down), and a size ratchet so the next person does not inherit a 4,000-line file by accident.
+
+- Fixed: the tool mask used to lift the previous restriction before installing the next one. If
+  `restrict()` threw, the agent was left with **no** mask while `applied` still claimed the old
+  list was live. Restrictions intersect, so the new layer now lands first — the overlap
+  over-denies for a moment, which is the safe direction.
+- Session overlays: `state.sessions` holds per-session `mcp__*` denies, unioned with the
+  installation list. Agents inherit along the session lineage (`parentSession`), which is how a
+  subagent keeps its parent's switches; a broken lineage falls back to the installation list
+  only. Ops `session.set` / `session.clear`, CLI `session list|set|clear`, snapshot exposure.
+- Scenes: `scene.save` / `scene.apply` / `scene.exit` switch the whole tools + MCP environment.
+  A missing section means "leave that domain alone", `[]` means "clear it" — one rule for both
+  domains. The mode record (with a full snapshot) is written before anything changes, a failed
+  apply restores the snapshot, and an incomplete restore says exactly which targets are still
+  wrong instead of claiming success.
+- Mount heartbeat: `apply()` drops `<state dir>/mount.json` (pid, host start, injects) from the
+  REQUIRED inject callback, and `doctor` grew a ninth check that compares it with the live
+  process. An inject name the host stops publishing used to make the plugin vanish silently.
+- Op registry: 52 ops (48 dotted + `toggle`/`bulk`/`doctor`/`snapshot`) declare write / confirm /
+  audit. Dispatch refuses unregistered ops and enforces the unconditional confirmation gates from
+  the table; history entries carry the audit flag.
+- Host contract: 11 services / 19 members, with the private `tools.view` marked and its fallback
+  written down as a dead end — `definitions()` is post-restriction, so using it as mask input
+  would make the mask lift itself.
+- Panel: a failed snapshot offers Retry with `role="alert"`, empty states name the view and the
+  next step, destructive icons stay red without hovering, and the MCP row badge matches the
+  header's pill.
+- Tooling: `probe/size-budget.mjs` enforces 1,500/3,000 lines and 80/150 KiB for hand-written
+  source, with a baseline that only allows the two existing offenders to shrink; the repository
+  got its first workflow. `.gitattributes` pins LF so a Windows checkout cannot rewrite a file.
+- Probes: 11 suites, 833 assertions (host 339 · oauth 92 · skill-pack 73 · CLI 199 · mask 27 ·
+  registry 16 · heartbeat 19 · contract 29 · client 8 · scene 31 · size budget green).
 ## 1.0.1
 
 - Fixed: the two HTTP routes now ask the host first — `connection.requestRejection(request)` runs before anything else, so a browser without a DSH session (or a remote session the host policy refuses) gets `401`/`403` instead of reaching the panel API. A gate that throws refuses too (fail closed). Our own same-origin check stays as the second line of defence for hosts that expose no `connection` service.
