@@ -238,6 +238,8 @@ function emptyState() {
     presets: [],
     toolDeny: [],
     auto: { appliedAt: null },
+    // Session overlays: <sessionId> -> mcp__* names that session switched off.
+    sessions: {},
   }
 }
 
@@ -249,7 +251,7 @@ function isRecord(value) {
  * Keys this CLI owns. Anything else already in state.json belongs to the panel and
  * is carried through untouched so a rewrite never drops a field we do not know.
  */
-const OWNED_STATE_KEYS = new Set(['version', 'groups', 'collections', 'presets', 'toolDeny', 'auto'])
+const OWNED_STATE_KEYS = new Set(['version', 'groups', 'collections', 'presets', 'toolDeny', 'auto', 'sessions'])
 
 async function readState(ctx) {
   let raw
@@ -269,6 +271,13 @@ async function readState(ctx) {
   if (Array.isArray(raw.presets)) state.presets = raw.presets.filter(isRecord)
   if (Array.isArray(raw.toolDeny)) state.toolDeny = raw.toolDeny.filter(name => typeof name === 'string')
   if (isRecord(raw.auto)) state.auto = raw.auto
+  if (isRecord(raw.sessions)) {
+    for (const [sessionId, names] of Object.entries(raw.sessions)) {
+      if (sessionId === '' || !Array.isArray(names)) continue
+      const deny = names.filter(name => typeof name === 'string' && name.startsWith('mcp__'))
+      if (deny.length > 0) state.sessions[sessionId] = [...new Set(deny)]
+    }
+  }
   const extra = {}
   for (const [key, value] of Object.entries(raw)) {
     if (!OWNED_STATE_KEYS.has(key)) extra[key] = value
@@ -288,6 +297,7 @@ async function writeState(ctx, state) {
     presets: state.presets,
     toolDeny: state.toolDeny,
     auto: state.auto,
+    sessions: state.sessions,
   }
   await writeFileAtomic(ctx.stateFile, `${JSON.stringify(payload, null, 2)}\n`)
   return backup
@@ -654,6 +664,7 @@ function stateSummary(state) {
     presets: state.presets.length,
     collections: state.collections.length,
     toolDeny: state.toolDeny.length,
+    sessions: Object.keys(state.sessions).length,
   }
 }
 
@@ -1240,6 +1251,7 @@ Usage
   dsh-tool-hub skill list|enable|disable|delete <name> [--workspace path|--global] [--json]
   dsh-tool-hub mcp list|enable|disable <serverName> [--profile p] [--json]
   dsh-tool-hub mcp raw <serverName> [--set file] [--profile p]
+  dsh-tool-hub session list|set <sessionId> --names a,b|clear <sessionId> [--profile p] [--json]
   dsh-tool-hub config export <file> [--mkdir] [--force] [--profile p]
   dsh-tool-hub config import <file> [--replace --yes] [--profile p]
 
@@ -1247,6 +1259,8 @@ Semantics
   preset apply       exact by default: rows and skills the preset does not name are
                      switched off (the panel's behaviour); --only-enable only turns
                      things on. The panel's own row is never switched off in bulk.
+  session set        replaces one session's overlay (only mcp__* names survive); the panel's
+                     installation list is untouched, and an empty --names clears the entry.
   mcp raw --set      the file must hold exactly one row, of the MCP client module,
                      with the target's id; it is re-indented into the target row.
   config export      the destination must be a regular file inside $DSH_HOME or the
@@ -1277,6 +1291,47 @@ async function readVersion() {
 }
 
 // ── entry ────────────────────────────────────────────────────────────────────
+
+/**
+ * Session overlays: tools one session switched off, on top of the installation list. The CLI
+ * writes the same state file the panel does, so a session switch made here shows up there and
+ * the other way round.
+ */
+async function cmdSession(ctx, action, sessionId, options) {
+  const state = await readState(ctx)
+  if (action === undefined || action === 'list') {
+    const rows = Object.entries(state.sessions)
+      .sort((left, right) => left[0].localeCompare(right[0]))
+      .map(([id, deny]) => ({ sessionId: id, deny }))
+    emit(
+      options,
+      { ok: true, sessions: rows },
+      rows.length === 0
+        ? ['  (no session overlays)']
+        : rows.map(row => `  ${pad(row.sessionId, 24)}  ${row.deny.join(', ')}`),
+    )
+    return EXIT.ok
+  }
+  if (action !== 'set' && action !== 'clear') throw usage('session takes list, set <sessionId> --names a,b, or clear <sessionId>')
+  if (typeof sessionId !== 'string' || sessionId.trim() === '') throw usage(`session ${action} needs a sessionId`)
+  const id = sessionId.trim()
+  if (action === 'clear') {
+    delete state.sessions[id]
+  } else {
+    const names = String(options.names ?? '').split(',').map(name => name.trim()).filter(name => name !== '')
+    const deny = [...new Set(names.filter(name => name.startsWith('mcp__')))]
+    if (deny.length === 0) delete state.sessions[id]
+    else state.sessions[id] = deny
+  }
+  const backup = await writeState(ctx, state)
+  const deny = state.sessions[id] ?? []
+  emit(
+    options,
+    { ok: true, sessionId: id, deny, backup },
+    [deny.length === 0 ? `  cleared: ${id}` : `  set: ${id} -> ${deny.join(', ')}`],
+  )
+  return EXIT.ok
+}
 
 async function main(argv) {
   const options = parseArgv(argv)
@@ -1309,6 +1364,8 @@ async function main(argv) {
       return await cmdMcp(ctx, rest[0], rest[1], options)
     case 'config':
       return await cmdConfig(ctx, rest[0], rest[1], options)
+    case 'session':
+      return await cmdSession(ctx, rest[0], rest[1], options)
     default:
       throw usage(`unknown command "${command}"; run dsh-tool-hub --help`)
   }

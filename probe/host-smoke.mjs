@@ -324,6 +324,31 @@ const stateAfterTools = JSON.parse(await readFile(join(home, 'tool-hub', 'state.
 check('tool deny persisted in our own state file', JSON.stringify(stateAfterTools.toolDeny) === '["mcp__fixture__alpha","mcp__fixture__beta"]', JSON.stringify(stateAfterTools.toolDeny))
 r = await op('tool.save', { deny: [] })
 check('clearing the list re-enables everything', r.ok === true && (await get('/tool-hub/api/snapshot')).data.tools.every(row => row.enabled === true))
+
+// ── session overlays ───────────────────────────────────────────────────────
+// A session switch is data, not a switchboard change: the installation rows must stay on, and
+// the overlay has to survive a reload and stay separate per session.
+r = await op('session.set', { sessionId: 'sess-a', names: ['mcp__fixture__alpha', 'not_a_tool'] })
+check('session.set keeps only mcp names', r.ok === true && JSON.stringify(r.data.deny) === '["mcp__fixture__alpha"]', JSON.stringify(r))
+let sessionSnap = (await get('/tool-hub/api/snapshot')).data
+check('snapshot lists the session overlay', JSON.stringify(sessionSnap.sessions?.['sess-a']) === '["mcp__fixture__alpha"]', JSON.stringify(sessionSnap.sessions))
+check('the mask reports the session overlay', (sessionSnap.toolMask?.sessions ?? []).some(row => row.sessionId === 'sess-a'), JSON.stringify(sessionSnap.toolMask?.sessions))
+check('installation rows stay on while only a session is masked', sessionSnap.tools.every(row => row.enabled === true))
+await op('session.set', { sessionId: 'sess-b', names: ['mcp__fixture__beta'] })
+sessionSnap = (await get('/tool-hub/api/snapshot')).data
+check('two sessions keep separate overlays',
+  JSON.stringify(sessionSnap.sessions?.['sess-a']) === '["mcp__fixture__alpha"]' && JSON.stringify(sessionSnap.sessions?.['sess-b']) === '["mcp__fixture__beta"]',
+  JSON.stringify(sessionSnap.sessions))
+const stateAfterSessions = JSON.parse(await readFile(join(home, 'tool-hub', 'state.json'), 'utf8'))
+check('session overlays persist in our own state file', Object.keys(stateAfterSessions.sessions ?? {}).join(',') === 'sess-a,sess-b', JSON.stringify(stateAfterSessions.sessions))
+check('session.set refuses a missing sessionId', (await op('session.set', { names: ['mcp__fixture__alpha'] })).ok === false)
+r = await op('session.clear', { sessionId: 'sess-a' })
+sessionSnap = (await get('/tool-hub/api/snapshot')).data
+check('session.clear drops only that session',
+  r.ok === true && sessionSnap.sessions?.['sess-a'] === undefined && JSON.stringify(sessionSnap.sessions?.['sess-b']) === '["mcp__fixture__beta"]',
+  JSON.stringify(sessionSnap.sessions))
+await op('session.clear', { sessionId: 'sess-b' })
+check('clearing every overlay leaves the mask empty', ((await get('/tool-hub/api/snapshot')).data.toolMask?.sessions ?? []).length === 0)
 r = await op('preset.save', { name: 'tool-preset' })
 const savedPreset = r.data.presets.find(preset => preset.name === 'tool-preset')
 check('preset records the tool dimension', Array.isArray(savedPreset?.enabled?.tool) && savedPreset.enabled.tool.length === 2, JSON.stringify(savedPreset?.enabled?.tool))
@@ -868,11 +893,11 @@ check('a failing bundle inventory is a bundleError, not a failed snapshot',
 fakeBundlesFail = false
 
 // ── 13. doctor ─────────────────────────────────────────────────────────────
-const DOCTOR_IDS = ['patch-parse', 'state-writable', 'failed-rows', 'stale-lock', 'skill-roots', 'trash', 'hub-tools', 'snapshot-profile']
+const DOCTOR_IDS = ['patch-parse', 'state-writable', 'failed-rows', 'stale-lock', 'skill-roots', 'trash', 'hub-tools', 'mount-heartbeat', 'snapshot-profile']
 r = await op('doctor', {})
 let doctor = new Map((r.data?.checks ?? []).map(row => [row.id, row]))
-check('doctor returns exactly the eight contracted checks',
-  r.ok === true && doctor.size === 8 && DOCTOR_IDS.every(id => doctor.has(id)),
+check('doctor returns exactly the nine contracted checks',
+  r.ok === true && doctor.size === 9 && DOCTOR_IDS.every(id => doctor.has(id)),
   JSON.stringify((r.data?.checks ?? []).map(row => row.id)))
 check('doctor patch-parse passes on a readable patch', doctor.get('patch-parse')?.ok === true, doctor.get('patch-parse')?.detail)
 check('doctor state-writable passes', doctor.get('state-writable')?.ok === true, doctor.get('state-writable')?.detail)
@@ -880,6 +905,23 @@ check('doctor failed-rows passes on a healthy host', doctor.get('failed-rows')?.
 check('doctor stale-lock passes with no lock file', doctor.get('stale-lock')?.ok === true, doctor.get('stale-lock')?.detail)
 check('doctor skill-roots passes', doctor.get('skill-roots')?.ok === true, doctor.get('skill-roots')?.detail)
 check('doctor trash passes', doctor.get('trash')?.ok === true, doctor.get('trash')?.detail)
+
+// The heartbeat is the only check that can tell "mounted" from "vanished without a log line".
+const heartbeatFile = join(home, 'tool-hub', 'mount.json')
+const heartbeat = JSON.parse(await readFile(heartbeatFile, 'utf8'))
+check('apply() stamped a mount heartbeat',
+  heartbeat.pid === process.pid && Array.isArray(heartbeat.injects) && heartbeat.injects.includes('webServer'),
+  `pid=${heartbeat.pid} injects=${(heartbeat.injects ?? []).join(',')}`)
+check('doctor mount-heartbeat passes right after apply', doctor.get('mount-heartbeat')?.ok === true, doctor.get('mount-heartbeat')?.detail)
+
+// A heartbeat from another process is exactly the silent-failure case: same file, wrong owner.
+await writeFile(heartbeatFile, JSON.stringify({ ...heartbeat, pid: heartbeat.pid + 1 }, null, 2))
+r = await op('doctor', {})
+doctor = new Map((r.data?.checks ?? []).map(row => [row.id, row]))
+check('doctor names a heartbeat owned by another pid',
+  doctor.get('mount-heartbeat')?.ok === false && /belongs to pid/.test(String(doctor.get('mount-heartbeat')?.detail)),
+  doctor.get('mount-heartbeat')?.detail)
+await writeFile(heartbeatFile, JSON.stringify(heartbeat, null, 2))
 
 // The failing branches: a row the host itself reports as failed, and a lock left behind.
 fakePlugins.push({ entryId: 'e-broken', moduleName: 'broken-plugin', meta: {}, fiberPhase: 'failed' })
@@ -914,6 +956,14 @@ check('history records failures as well as successes',
   JSON.stringify(history.slice(0, 3)))
 check('history entries carry at / op / detail / ok',
   history.every(row => typeof row.at === 'string' && typeof row.op === 'string' && typeof row.detail === 'string' && typeof row.ok === 'boolean'))
+// The flag comes straight from the op registry, so a reader can filter to the calls worth
+// tracing without hard-coding a list of ops in the UI.
+check('history stamps the registry audit flag on switches',
+  history.some(row => row.op === 'toggle') && history.filter(row => row.op === 'toggle' || row.op === 'group.save').every(row => row.audit === true),
+  JSON.stringify(history.filter(row => row.op === 'toggle').slice(0, 1)))
+check('history marks reads as not audited',
+  history.some(row => row.op === 'doctor') && history.filter(row => row.op === 'doctor' || row.op === 'snapshot').every(row => row.audit === false),
+  JSON.stringify(history.filter(row => row.op === 'doctor').slice(0, 1)))
 check('history keeps ids but never the payload',
   history.filter(row => row.op === 'mcp.save').every(row => row.detail.includes('id=') && !row.detail.includes('serverName')),
   history.find(row => row.op === 'mcp.save')?.detail)
