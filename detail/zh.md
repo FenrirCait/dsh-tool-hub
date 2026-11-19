@@ -71,6 +71,29 @@ TOOL_HUB_SKILL_ROOTS=<dir>/skills;<dir>/skills2   # Windows 用分号分隔
 - SSE 传输的服务器不能在面板里测试连接（stdio 与 streamable HTTP 可以）
 - 没有终端界面，面板是 Web / Desktop 扩展
 
+## 会话级工具开关（1.1 起）
+
+工具屏蔽分两层，**并集**生效、只收紧不放松：
+
+| 层 | 存哪 | 影响谁 |
+|---|---|---|
+| 安装级 `toolDeny` | `state.json` 的 `toolDeny` | 这份安装里的所有会话 |
+| 会话级覆盖层 | `state.json` 的 `sessions.<sessionId>` | 该会话，以及**按父会话继承**的子代理 |
+
+三条边界，先说清楚免得踩：
+
+- **子代理是独立会话**：它之所以还能遵守父会话的开关，是因为本插件沿会话血缘（`parentSession`）把祖先的名单并进来；链断在宿主没给血缘信息时，子代理就只会拿到安装级那一层。
+- **未知名字不会让掩码失效**：宿主的 `restrict()` 对不认识的工具名直接抛错，所以名单在装到 agent 之前先与当前可限制集合取交集。
+- **空名单等于删条目**：`sessions` 里只留非空列表；清空一个会话的开关，就是把它的 key 删掉。
+
+命令行走同一条通道（改的是同一个 `state.json`）：
+
+```
+dsh-tool-hub session list
+dsh-tool-hub session set <sessionId> --names mcp__demo__beta
+dsh-tool-hub session clear <sessionId>
+```
+
 ## 导入 dshmarket 分组
 
 `dshmarket` 的分组存在 `<profile>/.dsh-market/state.json`。该文件有分组时，顶栏会出现导入按钮：面板把每个包名映射到它安装出来的 loader 行，再整组复制过来。这里已有同名的分组会被跳过而不是合并，所以重复导入不会产生重复项，也不会打乱你中途改过的分组；未安装的包按组列出并跳过，该文件本身只读不写。
