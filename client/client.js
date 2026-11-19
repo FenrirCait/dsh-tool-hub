@@ -154,6 +154,8 @@ window.__ModuleLoader__.load({
                 newGroup: '新建分组',
                 search: '搜索名称或模块名',
                 empty: '这里还没有东西',
+                emptyPlugins: '还没有插件。点右上角「刷新」重新读取，或安装插件后再看。',
+                emptySkills: '还没有技能。点右上角「导入技能」添加。',
                 emptyGroup: '这个分组是空的，勾选右侧条目后点「加入分组」',
                 loading: '读取中…',
                 reload: '刷新',
@@ -493,6 +495,8 @@ window.__ModuleLoader__.load({
                 newGroup: 'New group',
                 search: 'Search name or module',
                 empty: 'Nothing here yet',
+                emptyPlugins: 'No plugins yet. Hit Refresh to reload, or install a plugin first.',
+                emptySkills: 'No skills yet. Use Import skill to add one.',
                 emptyGroup: 'This group is empty. Tick rows on the right, then Add to group.',
                 loading: 'Loading…',
                 reload: 'Refresh',
@@ -2373,9 +2377,13 @@ window.__ModuleLoader__.load({
                 filterBar,
                 h("div", { style: { flex: 1, overflow: "auto", padding: "10px 12px 12px" } },
                     data === null
-                        ? h("div", { style: emptyStyle }, error === null ? t("loading") : error)
+                        ? h("div", { style: emptyStyle, role: error === null ? undefined : "alert" },
+                            error === null
+                                ? t("loading")
+                                : [error, h("div", { key: "retry", style: { marginTop: 10 } },
+                                    h(Button, { small: true, onClick: refresh }, t("retry")))])
                         : rows.length === 0
-                            ? h("div", { style: emptyStyle }, groupId === null ? t("empty") : t("emptyGroup"))
+                            ? h("div", { style: emptyStyle }, groupId === null ? (view === "plugin" ? t("emptyPlugins") : view === "skill" ? t("emptySkills") : t("empty")) : t("emptyGroup"))
                             : h("div", { key: "row-view" }, treeNodes, skillNodes)));
 
             const selectionBar = picked.size === 0 ? null : h("div", {
@@ -2846,7 +2854,6 @@ window.__ModuleLoader__.load({
 
         function MiniIcon({ label, title, onClick, danger }) {
             const [hover, setHover] = useState(false);
-            const accent = danger === true ? T.danger : T.text;
             return h("button", {
                 type: "button",
                 title,
@@ -2864,7 +2871,7 @@ window.__ModuleLoader__.load({
                     borderRadius: 5,
                     border: `1px solid ${hover === true ? (danger === true ? tint(T.danger, 45) : T.border) : T.borderSoft}`,
                     background: hover === true ? (danger === true ? tint(T.danger, 14) : T.card) : "transparent",
-                    color: hover === true ? accent : T.text2,
+                    color: danger === true ? T.danger : (hover === true ? T.text : T.text2),
                     fontSize: 12,
                     lineHeight: "16px",
                     cursor: "pointer",
@@ -3113,7 +3120,7 @@ window.__ModuleLoader__.load({
                     title: row.kind === "plugin" ? row.moduleName : row.name,
                 }, row.name),
                 row.mcp === true
-                    ? h(Badge, { tone: "brand", title: `${t("mcpBadgeHint")}${row.mcpPatchId ? ` · ${row.mcpPatchId}` : ""}` }, t("mcpBadge"))
+                    ? h(Badge, { tone: "plain", title: `${t("mcpBadgeHint")}${row.mcpPatchId ? ` · ${row.mcpPatchId}` : ""}` }, t("mcpBadge"))
                     : h(Badge, { tone: row.kind === "plugin" ? "brand" : "warn" }, row.kind === "plugin" ? t("kindPlugin") : t("kindSkill")),
                 row.official === true ? h(Badge, { tone: "success", title: t("officialHint") }, t("officialBadge")) : null,
                 row.builtinUi === true ? h(Badge, { tone: "warn", title: t("builtinUiHint") }, t("builtinUiBadge")) : null,
