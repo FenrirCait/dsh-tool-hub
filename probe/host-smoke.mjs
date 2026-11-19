@@ -349,6 +349,26 @@ check('session.clear drops only that session',
   JSON.stringify(sessionSnap.sessions))
 await op('session.clear', { sessionId: 'sess-b' })
 check('clearing every overlay leaves the mask empty', ((await get('/tool-hub/api/snapshot')).data.toolMask?.sessions ?? []).length === 0)
+
+// ── scenes ─────────────────────────────────────────────────────────────────
+// A scene is a whole environment; the MCP half of it is covered by probe/scene-smoke.mjs, which
+// can inject a failing host call. Here the point is the op surface and the snapshot record.
+r = await op('scene.save', { name: 'work', tools: { deny: ['mcp__fixture__alpha'] } })
+check('scene.save stores a scene', r.ok === true && r.data.scenes.includes('work'), JSON.stringify(r.data ?? r.error))
+let sceneSnap = (await get('/tool-hub/api/snapshot')).data
+check('snapshot reports the saved scenes', (sceneSnap.scene?.names ?? []).includes('work') && sceneSnap.scene?.mode === null, JSON.stringify(sceneSnap.scene))
+r = await op('scene.apply', { name: 'work' })
+check('scene.apply plans the tool domain', r.ok === true && JSON.stringify(r.data.plan.tools.deny) === '["mcp__fixture__alpha"]', JSON.stringify(r.data ?? r.error))
+sceneSnap = (await get('/tool-hub/api/snapshot')).data
+check('the applied scene is recorded as the current mode', sceneSnap.scene?.mode === 'work', JSON.stringify(sceneSnap.scene))
+check('the applied deny list is live', sceneSnap.tools.find(row => row.name === 'mcp__fixture__alpha')?.enabled === false)
+r = await op('scene.exit')
+check('scene.exit restores the snapshot', r.ok === true && r.data.restored === true, JSON.stringify(r.data ?? r.error))
+sceneSnap = (await get('/tool-hub/api/snapshot')).data
+check('the mode record is cleared after exit', sceneSnap.scene?.mode === null && sceneSnap.tools.every(row => row.enabled === true))
+check('exiting twice is a no-op', (await op('scene.exit')).data?.restored === false)
+check('applying an unknown scene fails', (await op('scene.apply', { name: 'nope' })).ok === false)
+check('a scene without a name is refused', (await op('scene.save', { tools: { deny: [] } })).ok === false)
 r = await op('preset.save', { name: 'tool-preset' })
 const savedPreset = r.data.presets.find(preset => preset.name === 'tool-preset')
 check('preset records the tool dimension', Array.isArray(savedPreset?.enabled?.tool) && savedPreset.enabled.tool.length === 2, JSON.stringify(savedPreset?.enabled?.tool))

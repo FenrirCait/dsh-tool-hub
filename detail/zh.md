@@ -71,6 +71,25 @@ TOOL_HUB_SKILL_ROOTS=<dir>/skills;<dir>/skills2   # Windows 用分号分隔
 - SSE 传输的服务器不能在面板里测试连接（stdio 与 streamable HTTP 可以）
 - 没有终端界面，面板是 Web / Desktop 扩展
 
+## 场景：一次换掉整套「工具 + MCP」
+
+场景存的是两个域的目标状态：哪些 MCP 工具静音、哪些服务器打开。`scene.save` 存下来，`scene.apply` 一次应用，`scene.exit` 按**应用前拍的快照**还原。
+
+**空段语义（两个域同一套，别记反）：**
+
+| 写法 | 含义 |
+|---|---|
+| `tools` 段不写 / `mcp` 段不写 | 该域**不动**（保持现状） |
+| `tools: { deny: [] }` | 该域**清空**（所有工具恢复可见） |
+| `mcp: { off: ["demo"] }` | 只动点名的服务器 |
+
+三条安全保证：
+
+- **先落意图再改状态**：`mode` 记录（含工具与 MCP 两域的全量快照）先写盘，中途失败仍可退。
+- **失败按快照反向恢复**，恢复不完整时如实报「rollback incomplete — still wrong: …」，不会假装成功。
+- **退出容忍已删除的行**：场景生效期间被你删掉的 MCP 服务器，还原时记为 skipped，而不是报失败。
+
+命令行与面板走同一条 op：`scene.save` / `scene.apply` / `scene.exit`（面板入口与 CLI 子命令随后补）。
 ## 会话级工具开关（1.1 起）
 
 工具屏蔽分两层，**并集**生效、只收紧不放松：

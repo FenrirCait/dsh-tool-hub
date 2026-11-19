@@ -75,7 +75,7 @@ check(
   registryKeys.length === codeOps.length,
   `registry=${registryKeys.length} code=${codeOps.length}`,
 )
-check('registry holds 49 ops (45 dotted + 4 plain words)', registryKeys.length === 49, `got ${registryKeys.length}`)
+check('registry holds 52 ops (48 dotted + 4 plain words)', registryKeys.length === 52, `got ${registryKeys.length}`)
 
 // ── entry shape ─────────────────────────────────────────────────────────────
 const CONFIRM_VALUES = new Set([null, 'reset', true])
