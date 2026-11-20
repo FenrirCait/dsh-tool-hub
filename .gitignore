@@ -6,3 +6,5 @@ probe/*.log.err
 probe/*-preview.yml
 release-*.md
 !docs/releases/**
+
+dist/
