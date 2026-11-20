@@ -22,10 +22,11 @@ import { ToolsView } from './views/tools.js'
 import { SessionsView } from './views/sessions.js'
 import { DiagnosticsView } from './views/diagnostics.js'
 import { ConfigView } from './views/config.js'
+import { ExtensionsView } from './views/extensions.js'
 import { SettingsView } from './settings/index.js'
 import { SkillsView } from './views/skills.js'
 
-export type ViewId = 'plugins' | 'skills' | 'mcp' | 'tools' | 'groups' | 'presets' | 'sessions' | 'scenes' | 'diagnostics' | 'config' | 'settings'
+export type ViewId = 'plugins' | 'skills' | 'mcp' | 'tools' | 'groups' | 'presets' | 'sessions' | 'scenes' | 'diagnostics' | 'config' | 'extensions' | 'settings'
 
 /** Which surface the slot asked for: the tab, the main area, or the narrow side panel. */
 export type ShellSurface = 'tab' | 'main' | 'panel'
@@ -53,6 +54,7 @@ const NAV: Array<{ id: ViewId; label: string }> = [
   { id: 'scenes', label: 'nav.scenes' },
   { id: 'diagnostics', label: 'nav.diagnostics' },
   { id: 'config', label: 'nav.config' },
+  { id: 'extensions', label: 'nav.extensions' },
   { id: 'settings', label: 'nav.settings' },
 ]
 
@@ -190,12 +192,13 @@ export function Shell(props: ShellProps): React.ReactElement {
     scenes: snapshot === null ? 0 : snapshot.scene.names.length,
     diagnostics: snapshot === null ? 0 : snapshot.history.filter(entry => !entry.ok).length,
     config: 0,
+    extensions: snapshot === null ? 0 : snapshot.extensions.filter(entry => entry.enabled).length,
     settings: snapshot === null ? 0 : snapshot.settingsSchema.length,
   }
 
   const views: Record<ViewId, React.ReactElement> =
     snapshot === null
-      ? { plugins: <div />, skills: <div />, mcp: <div />, tools: <div />, groups: <div />, presets: <div />, sessions: <div />, scenes: <div />, diagnostics: <div />, config: <div />, settings: <div /> }
+      ? { plugins: <div />, skills: <div />, mcp: <div />, tools: <div />, groups: <div />, presets: <div />, sessions: <div />, scenes: <div />, diagnostics: <div />, config: <div />, extensions: <div />, settings: <div /> }
       : {
           plugins: <PluginsView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} runDetailed={runDetailed} reload={reload} />,
           skills: <SkillsView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} runDetailed={runDetailed} reload={reload} />,
@@ -207,6 +210,7 @@ export function Shell(props: ShellProps): React.ReactElement {
           scenes: <ScenesView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} runDetailed={runDetailed} reload={reload} />,
           diagnostics: <DiagnosticsView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} runDetailed={runDetailed} reload={reload} />,
           config: <ConfigView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} runDetailed={runDetailed} reload={reload} />,
+          extensions: <ExtensionsView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} runDetailed={runDetailed} reload={reload} />,
           settings: <SettingsView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} runDetailed={runDetailed} reload={reload} />,
         }
 

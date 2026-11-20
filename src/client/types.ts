@@ -84,6 +84,26 @@ export interface PresetRow {
   tool?: string[]
 }
 
+export interface ExtensionViewRow {
+  id: string
+  title: { zh: string; en: string }
+  kind: 'table' | 'list' | 'json'
+  op: string
+}
+
+export interface ExtensionStatus {
+  id: string
+  name: { zh: string; en: string }
+  version: string
+  apiVersion: number
+  dir: string
+  enabled: boolean
+  loaded: boolean
+  error: string | null
+  ops: string[]
+  views: ExtensionViewRow[]
+}
+
 export interface HistoryEntry {
   at: string
   op: string
@@ -141,6 +161,8 @@ export interface HubSnapshot {
   settingsSchema: SettingsField[]
   /** Newest-first audit lines from the host dispatcher. */
   history: HistoryEntry[]
+  /** Local extensions the host discovered, with load state and declared views. */
+  extensions: ExtensionStatus[]
   /** When this copy was read, used by the topbar to show staleness. */
   fetchedAt: number
 }

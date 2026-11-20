@@ -11,12 +11,15 @@ import { listSkills, skillRoots } from '../domains/skills.js'
 import { patchPathFor } from '../domains/mcp.js'
 import { readMode } from '../domains/scenes.js'
 import { readLazy, serverOf } from '../domains/tool-surface.js'
+import type { ExtensionStatus } from './extensions.js'
 
 export interface SnapshotDeps {
   env: HostEnv
   registry: Registry
   fresh?: boolean
   history?: () => Promise<unknown[]>
+  /** The build's extension rows; the client renders them in the Extensions view. */
+  extensions?: ExtensionStatus[]
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -98,6 +101,7 @@ export async function buildSnapshot(deps: SnapshotDeps): Promise<Record<string, 
     limits: { bulk: 100 },
     mcpError: null,
     history: deps.history === undefined ? [] : await deps.history(),
+    extensions: deps.extensions ?? [],
     fetchedAt: Date.now(),
   }
 }

@@ -5,7 +5,7 @@
  * value ({ ok: false, code, message }), never as a rejection, so a view can render an error
  * banner instead of relying on a catch somewhere up the tree.
  */
-import type { CollectionRow, GroupRow, HistoryEntry, HubSnapshot, PluginRow, PresetRow, SceneState, SecretKeys, SkillRootInfo, SkillRow, ToolRow } from './types.js'
+import type { CollectionRow, ExtensionStatus, ExtensionViewRow, GroupRow, HistoryEntry, HubSnapshot, PluginRow, PresetRow, SceneState, SecretKeys, SkillRootInfo, SkillRow, ToolRow } from './types.js'
 import type { SettingsField } from '../shared/types.js'
 
 /** Op ids the panel sends. Kept in one table: a host rename is a one-line change here. */
@@ -221,6 +221,32 @@ function groupOf(row: Record<string, unknown>): GroupRow | null {
   }
 }
 
+function extensionOf(row: Record<string, unknown>): ExtensionStatus | null {
+  const id = asString(row.id)
+  if (id === '') return null
+  const name = asRecord(row.name)
+  const views = Array.isArray(row.views)
+    ? row.views.map(view => asRecord(view)).filter(view => asString(view.id) !== '' && asString(view.op) !== '').map(view => ({
+        id: asString(view.id),
+        title: { zh: asString(asRecord(view.title).zh, asString(view.id)), en: asString(asRecord(view.title).en, asString(view.id)) },
+        kind: asString(view.kind, 'json') as ExtensionViewRow['kind'],
+        op: asString(view.op),
+      }))
+    : []
+  return {
+    id,
+    name: { zh: asString(name.zh, id), en: asString(name.en, id) },
+    version: asString(row.version),
+    apiVersion: typeof row.apiVersion === 'number' ? row.apiVersion : 1,
+    dir: asString(row.dir),
+    enabled: asBoolean(row.enabled),
+    loaded: asBoolean(row.loaded),
+    error: asStringOrNull(row.error),
+    ops: Array.isArray(row.ops) ? row.ops.filter((op): op is string => typeof op === 'string') : [],
+    views,
+  }
+}
+
 function historyOf(row: Record<string, unknown>): HistoryEntry | null {
   const op = asString(row.op)
   if (op === '') return null
@@ -337,6 +363,7 @@ export function normalizeSnapshot(raw: unknown): HubSnapshot {
     },
     settings: asRecord(record.settings) as Record<string, unknown>,
     history: asRows(record.history, historyOf),
+    extensions: asRows(record.extensions, extensionOf),
     settingsSchema: settingsFieldsOf(record.settingsSchema),
     mcpError: asStringOrNull(record.mcpError),
     limits: typeof limits.bulk === 'number' ? { bulk: limits.bulk } : null,

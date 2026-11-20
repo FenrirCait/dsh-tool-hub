@@ -1,22 +1,20 @@
 import { Registry } from '../core/registry.js'
-import { loadState, stateDir } from '../core/io.js'
+import { loadState, saveState, stateDir } from '../core/io.js'
 import { applySettingsDefaults, normalizeSettings } from '../core/settings.js'
 import { registerAll } from '../domains/index.js'
 import { createCatalogTool } from './catalog-tool.js'
 import type { DomainRegistration, OpHandler } from '../shared/contract.js'
 import type { HubContext } from '../shared/types.js'
-import { Dispatcher, failureOf } from './dispatch.js'
+import type { StateV2 } from '../core/state.js'
+import { Dispatcher, Failure, failureOf } from './dispatch.js'
 import { HEARTBEAT_INJECTS, runDoctor, writeMountHeartbeat } from './diagnostics.js'
 import { installApi } from './routes.js'
 import { PORTABILITY_OPS, portabilityHandlers } from './portability.js'
 import { buildSnapshot } from './snapshot.js'
+import { ExtensionManager, extensionRoots, type ExtensionStatus } from './extensions.js'
 
 export const name = 'dsh-tool-hub'
 export const inject = ['webServer'] as const
-
-interface Started {
-  dispatcher: Dispatcher
-}
 
 function logTo(ctx: HubContext) {
   return (level: 'info' | 'warn', message: string): void => {
@@ -25,40 +23,189 @@ function logTo(ctx: HubContext) {
   }
 }
 
-/**
- * 2.0 entry. The 1.x entry stays in lib/index.js until the cutover; this module is compiled to
- * dist/ and only loaded when package.json points there.
- */
-export function apply(ctx: HubContext): void {
-  const ready = start(ctx)
-  const run = async (op: unknown, payload: unknown): Promise<ReturnType<Dispatcher['run']> extends Promise<infer T> ? T : never> => {
-    try {
-      const started = await ready
-      return await started.dispatcher.run(op, payload) as never
-    }
-    catch (error) {
-      const failure = failureOf(error)
-      return { ok: false, error: failure } as never
-    }
-  }
-  // installApi registers its own ctx.effect cleanup; a second one here would dispose twice.
-  installApi({
-    ctx,
-    run,
-    snapshot: async ({ fresh }) => {
-      const started = await ready
-      const outcome = await started.dispatcher.run('snapshot', { fresh })
-      if (!outcome.ok) throw new Error(outcome.error.message)
-      return outcome.data
-    },
-  })
+interface Build {
+  registry: Registry
+  dispatcher: Dispatcher
+  statuses: ExtensionStatus[]
+  modules: number
+  ops: number
 }
 
+const EXTENSION_ID = /^[a-z0-9][a-z0-9_-]{0,31}$/
+
 /**
- * The core domain: snapshot/doctor plus the portability ops (dshmarket status/import and the
- * third-party off/restore switch). Both halves are one registration so the registry can never end
- * up knowing an op whose handler is missing.
+ * The live host: one state document, a build (registry + dispatcher + extension statuses) that
+ * can be replaced atomically. Routes and the catalog tool hold this object, not a dispatcher, so
+ * enabling an extension swaps the build without remounting anything.
  */
+export class Runtime {
+  private build!: Build
+  private chain: Promise<void> = Promise.resolve()
+  private readonly manager: ExtensionManager
+
+  private constructor(private readonly ctx: HubContext, private readonly state: StateV2) {
+    this.manager = new ExtensionManager({
+      roots: extensionRoots(),
+      services: { get: service => ctx.get(service) },
+      log: logTo(ctx),
+    })
+  }
+
+  static async create(ctx: HubContext): Promise<Runtime> {
+    const loaded = await loadState()
+    if (loaded.recovered !== null) logTo(ctx)('warn', `state was unreadable; recovered from ${loaded.recovered}`)
+    const runtime = new Runtime(ctx, loaded.state)
+    runtime.build = await runtime.buildOnce()
+    writeMountHeartbeat({ stateDir: stateDir(), injects: [...HEARTBEAT_INJECTS] })
+    logTo(ctx)('info', `dsh-tool-hub 2.0: ${runtime.build.modules} module(s), ${runtime.build.ops} op(s)`)
+    return runtime
+  }
+
+  get dispatcher(): Dispatcher {
+    return this.build.dispatcher
+  }
+
+  get statuses(): ExtensionStatus[] {
+    return this.build.statuses
+  }
+
+  async run(op: unknown, payload: unknown): Promise<ReturnType<Dispatcher['run']> extends Promise<infer T> ? T : never> {
+    return await this.build.dispatcher.run(op, payload) as never
+  }
+
+  async execute(op: unknown, payload: unknown): Promise<unknown> {
+    return await this.build.dispatcher.execute(op, payload)
+  }
+
+  /** Serialised: two toggles cannot interleave their builds. */
+  async rebuild(reason: string): Promise<void> {
+    // A failed build must not poison the queue: the next attempt starts from a settled promise.
+    const attempt = this.chain.catch(() => undefined).then(async () => {
+      const next = await this.buildOnce()
+      this.build = next
+      logTo(this.ctx)('info', `[tool-hub] runtime rebuilt (${reason}): ${next.modules} module(s), ${next.ops} op(s)`)
+    })
+    this.chain = attempt.catch(() => undefined)
+    await attempt
+  }
+
+  private async buildOnce(): Promise<Build> {
+    const registry = new Registry()
+    const builtins = registerAll(registry)
+    const extensions = await this.manager.load(this.state.extensions.enabled)
+    const holder: { dispatcher: Dispatcher | null; statuses: ExtensionStatus[] } = {
+      dispatcher: null,
+      statuses: extensions.statuses,
+    }
+
+    // Register each extension on its own: a duplicate op id or a bad handler marks that one
+    // extension failed and leaves the rest of the host untouched.
+    const bindable: DomainRegistration[] = []
+    for (const item of extensions.registrations) {
+      try {
+        registry.register(item.registration.module)
+        bindable.push(item.registration)
+      }
+      catch (error) {
+        item.status.loaded = false
+        item.status.ops = []
+        item.status.error = String((error as Error)?.message ?? error).slice(0, 300)
+      }
+    }
+
+    const extensionOps: DomainRegistration = {
+      module: {
+        id: 'extensions',
+        title: { zh: '扩展', en: 'Extensions' },
+        ops: [
+          { id: 'extension.list', write: false, audit: false, note: 'Lists installed local extensions with their load state and views.' },
+          { id: 'extension.set', write: true, audit: true, note: 'Switches one extension on or off, saves the enabled list and rebuilds the runtime.' },
+          { id: 'extension.reload', write: true, audit: true, note: 'Re-imports extension code and rebuilds the runtime; no host restart.' },
+        ],
+      },
+      handlers: {
+        'extension.list': async () => ({ extensions: holder.statuses, enabled: [...this.state.extensions.enabled] }),
+        'extension.set': async (payload, env) => {
+          const body = payload as { id?: unknown; enabled?: unknown } | null
+          const id = typeof body?.id === 'string' ? body.id : ''
+          if (!EXTENSION_ID.test(id)) throw new Failure('bad-payload', 'extension.set needs an id')
+          if (typeof body?.enabled !== 'boolean') throw new Failure('bad-payload', 'extension.set needs enabled:boolean')
+          const known = holder.statuses.some(status => status.id === id)
+          if (!known && body.enabled) throw new Failure('missing-extension', `no extension "${id}" is installed`)
+          const enabled = new Set(this.state.extensions.enabled)
+          if (body.enabled) enabled.add(id)
+          else enabled.delete(id)
+          this.state.extensions.enabled = [...enabled].sort()
+          await env.save('extension-set')
+          await this.rebuild('extension-set')
+          return { enabled: [...this.state.extensions.enabled], extensions: this.statuses }
+        },
+        'extension.reload': async (payload) => {
+          const body = payload as { id?: unknown } | null
+          const id = typeof body?.id === 'string' && EXTENSION_ID.test(body.id) ? body.id : undefined
+          this.manager.invalidate(id)
+          await this.rebuild('extension-reload')
+          return { extensions: this.statuses, reloaded: id ?? '*' }
+        },
+      },
+    }
+
+    const coreBase = createCoreDomain({
+      snapshot: async (payload, env) => buildSnapshot({
+        env,
+        registry,
+        fresh: (payload as { fresh?: unknown } | undefined)?.fresh === true,
+        history: async () => (holder.dispatcher === null ? [] : await holder.dispatcher.history()),
+        extensions: holder.statuses,
+      }),
+      doctor: async () => runDoctor({ ctx: this.ctx, stateDir: stateDir(), expectedInjects: HEARTBEAT_INJECTS }),
+    })
+    const core: DomainRegistration = {
+      module: { ...coreBase.module, ops: [...coreBase.module.ops, ...extensionOps.module.ops] },
+      handlers: { ...coreBase.handlers, ...extensionOps.handlers },
+    }
+    registry.register(core.module)
+
+    const dispatcher = new Dispatcher({
+      registry,
+      state: this.state,
+      services: { get: service => this.ctx.get(service) },
+      log: logTo(this.ctx),
+      save: async (next, reason) => await saveState(next, reason),
+    })
+    holder.dispatcher = dispatcher
+    for (const registration of builtins) dispatcher.bind(registration)
+    for (const registration of bindable) {
+      try {
+        dispatcher.bind(registration)
+      }
+      catch (error) {
+        registry.remove(registration.module.id)
+        const status = holder.statuses.find(entry => entry.id === registration.module.id)
+        if (status !== undefined) {
+          status.loaded = false
+          status.ops = []
+          status.error = String((error as Error)?.message ?? error).slice(0, 300)
+        }
+      }
+    }
+    dispatcher.bind(core)
+
+    // Settings fields a new extension declares become visible with their defaults immediately;
+    // the next settings save persists them.
+    try {
+      const modules = registry.list()
+      this.state.settings = normalizeSettings(applySettingsDefaults(this.state.settings, modules), modules)
+    }
+    catch {
+      // A malformed settings field must not take the host down; the settings page shows what it can.
+    }
+
+    return { registry, dispatcher, statuses: holder.statuses, modules: registry.list().length, ops: registry.ops().length }
+  }
+}
+
+/** The core domain: snapshot/doctor plus the portability ops (dshmarket, third-party). */
 export function createCoreDomain(handlers: { snapshot: OpHandler; doctor: OpHandler }): DomainRegistration {
   return {
     module: {
@@ -78,63 +225,53 @@ export function createCoreDomain(handlers: { snapshot: OpHandler; doctor: OpHand
   }
 }
 
-async function start(ctx: HubContext): Promise<Started> {
-  const loaded = await loadState()
-  if (loaded.recovered !== null) logTo(ctx)('warn', `state was unreadable; recovered from ${loaded.recovered}`)
-  const state = loaded.state
-  const registry = new Registry()
-  const registrations = registerAll(registry)
-  const dispatcher = new Dispatcher({
-    registry,
-    state,
-    services: { get: service => ctx.get(service) },
-    log: logTo(ctx),
-    save: async (next, reason) => {
-      // Persist the whole document because env.state is the same object every handler mutates.
-      const { saveState } = await import('../core/io.js')
-      return await saveState(next, reason)
+/**
+ * 2.0 entry. The 1.x entry stays in lib/index.js until the cutover; this module is compiled to
+ * dist and only loaded when package.json points there.
+ */
+export function apply(ctx: HubContext): void {
+  const ready = Runtime.create(ctx)
+  const run = async (op: unknown, payload: unknown): Promise<ReturnType<Dispatcher['run']> extends Promise<infer T> ? T : never> => {
+    try {
+      const runtime = await ready
+      return await runtime.run(op, payload) as never
+    }
+    catch (error) {
+      return { ok: false, error: failureOf(error) } as never
+    }
+  }
+  installApi({
+    ctx,
+    run,
+    snapshot: async ({ fresh }) => {
+      const runtime = await ready
+      const outcome = await runtime.run('snapshot', { fresh })
+      if (!outcome.ok) throw new Error(outcome.error.message)
+      return outcome.data
     },
   })
-  for (const registration of registrations) dispatcher.bind(registration)
 
-  const core = createCoreDomain({
-    snapshot: async (payload, env) => buildSnapshot({
-      env,
-      registry,
-      fresh: (payload as { fresh?: unknown } | undefined)?.fresh === true,
-      history: () => dispatcher.history(),
-    }),
-    doctor: async () => runDoctor({ ctx, stateDir: stateDir(), expectedInjects: HEARTBEAT_INJECTS }),
+  // The catalog tool is the model's only door into a lazily hidden server; it follows rebuilds.
+  void ready.then(runtime => {
+    try {
+      const inject = (ctx as unknown as {
+        inject?: (services: string[], callback: (scope: unknown) => void, label?: string) => void
+      }).inject
+      inject?.(['tools'], (scope: unknown) => {
+        const hostCtx = scope as { tools?: { register?: (definition: unknown) => void }; get?: (name: string) => unknown }
+        const tools = hostCtx.tools ?? hostCtx.get?.('tools') as { register?: (definition: unknown) => void } | undefined
+        if (tools?.register === undefined) return
+        try {
+          const adapter = { execute: (op: unknown, payload: unknown) => runtime.execute(op, payload) }
+          tools.register(createCatalogTool(adapter as never))
+        }
+        catch (error) {
+          ctx.logger?.warn('[tool-hub] hub_tools unavailable: ' + String((error as Error)?.message ?? error))
+        }
+      }, 'tool-hub: hub_tools')
+    }
+    catch (error) {
+      ctx.logger?.warn('[tool-hub] tools service unavailable: ' + String((error as Error)?.message ?? error))
+    }
   })
-  registry.register(core.module)
-  dispatcher.bind(core)
-
-  // The catalog tool is the model's only door into a lazily hidden server; 1.x registered it
-  // here and the doctor check 'hub-tools' fails without it.
-  try {
-    // HubContext is the narrow shape the domains see; cordis scopes carry inject at runtime.
-    const inject = (ctx as unknown as {
-      inject?: (services: string[], callback: (scope: unknown) => void, label?: string) => void
-    }).inject
-    inject?.(['tools'], (scope: unknown) => {
-      const hostCtx = scope as { tools?: { register?: (definition: unknown) => void }; get?: (name: string) => unknown }
-      const tools = hostCtx.tools ?? hostCtx.get?.('tools') as { register?: (definition: unknown) => void } | undefined
-      if (tools?.register === undefined) return
-      try {
-        tools.register(createCatalogTool(dispatcher))
-      }
-      catch (error) {
-        logTo(ctx)('warn', '[tool-hub] hub_tools unavailable: ' + String((error as Error)?.message ?? error))
-      }
-    }, 'tool-hub: hub_tools')
-  }
-  catch (error) {
-    logTo(ctx)('warn', '[tool-hub] tools service unavailable: ' + String((error as Error)?.message ?? error))
-  }
-
-  const modules = registry.list()
-  state.settings = normalizeSettings(applySettingsDefaults(state.settings, modules), modules)
-  writeMountHeartbeat({ stateDir: stateDir(), injects: [...HEARTBEAT_INJECTS] })
-  logTo(ctx)('info', `dsh-tool-hub 2.0: ${modules.length} module(s), ${registry.ops().length} op(s)`)
-  return { dispatcher }
 }

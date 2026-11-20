@@ -18,6 +18,15 @@ export class Registry {
     this.modules.set(module.id, module)
   }
 
+  /** Drop one module. Only the hot-rebuild path uses it, after a failed bind. */
+  remove(id: string): boolean {
+    return this.modules.delete(id)
+  }
+
+  opIds(): string[] {
+    return this.ops().map(op => op.id)
+  }
+
   list(): DomainModule[] {
     return [...this.modules.values()].sort((left, right) => left.id.localeCompare(right.id))
   }

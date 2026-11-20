@@ -43,6 +43,8 @@ export interface StateV2 {
   /** 1.x lazy-loading lists, carried through so the lazy domain reads them without a cast. */
   lazyServers?: string[]
   lazyLoaded?: string[]
+  /** Locally installed extensions the owner has switched on; loaded at build time. */
+  extensions: { enabled: string[] }
 }
 
 /** A fresh v2 document: exactly what a first run starts from. */
@@ -59,6 +61,7 @@ export function emptyState(): StateV2 {
     mode: null,
     settings: {},
     modules: {},
+    extensions: { enabled: [] },
   }
 }
 
@@ -79,6 +82,7 @@ const KNOWN_KEYS = new Set([
   'modules',
   'lazyServers',
   'lazyLoaded',
+  'extensions',
 ])
 
 /** Keys that would replace a prototype if they were spread out of a hostile file. */
@@ -174,6 +178,9 @@ export function migrate(raw: unknown): StateV2 {
     const modules = recordMap(raw.modules)
     const lazyServers = stringList(raw.lazyServers)
     const lazyLoaded = stringList(raw.lazyLoaded)
+    const extensions = isRecord(raw.extensions)
+      ? { enabled: stringList(raw.extensions.enabled) ?? [] }
+      : null
 
     const out: Record<string, unknown> = { ...unknownKeys(raw), ...base }
     out.version = STATE_VERSION
@@ -190,6 +197,7 @@ export function migrate(raw: unknown): StateV2 {
     if (modules !== null) out.modules = modules
     if (lazyServers !== null) out.lazyServers = lazyServers
     if (lazyLoaded !== null) out.lazyLoaded = lazyLoaded
+    if (extensions !== null) out.extensions = extensions
     return out as unknown as StateV2
   }
   catch {
