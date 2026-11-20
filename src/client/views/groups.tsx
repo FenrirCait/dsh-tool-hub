@@ -1,12 +1,414 @@
 /**
- * Groups: placeholder scaffolded by the shell; the team fills this view next.
+ * Groups: the rail's groups, their members, their drawer and the one bulk switch.
+ *
+ * The payloads mirror src/domains/groups.ts exactly, because the host normalises only what it
+ * is given and nothing the client is allowed to guess at:
+ *   group.save      { id?, name, members, collection }   (members resent on edit, or they drop)
+ *   group.delete    { id }
+ *   group.toggle    { id, enabled, skipShared }
+ *   group.clean     { id }
+ *   collection.save { id, name }
+ *
+ * Deleting a group or dropping its stale members rewrites state the panel cannot undo, so both
+ * go through a Dialog first; the group switch is reversible and therefore does not.
  */
 import * as React from 'react'
-import { Empty } from '../components.js'
-import type { ViewProps } from '../types.js'
+import { Badge, Button, Card, Dialog, Empty, Field, SearchBox, Select, Switch, Toolbar } from '../components.js'
+import { runOp } from '../api.js'
+import type { GroupMember, GroupRow, ViewProps } from '../types.js'
+
+/** Op ids this view owns; api.ts keeps the shell's shared table, not the groups domain. */
+const OPS = {
+  save: 'group.save',
+  del: 'group.delete',
+  toggle: 'group.toggle',
+  clean: 'group.clean',
+  collection: 'collection.save',
+  autoPreview: 'auto.preview',
+  autoApply: 'auto.apply',
+} as const
+
+/** Sentinels for the drawer filter: a drawer id matches /^[a-z0-9][a-z0-9_-]{0,31}$/, so neither collides. */
+const ALL = '*'
+const NONE = '-none-'
+const NAME_MAX = 60
+const DRAWER_NAME_MAX = 40
+const DRAWER_ID_MAX = 32
+const DRAWER_ID = /^[a-z0-9][a-z0-9_-]*$/
+
+type DialogKind = 'create' | 'edit' | 'delete' | 'clean' | 'drawer' | 'auto'
+
+interface Drawer {
+  id: string
+  name: string
+}
+
+/** The drawer id derived from a typed name; empty means the name cannot become an id. */
+function slugify(value: string): string {
+  const base = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^[-_]+|[-_]+$/g, '')
+    .slice(0, DRAWER_ID_MAX)
+  return DRAWER_ID.test(base) ? base : ''
+}
+
+/** group.save's payload: the handler drops members it is not sent, so an edit resends them. */
+function savePayload(id: string | null, name: string, drawer: string, members: GroupMember[] | null): Record<string, unknown> {
+  return {
+    ...(id === null ? {} : { id }),
+    name,
+    members: members ?? [],
+    collection: drawer === NONE ? null : drawer,
+  }
+}
 
 export function GroupsView(props: ViewProps): React.ReactElement {
-  const { snapshot, t } = props
-  if (snapshot === null) return <Empty title={t('groups.empty')} />
-  return <Empty title={t('groups.title')} hint={t('groups.empty')} />
+  const { snapshot, lang, t, busy, run } = props
+  const groups = snapshot.groups
+  const [query, setQuery] = React.useState('')
+  const [filter, setFilter] = React.useState(ALL)
+  const [dialog, setDialog] = React.useState<DialogKind | null>(null)
+  const [targetId, setTargetId] = React.useState('')
+  const [targetName, setTargetName] = React.useState('')
+  const [formName, setFormName] = React.useState('')
+  const [formDrawer, setFormDrawer] = React.useState(NONE)
+  const [drawerName, setDrawerName] = React.useState('')
+  // Drawer names come from the snapshot; a drawer created in this session is merged in until
+  // the next reload returns it, and a group pointing at an unknown drawer still shows its id.
+  const [created, setCreated] = React.useState<Drawer[]>([])
+  const [autoPlan, setAutoPlan] = React.useState<Array<{ name: string; members: unknown[] }>>([])
+
+  const drawers = React.useMemo(() => {
+    const seen = new Map<string, string>()
+    for (const drawer of snapshot.collections) seen.set(drawer.id, drawer.name)
+    for (const group of groups) {
+      const id = group.collection
+      if (typeof id === 'string' && id !== '' && !seen.has(id)) seen.set(id, id)
+    }
+    for (const drawer of created) if (!seen.has(drawer.id)) seen.set(drawer.id, drawer.name)
+    return [...seen.entries()].map(([id, name]) => ({ id, name }))
+  }, [groups, created, snapshot.collections])
+
+  const term = query.trim().toLowerCase()
+  const rows = groups.filter(group => {
+    const drawer = typeof group.collection === 'string' ? group.collection : ''
+    if (filter === NONE ? drawer !== '' : filter !== ALL && drawer !== filter) return false
+    if (term === '') return true
+    return group.name.toLowerCase().includes(term) || group.id.toLowerCase().includes(term)
+  })
+
+  const drawerLabel = (id: string | null | undefined): string =>
+    typeof id === 'string' && id !== '' ? id : t('groups.ungrouped')
+
+  const openCreate = (): void => {
+    setTargetId('')
+    setTargetName('')
+    setFormName('')
+    setFormDrawer(filter === ALL || filter === NONE ? NONE : filter)
+    setDialog('create')
+  }
+
+  const openEdit = (group: GroupRow): void => {
+    setTargetId(group.id)
+    setTargetName(group.name)
+    setFormName(group.name)
+    setFormDrawer(typeof group.collection === 'string' && group.collection !== '' ? group.collection : NONE)
+    setDialog('edit')
+  }
+
+  const openConfirm = (kind: 'delete' | 'clean', group: GroupRow): void => {
+    setTargetId(group.id)
+    setTargetName(group.name)
+    setDialog(kind)
+  }
+
+  const close = (): void => {
+    setDialog(null)
+  }
+
+  // auto.preview is a read; the plan is only shown, the write leaves from confirmAction.
+  const openAuto = async (): Promise<void> => {
+    const result = await runOp(OPS.autoPreview, {})
+    if (!result.ok) return
+    const data = result.data as { plan?: unknown } | null
+    const plan = Array.isArray(data?.plan) ? data.plan : []
+    setAutoPlan(plan.map(entry => {
+      const row = entry as { name?: unknown; members?: unknown }
+      return { name: typeof row.name === 'string' ? row.name : '', members: Array.isArray(row.members) ? row.members : [] }
+    }))
+    setDialog('auto')
+  }
+
+  // Every write leaves from here: the row buttons only open a dialog, they never send an op.
+  const confirmAction = (): void => {
+    if (dialog === 'delete') {
+      close()
+      void run(OPS.del, { id: targetId })
+      return
+    }
+    if (dialog === 'clean') {
+      close()
+      void run(OPS.clean, { id: targetId })
+      return
+    }
+    if (dialog === 'auto') {
+      close()
+      void run(OPS.autoApply, {})
+      return
+    }
+    if (dialog === 'drawer') {
+      const name = drawerName.trim()
+      const slug = slugify(name)
+      if (name === '' || slug === '') return
+      close()
+      void run(OPS.collection, { id: slug, name }).then(ok => {
+        if (!ok) return
+        setCreated(current => (current.some(drawer => drawer.id === slug) ? current : [...current, { id: slug, name }]))
+      })
+      return
+    }
+    if (dialog === null) {
+      close()
+      return
+    }
+    const name = formName.trim().slice(0, NAME_MAX)
+    if (name === '') return
+    const editing = dialog === 'edit' ? groups.find(group => group.id === targetId) : undefined
+    close()
+    void run(OPS.save, savePayload(editing === undefined ? null : editing.id, name, formDrawer, editing?.members ?? null))
+  }
+
+  const newDrawerLabel = lang === 'zh' ? '新建抽屉' : 'New drawer'
+  const drawerIdHint = `${lang === 'zh' ? '用途 id' : 'id'}: ${slugify(drawerName) || '—'}`
+
+  const drawerOptions = [
+    { value: NONE, label: t('groups.ungrouped') },
+    ...drawers.map(drawer => ({ value: drawer.id, label: drawer.name })),
+  ]
+  const filterOptions = [{ value: ALL, label: lang === 'zh' ? '全部抽屉' : 'All drawers' }, ...drawerOptions]
+  const emptyQuery = term !== '' ? query.trim() : filter === ALL ? '' : filter === NONE ? t('groups.ungrouped') : filter
+  const staleCount = groups.find(group => group.id === targetId)?.stale ?? 0
+
+  let title = ''
+  let body: React.ReactNode = null
+  let confirmLabel = t('action.confirm')
+  let confirmVariant: 'primary' | 'danger' = 'primary'
+  let confirmBusy = false
+  let confirmDisabled = false
+
+  if (dialog === 'create' || dialog === 'edit') {
+    title = dialog === 'create' ? t('groups.create') : `${t('action.edit')} · ${targetName}`
+    body = (
+      <>
+        <Field id="th-group-name" label={t('groups.name')} hint={t('groups.membersHint')}>
+          <input
+            id="th-group-name"
+            className="th-input"
+            type="text"
+            value={formName}
+            maxLength={NAME_MAX}
+            onChange={event => {
+              setFormName(event.target.value)
+            }}
+          />
+        </Field>
+        <Field id="th-group-drawer" label={t('groups.collection')}>
+          <Select id="th-group-drawer" value={formDrawer} options={drawerOptions} onChange={setFormDrawer} label={t('groups.collection')} />
+        </Field>
+      </>
+    )
+    confirmLabel = dialog === 'create' ? t('action.create') : t('action.save')
+    confirmBusy = busy === (dialog === 'create' ? OPS.save : `${OPS.save}:${targetId}`)
+    confirmDisabled = formName.trim() === ''
+  } else if (dialog === 'delete') {
+    title = t('dialog.confirmTitle')
+    body = t('groups.deleteBody', { name: targetName })
+    confirmLabel = t('action.delete')
+    confirmVariant = 'danger'
+    confirmBusy = busy === `${OPS.del}:${targetId}`
+  } else if (dialog === 'clean') {
+    title = t('dialog.confirmTitle')
+    body = `${t('groups.clean')}: ${targetName} — ${t('groups.stale', { n: staleCount })}`
+    confirmLabel = t('groups.clean')
+    confirmVariant = 'danger'
+    confirmBusy = busy === `${OPS.clean}:${targetId}`
+  } else if (dialog === 'auto') {
+    const total = autoPlan.reduce((sum, entry) => sum + entry.members.length, 0)
+    title = lang === 'zh' ? '自动分组' : 'Auto groups'
+    body = (
+      <div>
+        <div>{lang === 'zh' ? `将重建 ${autoPlan.length} 个分组、${total} 个成员，现有手工分组保留。` : `Rebuild ${autoPlan.length} groups with ${total} members; manual groups stay.`}</div>
+        <ul className="th-list">
+          {autoPlan.map(entry => (
+            <li key={entry.name} className="th-row">
+              <span className="th-row-name">{entry.name}</span>
+              <Badge>{t('groups.members', { n: entry.members.length })}</Badge>
+            </li>
+          ))}
+        </ul>
+      </div>
+    )
+    confirmLabel = lang === 'zh' ? '重建自动分组' : 'Rebuild'
+    confirmBusy = busy === OPS.autoApply
+  } else if (dialog === 'drawer') {
+    title = t('groups.collection')
+    body = (
+      <Field id="th-drawer-name" label={lang === 'zh' ? '抽屉名称' : 'Drawer name'} hint={drawerIdHint}>
+        <input
+          id="th-drawer-name"
+          className="th-input"
+          type="text"
+          value={drawerName}
+          maxLength={DRAWER_NAME_MAX}
+          onChange={event => {
+            setDrawerName(event.target.value)
+          }}
+        />
+      </Field>
+    )
+    confirmLabel = t('action.create')
+    confirmBusy = busy === `${OPS.collection}:${slugify(drawerName)}`
+    confirmDisabled = slugify(drawerName) === ''
+  }
+
+  return (
+    <div>
+      <Toolbar>
+        <SearchBox
+          value={query}
+          onChange={setQuery}
+          placeholder={t('groups.search')}
+          label={t('groups.search')}
+          onClear={() => {
+            setQuery('')
+          }}
+          clearLabel={t('action.clear')}
+        />
+        <Select id="th-groups-filter" value={filter} options={filterOptions} onChange={setFilter} label={t('groups.collection')} />
+        <Badge tone="brand">{t('groups.count', { n: rows.length })}</Badge>
+        <Button
+          variant="ghost"
+          label={lang === 'zh' ? '自动分组' : 'Auto groups'}
+          onClick={() => {
+            void openAuto()
+          }}
+        >
+          {lang === 'zh' ? '自动分组' : 'Auto groups'}
+        </Button>
+        <Button
+          variant="ghost"
+          label={newDrawerLabel}
+          onClick={() => {
+            setDrawerName('')
+            setDialog('drawer')
+          }}
+        >
+          {newDrawerLabel}
+        </Button>
+        <Button variant="primary" onClick={openCreate}>
+          {t('groups.create')}
+        </Button>
+      </Toolbar>
+
+      {groups.length === 0 ? (
+        // Rendered inside the same subtree as the dialog: deleting the last group must leave
+        // the New group dialog usable, not strand it behind an early return.
+        <Empty
+          title={t('groups.empty')}
+          hint={t('groups.membersHint')}
+          action={
+            <Button variant="primary" onClick={openCreate}>
+              {t('groups.create')}
+            </Button>
+          }
+        />
+      ) : rows.length === 0 ? (
+        <Empty title={t('groups.emptyFiltered', { query: emptyQuery })} />
+      ) : (
+        <Card label={t('groups.title')}>
+          <div className="th-list">
+            {rows.map(group => {
+              const stale = group.stale ?? 0
+              const on = group.enabled === true
+              return (
+                <div className="th-row" key={group.id}>
+                  <div className="th-row-body">
+                    <span className="th-row-name">{group.name}</span>
+                    <span className="th-row-meta">
+                      <span className="th-mono">{group.id}</span>
+                      <Badge>{t('groups.members', { n: group.members.length })}</Badge>
+                      <Badge tone="brand">{drawerLabel(group.collection)}</Badge>
+                      {stale > 0 ? <Badge tone="warn">{t('groups.stale', { n: stale })}</Badge> : null}
+                      <Badge tone={on ? 'on' : 'off'}>{on ? t('state.on') : t('state.off')}</Badge>
+                    </span>
+                  </div>
+                  {stale > 0 ? (
+                    <Button
+                      variant="ghost"
+                      label={`${t('groups.clean')}: ${group.name}`}
+                      busy={busy === `${OPS.clean}:${group.id}`}
+                      onClick={() => {
+                        openConfirm('clean', group)
+                      }}
+                    >
+                      {t('groups.clean')}
+                    </Button>
+                  ) : null}
+                  <Button
+                    variant="ghost"
+                    label={`${t('action.edit')}: ${group.name}`}
+                    busy={busy === `${OPS.save}:${group.id}`}
+                    onClick={() => {
+                      openEdit(group)
+                    }}
+                  >
+                    {t('action.edit')}
+                  </Button>
+                  <Button
+                    variant="danger"
+                    label={`${t('groups.delete')}: ${group.name}`}
+                    busy={busy === `${OPS.del}:${group.id}`}
+                    onClick={() => {
+                      openConfirm('delete', group)
+                    }}
+                  >
+                    {t('groups.delete')}
+                  </Button>
+                  <Switch
+                    checked={on}
+                    busy={busy === `${OPS.toggle}:${group.id}`}
+                    label={t('a11y.switch', { name: group.name })}
+                    onChange={next => {
+                      // skipShared=false flips every member, including one another group lists.
+                      void run(OPS.toggle, { id: group.id, enabled: next, skipShared: false })
+                    }}
+                  />
+                </div>
+              )
+            })}
+          </div>
+        </Card>
+      )}
+
+      <Dialog
+        open={dialog !== null}
+        title={title}
+        onClose={close}
+        footer={
+          <>
+            <Button variant="ghost" onClick={close}>
+              {t('action.cancel')}
+            </Button>
+            <Button variant={confirmVariant} busy={confirmBusy} disabled={confirmDisabled} onClick={confirmAction}>
+              {confirmLabel}
+            </Button>
+          </>
+        }
+      >
+        {body}
+      </Dialog>
+    </div>
+  )
 }

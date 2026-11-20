@@ -5,7 +5,7 @@
  * value ({ ok: false, code, message }), never as a rejection, so a view can render an error
  * banner instead of relying on a catch somewhere up the tree.
  */
-import type { GroupRow, HubSnapshot, PluginRow, PresetRow, SceneState, SecretKeys, SkillRootInfo, SkillRow, ToolRow } from './types.js'
+import type { CollectionRow, GroupRow, HubSnapshot, PluginRow, PresetRow, SceneState, SecretKeys, SkillRootInfo, SkillRow, ToolRow } from './types.js'
 import type { SettingsField } from '../shared/types.js'
 
 /** Op ids the panel sends. Kept in one table: a host rename is a one-line change here. */
@@ -221,6 +221,12 @@ function groupOf(row: Record<string, unknown>): GroupRow | null {
   }
 }
 
+function collectionOf(row: Record<string, unknown>): CollectionRow | null {
+  const id = asString(row.id)
+  if (id === '') return null
+  return { id, name: asString(row.name, id) }
+}
+
 function toolOf(row: Record<string, unknown>): ToolRow | null {
   const name = asString(row.name)
   if (name === '') return null
@@ -305,6 +311,7 @@ export function normalizeSnapshot(raw: unknown): HubSnapshot {
     plugins: asRows(record.plugins, pluginOf),
     skills: asRows(record.skills, skillOf),
     groups: asRows(record.groups, groupOf),
+    collections: asRows(record.collections, collectionOf),
     presets: presetsOf(record.presets),
     tools: asRows(record.tools, toolOf),
     sessions: sessionsOf(record.sessions),

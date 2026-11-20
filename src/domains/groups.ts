@@ -6,6 +6,8 @@
  *   - a generated bucket that appears twice (same role + name) is merged, a hand-made one is not;
  *   - a member expands to its whole package, so a group never flips half an install;
  *   - a plugin listed by two groups is still one switch, which is what skipShared protects.
+ *   - the automatic taxonomy is a plan first: a preview builds it without writing, an apply
+ *     replaces only the generated groups and never a hand-made one;
  *
  * 2.0 adds one field: onDemand. A group marked on demand keeps its members out of the model
  * until the group is switched on; the mask itself is computed by tool-surface.ts, which asks
@@ -483,6 +485,201 @@ export function onDemandMembers(groups: readonly GroupRecord[]): Member[] {
   return out
 }
 
+// -- auto groups (rule-based taxonomy) ---------------------------------------
+
+/** The four buckets the automatic plan can produce, in the order the rail shows them. */
+export type AutoRole = 'official' | 'mcp' | 'base' | 'rest'
+
+/** The labels 1.x used; a user's existing auto groups read the same after the port. */
+export const AUTO_ROLE_NAMES: Record<AutoRole, string> = {
+  official: '官方',
+  mcp: 'MCP 服务器',
+  base: '第三方底座',
+  rest: '用户下载',
+}
+
+const AUTO_ROLE_RANK: Record<AutoRole, number> = { official: 0, mcp: 1, base: 2, rest: 3 }
+
+/** Package names shaped like the client's own: those rows are never a third-party bucket. */
+const AUTO_OFFICIAL_PREFIX = /^(?:@deepseek-ai\/|cordis[:-])/
+
+/**
+ * Words that describe a layer rather than a job. A third-party row whose text hits more of these
+ * than of the task words is something you keep on, not something you switch per task.
+ */
+const AUTO_BASE_HINTS = /context|compact|memory|session|sidebar|theme|layout|market|install|usage|cost|panel|runtime|bridge|gateway|registry|storage|shell|ui|tools|permission|sandbox|prompt/
+const AUTO_TASK_HINTS = /generate|search|crawl|convert|extract|review|batch|analy|render|edit|translate|export|import|notify|fetch|scrape|compose|draw|animate/
+
+/** What the classifier reads: the row's own metadata, nothing inferred from a manifest. */
+export interface AutoPluginRow {
+  id: string
+  moduleName: string
+  name: string
+  description: string
+  mcp: boolean
+  manageable: boolean
+}
+
+export interface AutoSkillRow {
+  id: string
+}
+
+export interface AutoRows {
+  plugins: readonly AutoPluginRow[]
+  skills: readonly AutoSkillRow[]
+}
+
+/** One generated bucket, before it has an id. */
+export interface AutoPlanEntry {
+  name: string
+  role: AutoRole
+  collection: string | null
+  tags: string[]
+  members: Member[]
+}
+
+/**
+ * Which bucket a plugin belongs to. The 1.x order is kept on purpose: an MCP server row is also an
+ * `@deepseek-ai/` package, so it has to be claimed before the official prefix swallows it.
+ *
+ * Both hint patterns are matched without /g, exactly as 1.x did, so each contributes at most one
+ * hit: a third-party row is a base layer only when a layer word appears and no job word does.
+ */
+export function autoRoleFor(row: AutoPluginRow): AutoRole {
+  const module = row.moduleName.toLowerCase()
+  const text = (row.moduleName + ' ' + row.description + ' ' + row.name).toLowerCase()
+  if (row.mcp) return 'mcp'
+  if (AUTO_OFFICIAL_PREFIX.test(module)) return 'official'
+  const baseHits = text.match(AUTO_BASE_HINTS) === null ? 0 : 1
+  const taskHits = text.match(AUTO_TASK_HINTS) === null ? 0 : 1
+  return baseHits > taskHits ? 'base' : 'rest'
+}
+
+/**
+ * The plan the auto preview shows and the apply writes. Four buckets — official, MCP servers, the
+ * always-on base layer, and what the user downloaded — because that is the decision a user makes
+ * when flipping switches. A row the loader cannot flip is left out: a group must be actionable.
+ *
+ * Tags stay empty here. 1.x dressed generated groups with the package's own `keywords`, and the
+ * 2.0 plugin row does not carry them (plugins.ts reads row meta only), so an inferred word would
+ * pretend to be package metadata.
+ */
+export function buildAutoPlan(rows: AutoRows): AutoPlanEntry[] {
+  const buckets = new Map<AutoRole, Member[]>()
+  const push = (role: AutoRole, member: Member): void => {
+    buckets.set(role, [...(buckets.get(role) ?? []), member])
+  }
+  for (const row of rows.plugins) {
+    if (!row.manageable) continue
+    push(autoRoleFor(row), { kind: 'plugin', id: row.id })
+  }
+  // Skills are something the user downloaded, so they share that bucket; the type column is what
+  // tells them apart from plugins.
+  for (const row of rows.skills) push('rest', { kind: 'skill', id: row.id })
+  return [...buckets.entries()]
+    .sort((left, right) => AUTO_ROLE_RANK[left[0]] - AUTO_ROLE_RANK[right[0]])
+    .map(([role, members]) => ({
+      name: AUTO_ROLE_NAMES[role],
+      role,
+      collection: role === 'rest' ? null : DEFAULT_COLLECTION_ID,
+      tags: [],
+      members,
+    }))
+}
+
+export interface AutoApplyResult {
+  groups: GroupRecord[]
+  created: GroupRecord[]
+  members: number
+}
+
+/**
+ * Write a plan over an existing group list. Every automatic group is replaced and every hand-made
+ * group survives: leaving the old taxonomy behind would show two truths in one rail. A group whose
+ * id is automatic but which somehow lost its flag is still automatic, so the id alone is enough.
+ * Hand-made groups keep their place at the front; the generated ones follow in plan order.
+ */
+export function applyAutoPlan(
+  groups: readonly GroupRecord[],
+  plan: readonly AutoPlanEntry[],
+  now: number,
+): AutoApplyResult {
+  const keep = groups.filter(group => !group.auto && !/^a\d-/.test(group.id))
+  const created: GroupRecord[] = plan
+    .filter(entry => entry.members.length > 0)
+    .map((entry, index) => ({
+      id: 'a' + index + '-' + now.toString(36),
+      name: entry.name,
+      members: entry.members.map(member => ({ ...member })),
+      role: entry.role,
+      collection: entry.collection,
+      tags: [...entry.tags],
+      auto: true,
+      createdAt: now,
+      onDemand: false,
+    }))
+  return {
+    groups: [...keep, ...created],
+    created,
+    members: created.reduce((sum, group) => sum + group.members.length, 0),
+  }
+}
+
+/** Service a host may register to hand the auto builder richer rows than the toggle catalog. */
+export const AUTO_ROWS_SERVICE = 'toolHub.autoRows'
+
+export interface AutoRowPort {
+  plugins(): Promise<readonly AutoPluginRow[]> | readonly AutoPluginRow[]
+  skills(): Promise<readonly AutoSkillRow[]> | readonly AutoSkillRow[]
+}
+
+/** Default port: the plugin and skill domains this build already ships. */
+export function defaultAutoRowPort(env: HostEnv): AutoRowPort {
+  return { plugins: () => listPluginRows(env), skills: () => listSkills(env) }
+}
+
+/** A host may register its own auto row port; otherwise the shipped domains answer. */
+export function resolveAutoRowPort(env: HostEnv): AutoRowPort {
+  const raw = env.services.get(AUTO_ROWS_SERVICE)
+  if (raw !== null && typeof raw === 'object') {
+    const port = raw as Partial<AutoRowPort>
+    if (typeof port.plugins === 'function' && typeof port.skills === 'function') return raw as AutoRowPort
+  }
+  return defaultAutoRowPort(env)
+}
+
+interface AutoCatalog {
+  rows: AutoRows
+  degraded: string | null
+}
+
+/**
+ * Rows for one plan. A source that fails leaves its half empty and reports why: a preview may
+ * degrade and say so, while apply refuses rather than write a half-built taxonomy.
+ */
+async function readAutoRows(env: HostEnv): Promise<AutoCatalog> {
+  const port = resolveAutoRowPort(env)
+  const errors: string[] = []
+  let plugins: readonly AutoPluginRow[] = []
+  let skills: readonly AutoSkillRow[] = []
+  try {
+    plugins = await port.plugins()
+  }
+  catch (error) {
+    errors.push('plugins: ' + errorText(error))
+  }
+  try {
+    skills = await port.skills()
+  }
+  catch (error) {
+    errors.push('skills: ' + errorText(error))
+  }
+  return {
+    rows: { plugins, skills },
+    degraded: errors.length === 0 ? null : 'auto catalog incomplete: ' + errors.join('; '),
+  }
+}
+
 // -- drawers -----------------------------------------------------------------
 
 export function applyCollectionSave(collections: readonly CollectionRecord[], payload: Record<string, unknown>, now: number): CollectionRecord[] {
@@ -649,6 +846,36 @@ const groupToggle: OpHandler = async (payload, env) => {
   }
 }
 
+const autoPreview: OpHandler = async (_payload, env) => {
+  const catalog = await readAutoRows(env)
+  const plan = buildAutoPlan(catalog.rows)
+  return {
+    plan,
+    groups: plan.length,
+    members: plan.reduce((sum, entry) => sum + entry.members.length, 0),
+    degraded: catalog.degraded,
+  }
+}
+
+const autoApply: OpHandler = async (_payload, env) => {
+  const catalog = await readAutoRows(env)
+  if (catalog.degraded !== null) throw fail('capability-missing', catalog.degraded)
+  const now = env.now()
+  const plan = buildAutoPlan(catalog.rows)
+  const result = applyAutoPlan(normalizeGroups(env.state.groups), plan, now)
+  saveGroups(env, result.groups)
+  // `appliedAt` is the only key this op owns; another build's fields under `auto` ride along.
+  env.state.auto = { ...env.state.auto, appliedAt: now }
+  const backup = await env.save('auto-apply')
+  return {
+    groups: result.created.length,
+    members: result.members,
+    appliedAt: env.state.auto.appliedAt,
+    plan: groupList(result.created),
+    backup,
+  }
+}
+
 const collectionSave: OpHandler = async (payload, env) => {
   const collections = applyCollectionSave(normalizeCollections(env.state.collections), asRecord(payload), env.now())
   env.state.collections = collections
@@ -683,6 +910,8 @@ export function groupsDomain(): DomainRegistration {
         { id: 'group.clean', write: true, audit: true, note: 'Drops group members that no longer resolve to a live plugin or skill.' },
         { id: 'group.add', write: true, audit: true, note: 'Appends members to a group, expanding whole packages.' },
         { id: 'group.remove', write: true, audit: true, note: 'Removes members from a group.' },
+        { id: 'auto.preview', write: false, audit: false, note: 'Builds the rule-based group plan without touching state.' },
+        { id: 'auto.apply', write: true, audit: true, note: 'Replaces every automatic group with a fresh plan and stamps auto.appliedAt.' },
         { id: 'collection.save', write: true, audit: true, note: 'Creates or renames a drawer in state.json.' },
         { id: 'collection.delete', write: true, audit: true, note: 'Deletes a drawer and reassigns its groups to the default drawer.' },
       ],
@@ -696,6 +925,8 @@ export function groupsDomain(): DomainRegistration {
       'group.clean': groupClean,
       'group.add': groupAdd,
       'group.remove': groupRemove,
+      'auto.preview': autoPreview,
+      'auto.apply': autoApply,
       'collection.save': collectionSave,
       'collection.delete': collectionDelete,
     },

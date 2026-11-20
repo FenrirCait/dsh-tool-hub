@@ -62,6 +62,11 @@ export interface GroupMember {
   id: string
 }
 
+export interface CollectionRow {
+  id: string
+  name: string
+}
+
 export interface GroupRow {
   id: string
   name: string
@@ -114,6 +119,7 @@ export interface HubSnapshot {
   plugins: PluginRow[]
   skills: SkillRow[]
   groups: GroupRow[]
+  collections: CollectionRow[]
   presets: Record<string, PresetRow>
   tools: ToolRow[]
   sessions: Record<string, string[]>
