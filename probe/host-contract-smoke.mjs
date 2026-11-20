@@ -9,6 +9,10 @@
  */
 import { HOST_CONTRACT, checkContract, contractReport } from '../lib/host-contract.js'
 
+// Runtime checks only see the host half: `slots` and `locale` live in the browser shell.
+const hostRows = HOST_CONTRACT.filter(entry => (entry.surface ?? 'host') === 'host')
+const clientRows = HOST_CONTRACT.filter(entry => entry.surface === 'client')
+
 const results = []
 const check = (name, ok, detail = '') => {
   results.push({ name, ok })
@@ -35,7 +39,7 @@ const full = fullServices()
 const all = contractReport(full)
 check('full set: ok is true', all.ok === true)
 check('full set: missing is empty', all.missing.length === 0)
-check('full set: present equals total', all.present === all.total && all.total === HOST_CONTRACT.length, `present=${all.present} total=${all.total}`)
+check('full set: present equals total', all.present === all.total && all.total === hostRows.length, `present=${all.present} total=${all.total}`)
 check('full set: not degraded', all.degraded === false)
 
 // ── 2. a required member drops ───────────────────────────────────────────────
@@ -94,10 +98,24 @@ check('full set: not degraded', all.degraded === false)
     threwEmpty = true
   }
   check('checkContract(undefined) does not throw', threwUndefined === false)
-  check('checkContract(undefined) reports every member', undefinedReport?.length === HOST_CONTRACT.length, String(undefinedReport?.length))
-  check('checkContract({}) reports every member', emptyReport?.length === HOST_CONTRACT.length, String(emptyReport?.length))
+  check('checkContract(undefined) reports every host member', undefinedReport?.length === hostRows.length, String(undefinedReport?.length))
+  check('checkContract({}) reports every host member', emptyReport?.length === hostRows.length, String(emptyReport?.length))
+  check('surface "all" reports every member', checkContract(undefined, { surface: 'all' }).length === HOST_CONTRACT.length, String(checkContract(undefined, { surface: 'all' }).length))
   const emptyReportFull = contractReport({})
   check('empty bag: ok false and degraded true', emptyReportFull.ok === false && emptyReportFull.degraded === true)
+}
+
+// ── 5b. surfaces: the runtime probe skips the browser half ───────────────────
+{
+  const surfaces = new Set(HOST_CONTRACT.map(entry => entry.surface ?? 'host'))
+  check('every row is host or client', [...surfaces].every(name => name === 'host' || name === 'client'), [...surfaces].join(','))
+  check('the client half is exactly slots + locale', clientRows.length === 4 && clientRows.every(entry => entry.service === 'slots' || entry.service === 'locale'), clientRows.map(entry => `${entry.service}.${entry.member}`).join(','))
+  const hostOnly = contractReport(full)
+  check('the default report counts the host half only', hostOnly.total === hostRows.length && hostOnly.surface === 'host' && hostOnly.missing.every(entry => entry.service !== 'slots' && entry.service !== 'locale'), JSON.stringify({ total: hostOnly.total, missing: hostOnly.missing.length }))
+  check('a host bag without client services is complete', hostOnly.ok === true && hostOnly.degraded === false)
+  const client = contractReport({}, { surface: 'client' })
+  check('the client surface grades on its own', client.total === clientRows.length && client.ok === false, JSON.stringify({ total: client.total, ok: client.ok }))
+  check('a resolver can stand in for a plain bag', contractReport(null, { resolve: name => full[name] }).ok === true)
 }
 
 // ── 6. shape probe never calls a member ──────────────────────────────────────

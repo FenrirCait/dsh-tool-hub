@@ -182,6 +182,7 @@ const ctx = {
     // can get to that, and it is what makes "created but broken" observable.
     if (name === 'tools') return {
       view: () => ({ knownNames: [...mcpTools, ...registeredTools], restrictableNames: mcpTools }),
+      restrict() { return () => {} },
       register(definition) { registeredTools.push(definition.name); return () => {} },
     }
     if (name === 'agents') return { list: () => [] }
@@ -914,11 +915,11 @@ check('a failing bundle inventory is a bundleError, not a failed snapshot',
 fakeBundlesFail = false
 
 // ── 13. doctor ─────────────────────────────────────────────────────────────
-const DOCTOR_IDS = ['patch-parse', 'state-writable', 'failed-rows', 'stale-lock', 'skill-roots', 'trash', 'hub-tools', 'mount-heartbeat', 'snapshot-profile']
+const DOCTOR_IDS = ['patch-parse', 'state-writable', 'failed-rows', 'stale-lock', 'skill-roots', 'trash', 'hub-tools', 'mount-heartbeat', 'host-contract', 'snapshot-profile']
 r = await op('doctor', {})
 let doctor = new Map((r.data?.checks ?? []).map(row => [row.id, row]))
-check('doctor returns exactly the nine contracted checks',
-  r.ok === true && doctor.size === 9 && DOCTOR_IDS.every(id => doctor.has(id)),
+check('doctor returns exactly the ten contracted checks',
+  r.ok === true && doctor.size === 10 && DOCTOR_IDS.every(id => doctor.has(id)),
   JSON.stringify((r.data?.checks ?? []).map(row => row.id)))
 check('doctor patch-parse passes on a readable patch', doctor.get('patch-parse')?.ok === true, doctor.get('patch-parse')?.detail)
 check('doctor state-writable passes', doctor.get('state-writable')?.ok === true, doctor.get('state-writable')?.detail)
@@ -934,6 +935,7 @@ check('apply() stamped a mount heartbeat',
   heartbeat.pid === process.pid && Array.isArray(heartbeat.injects) && heartbeat.injects.includes('webServer'),
   `pid=${heartbeat.pid} injects=${(heartbeat.injects ?? []).join(',')}`)
 check('doctor mount-heartbeat passes right after apply', doctor.get('mount-heartbeat')?.ok === true, doctor.get('mount-heartbeat')?.detail)
+check('doctor host-contract passes on a complete host', doctor.get('host-contract')?.ok === true && /host member/.test(String(doctor.get('host-contract')?.detail)), doctor.get('host-contract')?.detail)
 
 // A heartbeat from another process is exactly the silent-failure case: same file, wrong owner.
 await writeFile(heartbeatFile, JSON.stringify({ ...heartbeat, pid: heartbeat.pid + 1 }, null, 2))
