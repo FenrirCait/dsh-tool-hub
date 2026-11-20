@@ -59,7 +59,7 @@ const invalid = (message, code = 'invalid') => new CliFailure(message, EXIT.inva
 
 // ── argv ─────────────────────────────────────────────────────────────────────
 
-const VALUE_FLAGS = new Set(['--profile', '--workspace', '--set', '--names', '--tools-deny', '--mcp-off'])
+const VALUE_FLAGS = new Set(['--profile', '--workspace', '--set', '--names', '--tools-deny', '--mcp-off', '--mcp-on'])
 
 function parseArgv(argv) {
   const options = {
@@ -68,6 +68,7 @@ function parseArgv(argv) {
     set: null,
     toolsDeny: null,
     mcpOff: null,
+    mcpOn: null,
     json: false,
     global: false,
     replace: false,
@@ -141,6 +142,7 @@ function parseArgv(argv) {
       else if (name === '--names') options.names = value
       else if (name === '--tools-deny') options.toolsDeny = value
       else if (name === '--mcp-off') options.mcpOff = value
+      else if (name === '--mcp-on') options.mcpOn = value
       else options.set = value
       continue
     }
@@ -1278,7 +1280,7 @@ Usage
   dsh-tool-hub mcp raw <serverName> [--set file] [--profile p]
   dsh-tool-hub session list|set <sessionId> --names a,b|clear <sessionId> [--profile p] [--json]
   dsh-tool-hub scene list|exit [--profile p] [--json]
-  dsh-tool-hub scene save <name> [--tools-deny a,b] [--mcp-off x] [--profile p] [--json]
+  dsh-tool-hub scene save <name> [--tools-deny a,b] [--mcp-off x] [--mcp-on y] [--profile p] [--json]
   dsh-tool-hub scene apply <name> [--profile p] [--json]
   dsh-tool-hub config export <file> [--mkdir] [--force] [--profile p]
   dsh-tool-hub config import <file> [--replace --yes] [--profile p]
@@ -1290,7 +1292,7 @@ Semantics
   session set        replaces one session's overlay (only mcp__* names survive); the panel's
                      installation list is untouched, and an empty --names clears the entry.
   scene save         stores a tools + MCP environment in state.json. Only mcp__* names are
-                     kept in tools.deny; --mcp-off takes server names. A flag left out leaves
+                     kept in tools.deny; --mcp-off / --mcp-on take server names. A flag left out leaves
                      that domain untracked (apply will not touch it); an empty --tools-deny ("")
                      stores an empty deny list, which clears the mask on apply.
   scene apply        records the current environment first, then writes toolDeny and flips the
@@ -1461,7 +1463,9 @@ async function cmdScene(ctx, action, name, options) {
     if (wanted === '') throw usage('scene save needs a name')
     if (wanted.length > 60) throw invalid('a scene name is at most 60 characters', 'scene-name')
     const tools = options.toolsDeny === null ? undefined : { deny: splitList(options.toolsDeny) }
-    const mcp = options.mcpOff === null ? undefined : { off: splitList(options.mcpOff) }
+    const mcp = options.mcpOff === null && options.mcpOn === null
+      ? undefined
+      : { off: splitList(options.mcpOff), on: splitList(options.mcpOn) }
     const scene = normalizeScene({
       name: wanted,
       ...(tools === undefined ? {} : { tools }),
@@ -1469,10 +1473,10 @@ async function cmdScene(ctx, action, name, options) {
     })
     if (scene === null) throw invalid('the scene does not normalize to a usable record', 'scene-invalid')
     const keptTools = new Set(scene.tools?.deny ?? [])
-    const keptServers = new Set(scene.mcp?.off ?? [])
+    const keptServers = new Set([...(scene.mcp?.off ?? []), ...(scene.mcp?.on ?? [])])
     const dropped = {
       tools: tools === undefined ? [] : [...new Set(tools.deny)].filter(entry => !keptTools.has(entry)),
-      mcp: mcp === undefined ? [] : [...new Set(mcp.off)].filter(entry => !keptServers.has(entry)),
+      mcp: mcp === undefined ? [] : [...new Set([...mcp.off, ...mcp.on])].filter(entry => !keptServers.has(entry)),
     }
     const replaced = state.scenes[scene.name] !== undefined
     state.scenes[scene.name] = scene

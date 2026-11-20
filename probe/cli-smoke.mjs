@@ -1021,6 +1021,27 @@ async function sceneCommands() {
   const untouched = await stateOf()
   check('scene apply: an untracked domain is left alone', JSON.stringify(untouched.toolDeny) === '["shell_exec"]', JSON.stringify(untouched.toolDeny))
   run(['scene', 'exit'])
+
+  const woke = jsonOf(run(['scene', 'save', 'wake-beta', '--mcp-on', 'beta', '--json']))
+  check('scene save: --mcp-on stores an on list', JSON.stringify(woke.scene.mcp?.on) === '["beta"]' && JSON.stringify(woke.scene.mcp?.off) === '[]', JSON.stringify(woke.scene))
+  check('scene save: --mcp-on leaves tools untracked', woke.scene.tools === undefined, JSON.stringify(woke.scene))
+
+  const wokeApply = jsonOf(run(['scene', 'apply', 'wake-beta', '--json']))
+  check('scene apply: --mcp-on turns the server back on', rowOf(await patchOf(), 'mcp-beta')?.disabled === false)
+  check('scene apply: the plan names the server it turns on', /servers on: beta/.test(wokeApply.plan ?? ''), String(wokeApply.plan))
+  run(['scene', 'exit', '--json'])
+  check('scene exit: --mcp-on is rolled back', rowOf(await patchOf(), 'mcp-beta')?.disabled === true)
+
+  const ghost = jsonOf(run(['scene', 'save', 'ghost-on', '--mcp-on', 'ghost', '--json']))
+  check('scene save: --mcp-on keeps a name that is not installed yet', JSON.stringify(ghost.scene.mcp?.on) === '["ghost"]', JSON.stringify(ghost.scene))
+  const ghostApply = jsonOf(run(['scene', 'apply', 'ghost-on', '--json']))
+  check('scene apply: a missing on-server is reported, not fatal', JSON.stringify(ghostApply.missing) === '["ghost"]' && ghostApply.ok === true, JSON.stringify(ghostApply))
+  run(['scene', 'exit'])
+
+  const badOn = run(['scene', 'save', 'bad-on', '--mcp-on', '', '--json'], 1)
+  check('scene save: an empty --mcp-on is a usage error', badOn.status === 1)
+  const badName = jsonOf(run(['scene', 'save', 'bad-name', '--mcp-on', 'bad name!', '--json']))
+  check('scene save: --mcp-on reports a dropped server name', JSON.stringify(badName.dropped?.mcp) === '["bad name!"]', JSON.stringify(badName.dropped))
 }
 
 await test('unit: parseRows', unitParseRows)
