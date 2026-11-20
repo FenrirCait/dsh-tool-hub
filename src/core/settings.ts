@@ -6,7 +6,10 @@ import type { DomainModule, SettingsField } from '../shared/types.js'
  * next write without a migration.
  */
 export function settingsFields(modules: DomainModule[]): Array<{ key: string; field: SettingsField }> {
-  return modules.flatMap(module => (module.settings ?? []).map(field => ({ key: `${module.id}.${field.key}`, field })))
+  return modules.flatMap(module => (module.settings ?? []).map(field => ({
+    key: field.key.startsWith(`${module.id}.`) ? field.key : `${module.id}.${field.key}`,
+    field,
+  })))
 }
 
 export function settingsDefaults(modules: DomainModule[]): Record<string, unknown> {
