@@ -80,7 +80,15 @@ export function Shell(props: ShellProps): React.ReactElement {
   const [refreshing, setRefreshing] = React.useState(false)
   const [notice, setNotice] = React.useState<Notice | null>(null)
 
-  const t = React.useMemo(() => createT(lang), [lang])
+  // Settings are the panel's own, not the shell's: language can be forced, density and theme
+  // are expressed as attributes on the root so a compact/dark panel still lives in a light shell.
+  const storedSettings = snapshot?.settings ?? {}
+  const density = storedSettings['settings.appearance.density'] === 'compact' ? 'compact' : 'comfortable'
+  const themeValue = storedSettings['settings.appearance.theme']
+  const theme = themeValue === 'dark' || themeValue === 'light' ? themeValue : 'system'
+  const forcedLang = storedSettings['settings.general.language']
+  const effectiveLang: Lang = forcedLang === 'zh' || forcedLang === 'en' ? forcedLang : lang
+  const t = React.useMemo(() => createT(effectiveLang), [effectiveLang])
 
   React.useEffect(() => {
     installStyles()
@@ -212,15 +220,17 @@ export function Shell(props: ShellProps): React.ReactElement {
 
   if (surface === 'panel') {
     return (
-      <div className="th-root" role="region" aria-label={t('app.title')}>
+      <div className="th-root" role="region" aria-label={t('app.title')} data-th-theme={theme} data-th-density={density}>
         {nav}
         <div className="th-main">
           <div className="th-top">
             <span className="th-top-title">{t('app.title')}</span>
             <div className="th-top-actions">
-              <Button variant="ghost" onClick={toggleLang} label={t('top.lang')}>
-                {lang === 'zh' ? 'EN' : '中文'}
-              </Button>
+              {forcedLang === 'zh' || forcedLang === 'en' ? null : (
+                <Button variant="ghost" onClick={toggleLang} label={t('top.lang')}>
+                  {lang === 'zh' ? 'EN' : '中文'}
+                </Button>
+              )}
               <Button variant="ghost" onClick={refresh} busy={refreshing} label={t('top.refresh')}>
                 {refreshing ? t('top.refreshing') : t('top.refresh')}
               </Button>
@@ -252,7 +262,7 @@ export function Shell(props: ShellProps): React.ReactElement {
   }
 
   return (
-    <div className="th-root">
+    <div className="th-root" data-th-theme={theme} data-th-density={density}>
       {nav}
       <div className="th-main">
         <header className="th-top">
@@ -261,9 +271,11 @@ export function Shell(props: ShellProps): React.ReactElement {
             {snapshot?.paths.home !== undefined && snapshot.paths.home !== '' ? snapshot.paths.home : t('app.subtitle')}
           </span>
           <div className="th-top-actions">
-            <Button variant="ghost" onClick={toggleLang} label={t('top.lang')}>
-              {lang === 'zh' ? 'EN' : '中文'}
-            </Button>
+            {forcedLang === 'zh' || forcedLang === 'en' ? null : (
+              <Button variant="ghost" onClick={toggleLang} label={t('top.lang')}>
+                {lang === 'zh' ? 'EN' : '中文'}
+              </Button>
+            )}
             <Button onClick={refresh} busy={refreshing} label={t('top.refresh')}>
               {refreshing ? t('top.refreshing') : t('top.refresh')}
             </Button>

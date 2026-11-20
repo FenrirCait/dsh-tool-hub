@@ -11,7 +11,6 @@ export const T = {
   surface: 'var(--dsw-alias-bg-l2, rgba(127, 127, 127, 0.06))',
   card: 'var(--dsw-alias-card-fill, rgba(127, 127, 127, 0.07))',
   cardHover: 'var(--dsw-alias-card-fill-hover, rgba(127, 127, 127, 0.12))',
-  elevated: 'var(--dsw-alias-bg-elevated, rgba(28, 28, 30, 0.98))',
   border: 'var(--dsw-alias-border-l2, rgba(127, 127, 127, 0.24))',
   borderSoft: 'var(--dsw-alias-border-l1, rgba(127, 127, 127, 0.14))',
   text: 'var(--dsw-alias-label-primary, inherit)',
@@ -58,6 +57,38 @@ const CSS = `
   line-height: 1.5;
   background: var(--dsw-alias-bg-base, transparent);
 }
+/* palette:start — forced light/dark palettes; the only place literal colours are allowed. */
+.th-root[data-th-theme='dark'] {
+  color-scheme: dark;
+  --dsw-alias-label-primary: rgb(242, 242, 247);
+  --dsw-alias-label-secondary: rgba(235, 235, 245, 0.74);
+  --dsw-alias-label-tertiary: rgba(235, 235, 245, 0.55);
+  --dsw-alias-border-l1: rgba(255, 255, 255, 0.10);
+  --dsw-alias-border-l2: rgba(255, 255, 255, 0.16);
+  --dsw-alias-card-fill: rgba(255, 255, 255, 0.06);
+  --dsw-alias-card-fill-hover: rgba(255, 255, 255, 0.10);
+  --dsw-alias-bg-l2: rgba(255, 255, 255, 0.06);
+  --dsw-alias-bg-base: rgb(22, 22, 24);
+  --dsw-alias-bg-elevated: rgb(28, 28, 30);
+}
+.th-root[data-th-theme='light'] {
+  color-scheme: light;
+  --dsw-alias-label-primary: rgb(27, 27, 31);
+  --dsw-alias-label-secondary: rgba(30, 30, 35, 0.72);
+  --dsw-alias-label-tertiary: rgba(30, 30, 35, 0.54);
+  --dsw-alias-border-l1: rgba(0, 0, 0, 0.10);
+  --dsw-alias-border-l2: rgba(0, 0, 0, 0.16);
+  --dsw-alias-card-fill: rgba(0, 0, 0, 0.045);
+  --dsw-alias-card-fill-hover: rgba(0, 0, 0, 0.075);
+  --dsw-alias-bg-l2: rgba(0, 0, 0, 0.05);
+  --dsw-alias-bg-base: rgb(255, 255, 255);
+  --dsw-alias-bg-elevated: rgb(255, 255, 255);
+}
+/* palette:end */
+.th-root[data-th-density='compact'] { font-size: 12px; }
+.th-root[data-th-density='compact'] .th-row { padding-top: 6px; padding-bottom: 6px; }
+.th-root[data-th-density='compact'] .th-navitem { padding-top: 5px; padding-bottom: 5px; }
+.th-root[data-th-density='compact'] .th-top { padding-top: 8px; padding-bottom: 8px; }
 .th-side {
   flex: 0 0 208px;
   display: flex;
@@ -321,12 +352,16 @@ const CSS = `
   width: min(460px, 100%);
   border: 1px solid var(--dsw-alias-border-l2, rgba(127, 127, 127, 0.24));
   border-radius: 14px;
-  background: var(--dsw-alias-bg-elevated, rgba(28, 28, 30, 0.98));
-  color: var(--dsw-alias-label-primary, inherit);
+  background: var(--dsw-alias-bg-elevated, rgb(255, 255, 255));
+  color: var(--dsw-alias-label-primary, rgb(27, 27, 31));
   box-shadow: 0 18px 44px var(--dsw-alias-shadow-popover, rgba(0, 0, 0, 0.28));
   padding: 16px 18px;
 }
 .th-dialog:focus { outline: none; }
+@media (prefers-color-scheme: dark) {
+  /* A shell without the elevated token still gets readable text in either theme. */
+  .th-dialog { background: var(--dsw-alias-bg-elevated, rgb(28, 28, 30)); color: var(--dsw-alias-label-primary, rgb(242, 242, 247)); }
+}
 .th-dialog-title { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
 .th-dialog-body { font-size: 12px; color: var(--dsw-alias-label-secondary, rgba(127, 127, 127, 0.96)); }
 .th-dialog-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }

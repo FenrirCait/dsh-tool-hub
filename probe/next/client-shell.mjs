@@ -166,7 +166,9 @@ check('color-tokens-only', () => {
     }
     return out
   }
-  for (const [path, source] of sources) {
+  for (const [path, raw] of sources) {
+    // The declared palettes are the one exception: forcing a theme needs its own colours.
+    const source = raw.replace(/\/\* palette:start[\s\S]*?\/\* palette:end \*\//g, '')
     const rest = strip(source)
     const match = /#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(/.exec(rest)
     assert(match === null, `${path}:${lineAt(rest, match?.index ?? 0)} uses a literal colour outside a token fallback`)
