@@ -31,6 +31,7 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } 
 import { fileURLToPath } from 'node:url'
 import { parseRows, removeRow, setRowDisabled } from '../lib/patch-rows.js'
 import { captureSnapshot, describePlan, normalizeScene, runScene } from '../lib/scene-engine.js'
+import { readMountHeartbeat } from '../lib/mount-heartbeat.js'
 
 const MCP_MODULE = '@deepseek-ai/dsh-mcp-client'
 const SKILL_FILE = 'SKILL.md'
@@ -1279,9 +1280,9 @@ Usage
   dsh-tool-hub mcp list|enable|disable <serverName> [--profile p] [--json]
   dsh-tool-hub mcp raw <serverName> [--set file] [--profile p]
   dsh-tool-hub session list|set <sessionId> --names a,b|clear <sessionId> [--profile p] [--json]
-  dsh-tool-hub scene list|exit [--profile p] [--json]
-  dsh-tool-hub scene save <name> [--tools-deny a,b] [--mcp-off x] [--mcp-on y] [--profile p] [--json]
-  dsh-tool-hub scene apply <name> [--profile p] [--json]
+  dsh-tool-hub scene list|exit [--force] [--profile p] [--json]
+  dsh-tool-hub scene save <name> [--tools-deny a,b] [--mcp-off x] [--mcp-on y] [--force] [--profile p] [--json]
+  dsh-tool-hub scene apply <name> [--force] [--profile p] [--json]
   dsh-tool-hub config export <file> [--mkdir] [--force] [--profile p]
   dsh-tool-hub config import <file> [--replace --yes] [--profile p]
 
@@ -1301,6 +1302,11 @@ Semantics
                      the host picks the new toolDeny up on its next load or state change.
   scene exit         puts the snapshot back and clears the record; with nothing active it is a
                      no-op, so it can be run twice.
+  scene save/apply/exit
+                     refuse while a DSH host is live (mount.json heartbeat + a live pid): the
+                     panel keeps state.json in memory and saves the whole object, so it would
+                     drop this write — including the mode record exit needs. --force writes
+                     anyway; a heartbeat whose process died is ignored.
   mcp raw --set      the file must hold exactly one row, of the MCP client module,
                      with the target's id; it is re-indented into the target row.
   config export      the destination must be a regular file inside $DSH_HOME or the
@@ -1431,6 +1437,30 @@ function sceneCliIo(ctx, state, { tolerateMissing = false } = {}) {
   }
 }
 
+/** A pid this machine can signal; EPERM still means the process exists. */
+function pidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  }
+  catch (error) {
+    return error?.code === 'EPERM'
+  }
+}
+
+/**
+ * The host keeps state.json in memory and saves the whole object, so a CLI write made while it
+ * runs can be overwritten without a trace — including the mode record a scene exit needs. The
+ * panel's mount.json heartbeat plus a live pid is the only signal a host is out there; a
+ * heartbeat whose process died proves nothing and is ignored.
+ */
+function liveHost(ctx) {
+  const read = readMountHeartbeat(dirname(ctx.stateFile))
+  if (read.ok !== true || !pidAlive(read.data.pid)) return null
+  return { pid: read.data.pid, writtenAt: read.data.writtenAt }
+}
+
 /**
  * Scenes: a saved environment of tool masking plus MCP servers — the same record the panel
  * writes, read back through lib/scene-engine.js so both paths agree on the empty-section rule
@@ -1441,6 +1471,17 @@ function sceneCliIo(ctx, state, { tolerateMissing = false } = {}) {
  */
 async function cmdScene(ctx, action, name, options) {
   const state = await readState(ctx)
+  /** Refuse before any write when a live host could overwrite it; --force is the way past. */
+  const refuseIfLive = () => {
+    if (options.force === true) return
+    const host = liveHost(ctx)
+    if (host === null) return
+    const age = Math.max(0, Math.round((Date.now() - host.writtenAt) / 1000))
+    throw invalid(
+      `a DSH host is live (pid ${host.pid}, heartbeat written ${age}s ago) and holds this state in memory; its next save would overwrite this one. Stop it, or pass --force.`,
+      'host-active',
+    )
+  }
   if (action === undefined || action === 'list') {
     const active = state.mode?.name ?? null
     const rows = Object.keys(state.scenes).sort().map(sceneName => ({
@@ -1462,6 +1503,7 @@ async function cmdScene(ctx, action, name, options) {
     const wanted = String(name ?? '').trim()
     if (wanted === '') throw usage('scene save needs a name')
     if (wanted.length > 60) throw invalid('a scene name is at most 60 characters', 'scene-name')
+    refuseIfLive()
     const tools = options.toolsDeny === null ? undefined : { deny: splitList(options.toolsDeny) }
     const mcp = options.mcpOff === null && options.mcpOn === null
       ? undefined
@@ -1493,6 +1535,7 @@ async function cmdScene(ctx, action, name, options) {
     if (wanted === '') throw usage('scene apply needs a name')
     const scene = state.scenes[wanted]
     if (scene === undefined) throw missing(`no scene named "${wanted}"`, 'unknown-scene')
+    refuseIfLive()
     const patch = await readPatch(ctx)
     const snapshot = captureSnapshot({
       toolDeny: state.toolDeny,
@@ -1516,6 +1559,7 @@ async function cmdScene(ctx, action, name, options) {
       emit(options, { ok: true, restored: false, note: 'no scene is active' }, ['  no scene is active; nothing to restore'])
       return EXIT.ok
     }
+    refuseIfLive()
     const restoring = state.mode.name
     const io = sceneCliIo(ctx, state, { tolerateMissing: true })
     const run = await runScene({ snapshot: state.mode.snapshot, io, restoreOnly: true })

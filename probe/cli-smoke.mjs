@@ -1042,6 +1042,31 @@ async function sceneCommands() {
   check('scene save: an empty --mcp-on is a usage error', badOn.status === 1)
   const badName = jsonOf(run(['scene', 'save', 'bad-name', '--mcp-on', 'bad name!', '--json']))
   check('scene save: --mcp-on reports a dropped server name', JSON.stringify(badName.dropped?.mcp) === '["bad name!"]', JSON.stringify(badName.dropped))
+
+  // The live-host guard: mount.json with a live pid (this probe's own) must stop every write,
+  // and --force must be the way past. A heartbeat whose process is gone proves nothing.
+  const mountPath = join(home, 'tool-hub', 'mount.json')
+  const beat = pid => JSON.stringify({ version: 1, pid, hostStartedAt: Date.now(), injects: [], writtenAt: Date.now() })
+  await writeFile(mountPath, `${beat(process.pid)}\n`)
+  const guardedSave = run(['scene', 'save', 'guarded', '--json'], 3)
+  check('scene save: a live host refuses the write', JSON.parse(guardedSave.stdout).error?.code === 'host-active', guardedSave.stdout)
+  const forcedSave = jsonOf(run(['scene', 'save', 'guarded', '--force', '--json']))
+  check('scene save: --force writes past a live host', forcedSave.ok === true && forcedSave.scene.name === 'guarded', JSON.stringify(forcedSave))
+  const guardedApply = run(['scene', 'apply', 'quiet', '--json'], 3)
+  check('scene apply: a live host refuses the write', JSON.parse(guardedApply.stdout).error?.code === 'host-active', guardedApply.stdout)
+  jsonOf(run(['scene', 'apply', 'quiet', '--force', '--json']))
+  const guardedExit = run(['scene', 'exit', '--json'], 3)
+  check('scene exit: a live host refuses the restore', JSON.parse(guardedExit.stdout).error?.code === 'host-active', guardedExit.stdout)
+  const forcedExit = jsonOf(run(['scene', 'exit', '--force', '--json']))
+  check('scene exit: --force restores past a live host', forcedExit.restored === true, JSON.stringify(forcedExit))
+
+  await writeFile(mountPath, `${beat(2147483646)}\n`)
+  const deadSave = jsonOf(run(['scene', 'save', 'after-dead', '--json']))
+  check('scene save: a dead pid does not block', deadSave.ok === true, JSON.stringify(deadSave))
+  await writeFile(mountPath, 'not json\n')
+  const corruptSave = jsonOf(run(['scene', 'save', 'after-corrupt', '--json']))
+  check('scene save: an unreadable heartbeat does not block', corruptSave.ok === true, JSON.stringify(corruptSave))
+  await rm(mountPath, { force: true })
 }
 
 await test('unit: parseRows', unitParseRows)
