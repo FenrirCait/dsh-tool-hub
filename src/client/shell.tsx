@@ -186,22 +186,22 @@ export function Shell(props: ShellProps): React.ReactElement {
     snapshot === null
       ? { plugins: <div />, skills: <div />, mcp: <div />, tools: <div />, groups: <div />, presets: <div />, sessions: <div />, scenes: <div />, settings: <div /> }
       : {
-          plugins: <PluginsView snapshot={snapshot} lang={lang} t={t} busy={busy} run={run} reload={reload} />,
-          skills: <SkillsView snapshot={snapshot} lang={lang} t={t} busy={busy} run={run} reload={reload} />,
-          mcp: <McpView snapshot={snapshot} lang={lang} t={t} busy={busy} run={run} reload={reload} />,
-          tools: <ToolsView snapshot={snapshot} lang={lang} t={t} busy={busy} run={run} reload={reload} />,
-          groups: <GroupsView snapshot={snapshot} lang={lang} t={t} busy={busy} run={run} reload={reload} />,
-          presets: <PresetsView snapshot={snapshot} lang={lang} t={t} busy={busy} run={run} reload={reload} />,
-          sessions: <SessionsView snapshot={snapshot} lang={lang} t={t} busy={busy} run={run} reload={reload} />,
-          scenes: <ScenesView snapshot={snapshot} lang={lang} t={t} busy={busy} run={run} reload={reload} />,
-          settings: <SettingsView snapshot={snapshot} lang={lang} t={t} busy={busy} run={run} reload={reload} />,
+          plugins: <PluginsView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} reload={reload} />,
+          skills: <SkillsView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} reload={reload} />,
+          mcp: <McpView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} reload={reload} />,
+          tools: <ToolsView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} reload={reload} />,
+          groups: <GroupsView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} reload={reload} />,
+          presets: <PresetsView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} reload={reload} />,
+          sessions: <SessionsView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} reload={reload} />,
+          scenes: <ScenesView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} reload={reload} />,
+          settings: <SettingsView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} reload={reload} />,
         }
 
   const statusLine =
     busy !== null ? (
       <span>{t('state.busy')}</span>
     ) : phase === 'ready' && snapshot !== null ? (
-      <span>{t('top.updated', { time: clock(snapshot.fetchedAt, lang) })}</span>
+      <span>{t('top.updated', { time: clock(snapshot.fetchedAt, effectiveLang) })}</span>
     ) : phase === 'error' ? (
       <span>{t('state.error')}</span>
     ) : (
