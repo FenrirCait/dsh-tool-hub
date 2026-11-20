@@ -16,10 +16,14 @@ import type { HubSnapshot } from './types.js'
 import { McpView } from './views/mcp.js'
 import { PluginsView } from './views/plugins.js'
 import { ScenesView } from './views/scenes.js'
+import { GroupsView } from './views/groups.js'
+import { PresetsView } from './views/presets.js'
+import { ToolsView } from './views/tools.js'
+import { SessionsView } from './views/sessions.js'
 import { SettingsView } from './settings/index.js'
 import { SkillsView } from './views/skills.js'
 
-export type ViewId = 'plugins' | 'skills' | 'mcp' | 'scenes' | 'settings'
+export type ViewId = 'plugins' | 'skills' | 'mcp' | 'tools' | 'groups' | 'presets' | 'sessions' | 'scenes' | 'settings'
 
 /** Which surface the slot asked for: the tab, the main area, or the narrow side panel. */
 export type ShellSurface = 'tab' | 'main' | 'panel'
@@ -40,6 +44,10 @@ const NAV: Array<{ id: ViewId; label: string }> = [
   { id: 'plugins', label: 'nav.plugins' },
   { id: 'skills', label: 'nav.skills' },
   { id: 'mcp', label: 'nav.mcp' },
+  { id: 'tools', label: 'nav.tools' },
+  { id: 'groups', label: 'nav.groups' },
+  { id: 'presets', label: 'nav.presets' },
+  { id: 'sessions', label: 'nav.sessions' },
   { id: 'scenes', label: 'nav.scenes' },
   { id: 'settings', label: 'nav.settings' },
 ]
@@ -166,17 +174,25 @@ export function Shell(props: ShellProps): React.ReactElement {
     plugins: snapshot === null ? 0 : snapshot.plugins.length,
     skills: snapshot === null ? 0 : snapshot.skills.length,
     mcp: snapshot === null ? 0 : snapshot.plugins.filter(row => row.mcp === true).length,
+    tools: snapshot === null ? 0 : snapshot.tools.length,
+    groups: snapshot === null ? 0 : snapshot.groups.length,
+    presets: snapshot === null ? 0 : Object.keys(snapshot.presets).length,
+    sessions: snapshot === null ? 0 : Object.keys(snapshot.sessions).length,
     scenes: snapshot === null ? 0 : snapshot.scene.names.length,
     settings: snapshot === null ? 0 : snapshot.settingsSchema.length,
   }
 
   const views: Record<ViewId, React.ReactElement> =
     snapshot === null
-      ? { plugins: <div />, skills: <div />, mcp: <div />, scenes: <div />, settings: <div /> }
+      ? { plugins: <div />, skills: <div />, mcp: <div />, tools: <div />, groups: <div />, presets: <div />, sessions: <div />, scenes: <div />, settings: <div /> }
       : {
           plugins: <PluginsView snapshot={snapshot} lang={lang} t={t} busy={busy} run={run} reload={reload} />,
           skills: <SkillsView snapshot={snapshot} lang={lang} t={t} busy={busy} run={run} reload={reload} />,
           mcp: <McpView snapshot={snapshot} lang={lang} t={t} busy={busy} run={run} reload={reload} />,
+          tools: <ToolsView snapshot={snapshot} lang={lang} t={t} busy={busy} run={run} reload={reload} />,
+          groups: <GroupsView snapshot={snapshot} lang={lang} t={t} busy={busy} run={run} reload={reload} />,
+          presets: <PresetsView snapshot={snapshot} lang={lang} t={t} busy={busy} run={run} reload={reload} />,
+          sessions: <SessionsView snapshot={snapshot} lang={lang} t={t} busy={busy} run={run} reload={reload} />,
           scenes: <ScenesView snapshot={snapshot} lang={lang} t={t} busy={busy} run={run} reload={reload} />,
           settings: <SettingsView snapshot={snapshot} lang={lang} t={t} busy={busy} run={run} reload={reload} />,
         }
