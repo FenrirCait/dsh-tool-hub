@@ -30,6 +30,7 @@ import { homedir } from 'node:os'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseRows, removeRow, setRowDisabled } from '../lib/patch-rows.js'
+import { captureSnapshot, describePlan, normalizeScene, runScene } from '../lib/scene-engine.js'
 
 const MCP_MODULE = '@deepseek-ai/dsh-mcp-client'
 const SKILL_FILE = 'SKILL.md'
@@ -58,13 +59,15 @@ const invalid = (message, code = 'invalid') => new CliFailure(message, EXIT.inva
 
 // ── argv ─────────────────────────────────────────────────────────────────────
 
-const VALUE_FLAGS = new Set(['--profile', '--workspace', '--set', '--names'])
+const VALUE_FLAGS = new Set(['--profile', '--workspace', '--set', '--names', '--tools-deny', '--mcp-off'])
 
 function parseArgv(argv) {
   const options = {
     profile: 'web',
     workspace: null,
     set: null,
+    toolsDeny: null,
+    mcpOff: null,
     json: false,
     global: false,
     replace: false,
@@ -128,12 +131,16 @@ function parseArgv(argv) {
         value = argv[index]
         if (value === undefined) throw usage(`${name} needs a value`)
       }
-      // An empty `--names ""` is a real value for `session set`: it means "no names", which
-      // clears that session's overlay. Every other value flag needs something to work with.
-      if (value === '' && name !== '--names') throw usage(`${name} needs a value`)
+      // An empty value is meaningful for two flags: `--names ""` clears a session overlay, and
+      // `--tools-deny ""` stores an empty deny list, which clears the mask on apply (omitting
+      // the flag means "do not touch tools"). An empty `--mcp-off` has no such meaning — an
+      // empty off/on list is not "turn everything on", it is just nothing to do.
+      if (value === '' && !['--names', '--tools-deny'].includes(name)) throw usage(`${name} needs a value`)
       if (name === '--profile') options.profile = value
       else if (name === '--workspace') options.workspace = value
       else if (name === '--names') options.names = value
+      else if (name === '--tools-deny') options.toolsDeny = value
+      else if (name === '--mcp-off') options.mcpOff = value
       else options.set = value
       continue
     }
@@ -243,6 +250,10 @@ function emptyState() {
     auto: { appliedAt: null },
     // Session overlays: <sessionId> -> mcp__* names that session switched off.
     sessions: {},
+    // Saved environments (tools + MCP) and the record of the one currently applied. The panel
+    // keeps both in this file too; lib/scene-engine.js owns their shape.
+    scenes: {},
+    mode: null,
   }
 }
 
@@ -254,7 +265,7 @@ function isRecord(value) {
  * Keys this CLI owns. Anything else already in state.json belongs to the panel and
  * is carried through untouched so a rewrite never drops a field we do not know.
  */
-const OWNED_STATE_KEYS = new Set(['version', 'groups', 'collections', 'presets', 'toolDeny', 'auto', 'sessions'])
+const OWNED_STATE_KEYS = new Set(['version', 'groups', 'collections', 'presets', 'toolDeny', 'auto', 'sessions', 'scenes', 'mode'])
 
 async function readState(ctx) {
   let raw
@@ -281,6 +292,15 @@ async function readState(ctx) {
       if (deny.length > 0) state.sessions[sessionId] = [...new Set(deny)]
     }
   }
+  if (isRecord(raw.scenes)) {
+    for (const [name, value] of Object.entries(raw.scenes)) {
+      const scene = normalizeScene(value)
+      if (scene !== null && scene.name === name) state.scenes[name] = scene
+    }
+  }
+  if (isRecord(raw.mode) && typeof raw.mode.name === 'string' && raw.mode.name !== '' && isRecord(raw.mode.snapshot)) {
+    state.mode = { name: raw.mode.name, at: typeof raw.mode.at === 'number' ? raw.mode.at : Date.now(), snapshot: raw.mode.snapshot }
+  }
   const extra = {}
   for (const [key, value] of Object.entries(raw)) {
     if (!OWNED_STATE_KEYS.has(key)) extra[key] = value
@@ -301,6 +321,8 @@ async function writeState(ctx, state) {
     toolDeny: state.toolDeny,
     auto: state.auto,
     sessions: state.sessions,
+    scenes: state.scenes,
+    mode: state.mode,
   }
   await writeFileAtomic(ctx.stateFile, `${JSON.stringify(payload, null, 2)}\n`)
   return backup
@@ -1255,6 +1277,9 @@ Usage
   dsh-tool-hub mcp list|enable|disable <serverName> [--profile p] [--json]
   dsh-tool-hub mcp raw <serverName> [--set file] [--profile p]
   dsh-tool-hub session list|set <sessionId> --names a,b|clear <sessionId> [--profile p] [--json]
+  dsh-tool-hub scene list|exit [--profile p] [--json]
+  dsh-tool-hub scene save <name> [--tools-deny a,b] [--mcp-off x] [--profile p] [--json]
+  dsh-tool-hub scene apply <name> [--profile p] [--json]
   dsh-tool-hub config export <file> [--mkdir] [--force] [--profile p]
   dsh-tool-hub config import <file> [--replace --yes] [--profile p]
 
@@ -1264,6 +1289,16 @@ Semantics
                      things on. The panel's own row is never switched off in bulk.
   session set        replaces one session's overlay (only mcp__* names survive); the panel's
                      installation list is untouched, and an empty --names clears the entry.
+  scene save         stores a tools + MCP environment in state.json. Only mcp__* names are
+                     kept in tools.deny; --mcp-off takes server names. A flag left out leaves
+                     that domain untracked (apply will not touch it); an empty --tools-deny ("")
+                     stores an empty deny list, which clears the mask on apply.
+  scene apply        records the current environment first, then writes toolDeny and flips the
+                     patch rows. A failure restores the snapshot, and the report names what is
+                     still wrong if the restore itself fails. It cannot re-apply a live mask:
+                     the host picks the new toolDeny up on its next load or state change.
+  scene exit         puts the snapshot back and clears the record; with nothing active it is a
+                     no-op, so it can be run twice.
   mcp raw --set      the file must hold exactly one row, of the MCP client module,
                      with the target's id; it is re-indented into the target row.
   config export      the destination must be a regular file inside $DSH_HOME or the
@@ -1336,6 +1371,159 @@ async function cmdSession(ctx, action, sessionId, options) {
   return EXIT.ok
 }
 
+/** Comma-separated flag value to a list; `--flag ""` is a real empty list, not "missing". */
+function splitList(value) {
+  return String(value ?? '').split(',').map(entry => entry.trim()).filter(entry => entry !== '')
+}
+
+/** One line for `scene list`: what this scene would touch, without needing a snapshot. */
+function sceneSummary(scene) {
+  const parts = []
+  if (scene.tools !== undefined) parts.push(`tools: ${scene.tools.deny.length} masked`)
+  if (scene.mcp !== undefined) {
+    if (scene.mcp.off.length > 0) parts.push(`off: ${scene.mcp.off.join(', ')}`)
+    if (scene.mcp.on.length > 0) parts.push(`on: ${scene.mcp.on.join(', ')}`)
+    if (scene.mcp.off.length === 0 && scene.mcp.on.length === 0) parts.push('mcp: empty list')
+  }
+  return parts.length === 0 ? 'no domains (leaves both untouched)' : parts.join(' · ')
+}
+
+/**
+ * The two writes a scene run needs, bound to one state object. `lib/scene-engine.js` owns the
+ * order and the rollback; this only knows where the bytes go: state.json for the deny list and
+ * the mode record, the profile patch for one MCP row.
+ */
+function sceneCliIo(ctx, state, { tolerateMissing = false } = {}) {
+  const backups = []
+  return {
+    backups,
+    async writeMode(mode) {
+      state.mode = { name: mode.name, at: mode.at, snapshot: mode.snapshot }
+      backups.push(await writeState(ctx, state))
+    },
+    async clearMode() {
+      state.mode = null
+      backups.push(await writeState(ctx, state))
+    },
+    async setTools(deny) {
+      state.toolDeny = [...deny]
+      backups.push(await writeState(ctx, state))
+    },
+    async setServer(entry) {
+      const text = await readPatch(ctx)
+      if (text === null) {
+        if (tolerateMissing) return { skipped: true }
+        throw missing(`profile "${ctx.name}" has no patch file`, 'patch-missing')
+      }
+      const servers = mcpServers(text)
+      const server = findServer(servers, entry.id) ?? findServer(servers, entry.serverName)
+      if (server === undefined) {
+        // A row deleted while the scene was active is nothing to put back; reporting it as a
+        // failed restore would be noise about something that no longer exists.
+        if (tolerateMissing) return { skipped: true }
+        throw missing(`no MCP server answers to "${entry.serverName}"`, 'server-not-found')
+      }
+      const next = setRowDisabled(text, server.id, entry.enabled !== true)
+      if (next !== text) backups.push(await writePatch(ctx, next))
+    },
+  }
+}
+
+/**
+ * Scenes: a saved environment of tool masking plus MCP servers — the same record the panel
+ * writes, read back through lib/scene-engine.js so both paths agree on the empty-section rule
+ * and on the rollback order.
+ *
+ * The CLI runs without a host, so `apply` persists the environment and flips the patch rows;
+ * the live mask is the host's to recompute the next time it loads state (see --help).
+ */
+async function cmdScene(ctx, action, name, options) {
+  const state = await readState(ctx)
+  if (action === undefined || action === 'list') {
+    const active = state.mode?.name ?? null
+    const rows = Object.keys(state.scenes).sort().map(sceneName => ({
+      name: sceneName,
+      active: sceneName === active,
+      summary: sceneSummary(state.scenes[sceneName]),
+      scene: state.scenes[sceneName],
+    }))
+    emit(
+      options,
+      { ok: true, active, scenes: rows },
+      rows.length === 0
+        ? ['  (no scenes)']
+        : rows.map(row => `  ${row.active ? '*' : ' '} ${pad(row.name, 16)}  ${row.summary}`),
+    )
+    return EXIT.ok
+  }
+  if (action === 'save') {
+    const wanted = String(name ?? '').trim()
+    if (wanted === '') throw usage('scene save needs a name')
+    if (wanted.length > 60) throw invalid('a scene name is at most 60 characters', 'scene-name')
+    const tools = options.toolsDeny === null ? undefined : { deny: splitList(options.toolsDeny) }
+    const mcp = options.mcpOff === null ? undefined : { off: splitList(options.mcpOff) }
+    const scene = normalizeScene({
+      name: wanted,
+      ...(tools === undefined ? {} : { tools }),
+      ...(mcp === undefined ? {} : { mcp }),
+    })
+    if (scene === null) throw invalid('the scene does not normalize to a usable record', 'scene-invalid')
+    const keptTools = new Set(scene.tools?.deny ?? [])
+    const keptServers = new Set(scene.mcp?.off ?? [])
+    const dropped = {
+      tools: tools === undefined ? [] : [...new Set(tools.deny)].filter(entry => !keptTools.has(entry)),
+      mcp: mcp === undefined ? [] : [...new Set(mcp.off)].filter(entry => !keptServers.has(entry)),
+    }
+    const replaced = state.scenes[scene.name] !== undefined
+    state.scenes[scene.name] = scene
+    const backup = await writeState(ctx, state)
+    const lines = [`saved scene ${scene.name}: ${sceneSummary(scene)}`]
+    if (dropped.tools.length > 0) lines.push(`  dropped (not an mcp__* name): ${dropped.tools.join(', ')}`)
+    if (dropped.mcp.length > 0) lines.push(`  dropped (not a server name): ${dropped.mcp.join(', ')}`)
+    if (backup !== null) lines.push(`  backup ${backup}`)
+    emit(options, { ok: true, name: scene.name, scene, replaced, dropped, backup }, lines)
+    return EXIT.ok
+  }
+  if (action === 'apply') {
+    const wanted = String(name ?? '').trim()
+    if (wanted === '') throw usage('scene apply needs a name')
+    const scene = state.scenes[wanted]
+    if (scene === undefined) throw missing(`no scene named "${wanted}"`, 'unknown-scene')
+    const patch = await readPatch(ctx)
+    const snapshot = captureSnapshot({
+      toolDeny: state.toolDeny,
+      sessions: state.sessions,
+      mcpRows: mcpServers(patch ?? '').map(row => ({ id: row.id, serverName: row.serverName, disabled: row.disabled })),
+    })
+    const io = sceneCliIo(ctx, state)
+    const run = await runScene({ scene, snapshot, io })
+    if (!run.ok) throw invalid(`${run.error}; ${run.rollback?.message ?? 'rollback unavailable'}`, 'scene-failed')
+    const planText = describePlan(run.plan)
+    const missingServers = [...new Set(run.plan.missing ?? [])]
+    const lines = [`applied scene ${scene.name}: ${planText}`]
+    if (missingServers.length > 0) lines.push(`  missing servers: ${missingServers.join(', ')}`)
+    for (const item of io.backups) if (item !== null) lines.push(`  backup ${item}`)
+    emit(options, { ok: true, scene: scene.name, plan: planText, applied: run.applied, missing: missingServers, backups: io.backups }, lines)
+    return EXIT.ok
+  }
+  if (action === 'exit') {
+    if (name !== undefined) throw usage('scene exit takes no name')
+    if (state.mode === null || state.mode === undefined) {
+      emit(options, { ok: true, restored: false, note: 'no scene is active' }, ['  no scene is active; nothing to restore'])
+      return EXIT.ok
+    }
+    const restoring = state.mode.name
+    const io = sceneCliIo(ctx, state, { tolerateMissing: true })
+    const run = await runScene({ snapshot: state.mode.snapshot, io, restoreOnly: true })
+    if (!run.ok) throw invalid(`${run.error}; ${run.rollback?.message ?? 'restore unavailable'}`, 'scene-exit-failed')
+    const lines = [`restored the environment saved before scene ${restoring}`, ...run.applied.map(item => `  ${item}`)]
+    for (const item of io.backups) if (item !== null) lines.push(`  backup ${item}`)
+    emit(options, { ok: true, restored: true, scene: restoring, targets: run.applied, backups: io.backups }, lines)
+    return EXIT.ok
+  }
+  throw usage('scene takes list, save <name>, apply <name>, or exit')
+}
+
 async function main(argv) {
   const options = parseArgv(argv)
   if (options.help) {
@@ -1369,6 +1557,8 @@ async function main(argv) {
       return await cmdConfig(ctx, rest[0], rest[1], options)
     case 'session':
       return await cmdSession(ctx, rest[0], rest[1], options)
+    case 'scene':
+      return await cmdScene(ctx, rest[0], rest[1], options)
     default:
       throw usage(`unknown command "${command}"; run dsh-tool-hub --help`)
   }

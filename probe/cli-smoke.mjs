@@ -948,6 +948,81 @@ async function sessionCommands() {
   check('session: an unknown action is a usage error', unknown.status === 1)
 }
 
+/**
+ * Scenes: a saved tools + MCP environment. Every assertion reads the files the CLI writes
+ * (state.json and the profile patch), so "applied" is proven by bytes, not by stdout phrasing.
+ *
+ * Restore note: where apply had to add a `disabled:` line, exit rewrites that line to
+ * `false` instead of deleting it — the same thing `mcp enable` does, and the same state.
+ */
+async function sceneCommands() {
+  await resetFixture()
+  const longName = 'x'.repeat(61)
+
+  const listed = jsonOf(run(['scene', 'list', '--json']))
+  check('scene list: empty to start', Array.isArray(listed.scenes) && listed.scenes.length === 0 && listed.active === null, JSON.stringify(listed))
+
+  const saved = jsonOf(run(['scene', 'save', 'quiet', '--tools-deny', 'shell_exec,mcp__alpha__one', '--mcp-off', 'alpha', '--json']))
+  check('scene save: keeps only mcp names', JSON.stringify(saved.scene.tools?.deny) === '["mcp__alpha__one"]', JSON.stringify(saved.scene))
+  check('scene save: reports what it dropped', JSON.stringify(saved.dropped?.tools) === '["shell_exec"]', JSON.stringify(saved.dropped))
+  const stored = await stateOf()
+  check('scene save: lands in the state file under its name', JSON.stringify(stored.scenes?.quiet?.tools?.deny) === '["mcp__alpha__one"]' && JSON.stringify(stored.scenes?.quiet?.mcp?.off) === '["alpha"]', JSON.stringify(stored.scenes))
+
+  const mcpOnly = jsonOf(run(['scene', 'save', 'mcp-only', '--mcp-off', 'beta', '--json']))
+  check('scene save: a flag left out leaves that domain untracked', mcpOnly.scene.tools === undefined && JSON.stringify(mcpOnly.scene.mcp.off) === '["beta"]', JSON.stringify(mcpOnly.scene))
+
+  const cleared = jsonOf(run(['scene', 'save', 'clear-tools', '--tools-deny', '', '--json']))
+  check('scene save: an empty value stores an empty list', JSON.stringify(cleared.scene.tools) === '{"deny":[]}', JSON.stringify(cleared.scene))
+
+  const longSave = run(['scene', 'save', longName, '--json'], 3)
+  check('scene save: a name over 60 characters exits 3', longSave.status === 3)
+  const noName = run(['scene', 'save', '--json'], 1)
+  check('scene save: a missing name is a usage error', noName.status === 1)
+
+  const beforePatch = await patchOf()
+  const applied = jsonOf(run(['scene', 'apply', 'quiet', '--json']))
+  const afterApply = await stateOf()
+  const afterPatch = await patchOf()
+  const delta = multisetDelta(beforePatch, afterPatch)
+  check('scene apply: replaces toolDeny with the scene list', JSON.stringify(afterApply.toolDeny) === '["mcp__alpha__one"]', JSON.stringify(afterApply.toolDeny))
+  check('scene apply: the patch gains exactly one disabled line', delta.added.length === 1 && delta.removed.length === 0 && delta.added[0].trim() === 'disabled: true', JSON.stringify(delta))
+  check('scene apply: the named server is off', rowOf(afterPatch, 'mcp-alpha')?.disabled === true)
+  check('scene apply: the other server row keeps its flag', rowOf(afterPatch, 'mcp-beta')?.disabled === true)
+  check('scene apply: records the environment it replaced', afterApply.mode?.name === 'quiet' && JSON.stringify(afterApply.mode?.snapshot?.toolDeny) === '["shell_exec"]' && afterApply.mode?.snapshot?.mcp?.alpha?.enabled === true, JSON.stringify(afterApply.mode))
+  check('scene apply: names the plan it ran', /tools: 1 masked/.test(applied.plan ?? '') && JSON.stringify(applied.missing) === '[]', JSON.stringify(applied.plan))
+
+  const active = jsonOf(run(['scene', 'list', '--json']))
+  check('scene list: marks the active scene', active.active === 'quiet' && active.scenes.find(row => row.name === 'quiet')?.active === true, JSON.stringify(active))
+  const human = run(['scene', 'list']).stdout
+  check('scene list: the human output stars the active scene', /^\s*\* quiet/m.test(human), human.trim())
+
+  const exited = jsonOf(run(['scene', 'exit', '--json']))
+  const afterExit = await stateOf()
+  const restoredPatch = await patchOf()
+  check('scene exit: restores toolDeny', JSON.stringify(afterExit.toolDeny) === '["shell_exec"]', JSON.stringify(afterExit.toolDeny))
+  check('scene exit: puts the server back', rowOf(restoredPatch, 'mcp-alpha')?.disabled === false)
+  check('scene exit: clears the record', afterExit.mode === null, JSON.stringify(afterExit.mode))
+  check('scene exit: reports the targets it restored', exited.restored === true && exited.targets.includes('mcp:alpha'), JSON.stringify(exited.targets))
+
+  const twice = jsonOf(run(['scene', 'exit', '--json']))
+  check('scene exit: a second run is a no-op', twice.ok === true && twice.restored === false, JSON.stringify(twice))
+
+  const unknown = run(['scene', 'apply', 'nope', '--json'], 2)
+  check('scene apply: an unknown scene exits 2', unknown.status === 2)
+  const badAction = run(['scene', 'wat', '--json'], 1)
+  check('scene: an unknown action is a usage error', badAction.status === 1)
+
+  run(['scene', 'apply', 'clear-tools', '--json'])
+  const clearedApply = await stateOf()
+  check('scene apply: an empty list clears that domain', JSON.stringify(clearedApply.toolDeny) === '[]', JSON.stringify(clearedApply.toolDeny))
+  run(['scene', 'exit'])
+
+  run(['scene', 'apply', 'mcp-only', '--json'])
+  const untouched = await stateOf()
+  check('scene apply: an untracked domain is left alone', JSON.stringify(untouched.toolDeny) === '["shell_exec"]', JSON.stringify(untouched.toolDeny))
+  run(['scene', 'exit'])
+}
+
 await test('unit: parseRows', unitParseRows)
 await resetFixture()
 await test('list', listCommands)
@@ -958,6 +1033,7 @@ await test('skill', skillCommands)
 await test('mcp', mcpCommands)
 await test('config', configCommands)
 await test('session', sessionCommands)
+await test('scene', sceneCommands)
 await test('guard rails', guardRails)
 await test('self row', selfGuard)
 await test('real profile', realProfile)
