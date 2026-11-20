@@ -24,7 +24,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
 /** Lines and bytes, not kilobytes: 153_600 bytes is the 150 KiB the doc talks about. */
 const TIERS = {
-  source: { dirs: ['lib', 'bin', 'probe'], soft: { lines: 1500, bytes: 80 * 1024 }, hard: { lines: 3000, bytes: 150 * 1024 } },
+  source: { dirs: ['lib', 'bin', 'probe', 'src'], soft: { lines: 1500, bytes: 80 * 1024 }, hard: { lines: 3000, bytes: 150 * 1024 } },
   bundle: { dirs: ['client'], soft: null, hard: null },
   data: { dirs: ['locale', 'detail'], measure: false },
 }

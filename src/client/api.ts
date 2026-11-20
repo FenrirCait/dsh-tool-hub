@@ -1,0 +1,325 @@
+/**
+ * The panel's only door to the host.
+ *
+ * Two endpoints, one envelope: GET snapshot and POST op. Every failure leaves this module as a
+ * value ({ ok: false, code, message }), never as a rejection, so a view can render an error
+ * banner instead of relying on a catch somewhere up the tree.
+ */
+import type { GroupRow, HubSnapshot, PluginRow, PresetRow, SceneState, SecretKeys, SkillRootInfo, SkillRow, ToolRow } from './types.js'
+import type { SettingsField } from '../shared/types.js'
+
+/** Op ids the panel sends. Kept in one table: a host rename is a one-line change here. */
+export const OPS = {
+  toggle: 'toggle',
+  bulk: 'bulk',
+  sceneApply: 'scene.apply',
+  sceneExit: 'scene.exit',
+  doctor: 'doctor',
+} as const
+
+export type OpId = (typeof OPS)[keyof typeof OPS] | string
+
+export interface ApiOk<T> {
+  ok: true
+  data: T
+}
+
+export interface ApiFail {
+  ok: false
+  code: string
+  message: string
+  status: number
+}
+
+export type ApiResult<T> = ApiOk<T> | ApiFail
+
+const BASE = '/tool-hub/api'
+const TIMEOUT_MS = 15000
+
+function fail(code: string, message: string, status = 0): ApiFail {
+  return { ok: false, code, message, status }
+}
+
+interface RawAnswer {
+  status: number
+  payload: unknown
+}
+
+/** One fetch, decoded as JSON when it is JSON. Network and timeout failures become ApiFail. */
+async function send(url: string, init: RequestInit): Promise<ApiResult<RawAnswer>> {
+  if (typeof fetch !== 'function') return fail('network', 'fetch is unavailable in this host', 0)
+  const controller = typeof AbortController === 'function' ? new AbortController() : null
+  const timer = controller === null ? null : setTimeout(() => controller.abort(), TIMEOUT_MS)
+  try {
+    const response = await fetch(url, controller === null ? init : { ...init, signal: controller.signal })
+    const text = await response.text()
+    let payload: unknown = null
+    if (text !== '') {
+      try {
+        payload = JSON.parse(text) as unknown
+      } catch {
+        payload = null
+      }
+    }
+    return { ok: true, data: { status: response.status, payload } }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    const aborted = error instanceof Error && error.name === 'AbortError'
+    return fail(aborted ? 'timeout' : 'network', message, 0)
+  } finally {
+    if (timer !== null) clearTimeout(timer)
+  }
+}
+
+/** Unwrap the { ok, data } envelope; anything else is reported as such. */
+function unwrap(answer: RawAnswer): ApiResult<unknown> {
+  if (answer.status === 401 || answer.status === 403) {
+    return fail('forbidden', 'the host refused this request', answer.status)
+  }
+  const body = asRecord(answer.payload)
+  if (body.ok === true) return { ok: true, data: body.data }
+  const error = asRecord(body.error)
+  const code = asString(error.code, answer.status >= 400 ? 'http' : 'envelope')
+  const message = asString(error.message, answer.status >= 400 ? 'request rejected' : 'unexpected response')
+  return fail(code, message, answer.status)
+}
+
+/**
+ * v1 first, the 1.x path second.
+ *
+ * During the cutover a host may only have the old routes mounted; a 404 on v1 is not an error
+ * the user should see, it is a fallback.
+ */
+async function call(path: string, init: RequestInit): Promise<ApiResult<unknown>> {
+  const first = await send(BASE + '/v1' + path, init)
+  if (!first.ok) return first
+  if (first.data.status !== 404) return unwrap(first.data)
+  const legacy = await send(BASE + path, init)
+  if (!legacy.ok) return legacy
+  return unwrap(legacy.data)
+}
+
+/** Read the snapshot and normalise it; a partial host answer still yields renderable arrays. */
+export async function getSnapshot(): Promise<ApiResult<HubSnapshot>> {
+  const result = await call('/snapshot', { method: 'GET', headers: { accept: 'application/json' } })
+  if (!result.ok) return result
+  return { ok: true, data: normalizeSnapshot(result.data) }
+}
+
+/** Send one op. The host is the only writer; the caller re-reads the snapshot afterwards. */
+export async function runOp(op: string, payload?: unknown): Promise<ApiResult<unknown>> {
+  const result = await call('/op', {
+    method: 'POST',
+    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    body: JSON.stringify({ op, payload: payload ?? {} }),
+  })
+  return result
+}
+
+// ── narrowing helpers ────────────────────────────────────────────────────────
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
+}
+
+function asString(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value : fallback
+}
+
+function asStringOrNull(value: unknown): string | null {
+  return typeof value === 'string' ? value : null
+}
+
+function asNumberOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function asBoolean(value: unknown): boolean {
+  return value === true
+}
+
+function asStringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+}
+
+function asRows<T>(value: unknown, map: (row: Record<string, unknown>) => T | null): T[] {
+  if (!Array.isArray(value)) return []
+  const out: T[] = []
+  for (const item of value) {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) continue
+    const mapped = map(item as Record<string, unknown>)
+    if (mapped !== null) out.push(mapped)
+  }
+  return out
+}
+
+function secretKeysOf(value: unknown): SecretKeys {
+  const record = asRecord(value)
+  return { env: asStringList(record.env), headers: asStringList(record.headers) }
+}
+
+function pluginOf(row: Record<string, unknown>): PluginRow | null {
+  const id = asString(row.id)
+  if (id === '') return null
+  return {
+    id,
+    name: asString(row.name, id),
+    kind: asString(row.kind, 'plugin'),
+    moduleName: asStringOrNull(row.moduleName),
+    description: asString(row.description),
+    enabled: asBoolean(row.enabled),
+    phase: asStringOrNull(row.phase),
+    patchId: asStringOrNull(row.patchId),
+    manageable: row.manageable === undefined ? true : asBoolean(row.manageable),
+    readOnlyReason: asStringOrNull(row.readOnlyReason),
+    self: asBoolean(row.self),
+    official: asBoolean(row.official),
+    builtinUi: asBoolean(row.builtinUi),
+    mcp: asBoolean(row.mcp),
+    mcpPatchId: asStringOrNull(row.mcpPatchId),
+    mcpEditable: asBoolean(row.mcpEditable),
+    transport: asStringOrNull(row.transport),
+    command: asStringOrNull(row.command),
+    url: asStringOrNull(row.url),
+    config: row.config === null || row.config === undefined ? null : asRecord(row.config),
+    secretKeys: secretKeysOf(row.secretKeys),
+    root: asStringOrNull(row.root),
+  }
+}
+
+function skillOf(row: Record<string, unknown>): SkillRow | null {
+  const id = asString(row.id)
+  if (id === '') return null
+  return {
+    id,
+    name: asString(row.name, id),
+    enabled: asBoolean(row.enabled),
+    rootId: asString(row.rootId, ''),
+    root: asStringOrNull(row.root),
+    description: asString(row.description),
+    entry: asString(row.entry, ''),
+    packs: typeof row.packs === 'number' ? row.packs : 0,
+  }
+}
+
+function groupOf(row: Record<string, unknown>): GroupRow | null {
+  const id = asString(row.id)
+  if (id === '') return null
+  const members = Array.isArray(row.members)
+    ? row.members
+        .map(member => asRecord(member))
+        .filter(member => asString(member.id) !== '')
+        .map(member => ({ kind: asString(member.kind, 'plugin'), id: asString(member.id) }))
+    : []
+  return {
+    id,
+    name: asString(row.name, id),
+    members,
+    collection: asStringOrNull(row.collection),
+    enabled: asBoolean(row.enabled),
+    stale: typeof row.stale === 'number' ? row.stale : 0,
+  }
+}
+
+function toolOf(row: Record<string, unknown>): ToolRow | null {
+  const name = asString(row.name)
+  if (name === '') return null
+  return { name, enabled: asBoolean(row.enabled), server: asStringOrNull(row.server), lazy: asBoolean(row.lazy) }
+}
+
+function rootOf(row: Record<string, unknown>): SkillRootInfo | null {
+  const id = asString(row.id)
+  if (id === '') return null
+  return {
+    id,
+    label: asString(row.label, id),
+    dir: asString(row.dir),
+    scope: asString(row.scope),
+    workspace: asStringOrNull(row.workspace),
+  }
+}
+
+function presetsOf(value: unknown): Record<string, PresetRow> {
+  const out: Record<string, PresetRow> = {}
+  for (const [name, entry] of Object.entries(asRecord(value))) {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) continue
+    const row = entry as Record<string, unknown>
+    out[name] = { plugin: asStringList(row.plugin), skill: asStringList(row.skill), tool: asStringList(row.tool) }
+  }
+  return out
+}
+
+function sessionsOf(value: unknown): Record<string, string[]> {
+  const out: Record<string, string[]> = {}
+  for (const [id, names] of Object.entries(asRecord(value))) out[id] = asStringList(names)
+  return out
+}
+
+const SETTING_TYPES = new Set(['boolean', 'number', 'string', 'select'])
+
+/** Keep only declarations a form can render; a malformed row is dropped, not guessed at. */
+function settingsFieldsOf(value: unknown): SettingsField[] {
+  return asRows(value, (row) => {
+    const key = asString(row.key)
+    const type = asString(row.type)
+    const label = asRecord(row.label)
+    if (key === '' || !SETTING_TYPES.has(type)) return null
+    const field = { key, type, default: row.default, label: { zh: asString(label.zh), en: asString(label.en) } } as SettingsField
+    if (row.hint !== null && typeof row.hint === 'object') {
+      const hint = asRecord(row.hint)
+      field.hint = { zh: asString(hint.zh), en: asString(hint.en) }
+    }
+    if (Array.isArray(row.options)) {
+      field.options = row.options.flatMap(option => {
+        const entry = asRecord(option)
+        const value = asString(entry.value)
+        if (value === '') return []
+        const text = asRecord(entry.label)
+        return [{ value, label: { zh: asString(text.zh), en: asString(text.en) } }]
+      })
+    }
+    if (typeof row.min === 'number') field.min = row.min
+    if (typeof row.max === 'number') field.max = row.max
+    return field
+  })
+}
+
+function sceneOf(value: unknown): SceneState {
+  const record = asRecord(value)
+  const scenes = asRecord(record.scenes)
+  const names = asStringList(record.names)
+  return {
+    mode: asStringOrNull(record.mode),
+    since: asNumberOrNull(record.since),
+    names: names.length > 0 ? names : Object.keys(scenes),
+    scenes,
+  }
+}
+
+/** A host answer, made total: no field a view reads can be undefined afterwards. */
+export function normalizeSnapshot(raw: unknown): HubSnapshot {
+  const record = asRecord(raw)
+  const paths = asRecord(record.paths)
+  const limits = asRecord(record.limits)
+  return {
+    plugins: asRows(record.plugins, pluginOf),
+    skills: asRows(record.skills, skillOf),
+    groups: asRows(record.groups, groupOf),
+    presets: presetsOf(record.presets),
+    tools: asRows(record.tools, toolOf),
+    sessions: sessionsOf(record.sessions),
+    scene: sceneOf(record.scene),
+    paths: {
+      home: asString(paths.home),
+      state: asString(paths.state),
+      patch: asStringOrNull(paths.patch),
+      skillRoots: asStringList(paths.skillRoots),
+      skills: asRows(paths.skills, rootOf),
+    },
+    settings: asRecord(record.settings) as Record<string, unknown>,
+    settingsSchema: settingsFieldsOf(record.settingsSchema),
+    mcpError: asStringOrNull(record.mcpError),
+    limits: typeof limits.bulk === 'number' ? { bulk: limits.bulk } : null,
+    fetchedAt: Date.now(),
+  }
+}
