@@ -43,14 +43,32 @@ function namesOf(overlays: Record<string, string[]>, sessionId: string): string[
   return names === undefined ? [] : names
 }
 
+// #region lineage-helpers
+/** What session.lineage answers: the chain nearest-first, and the mask unioned along it. */
+export type Lineage = { lineage: string[]; deny: string[] }
+
+/** The reply made total: junk entries dropped; a reply without a chain falls back to the local copy. */
+export function normalizeLineage(raw: unknown): Lineage | null {
+  const record = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : null
+  if (record === null) return null
+  const list = (value: unknown): string[] =>
+    Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+  const lineage = list(record.lineage)
+  if (lineage.length === 0) return null
+  return { lineage, deny: list(record.deny) }
+}
+// #endregion lineage-helpers
+
 export function SessionsView(props: ViewProps): React.ReactElement {
-  const { snapshot, t, lang, busy, run } = props
+  const { snapshot, t, lang, busy, run, runDetailed } = props
   const [query, setQuery] = React.useState('')
   const [draft, setDraft] = React.useState<Draft | null>(null)
   const [typedName, setTypedName] = React.useState('')
   const [nameError, setNameError] = React.useState<string | null>(null)
   const [clearing, setClearing] = React.useState<string | null>(null)
   const [tracing, setTracing] = React.useState<string | null>(null)
+  const [trace, setTrace] = React.useState<Lineage | null>(null)
+  const [traceError, setTraceError] = React.useState<string | null>(null)
 
   const overlays = snapshot.sessions
   const ids = Object.keys(overlays).sort()
@@ -67,7 +85,16 @@ export function SessionsView(props: ViewProps): React.ReactElement {
   }, [])
   const closeTrace = React.useCallback(() => {
     setTracing(null)
+    setTrace(null)
+    setTraceError(null)
   }, [])
+
+  /** Opening the dialog starts from the local overlay; a successful read replaces it. */
+  const openTrace = (sessionId: string): void => {
+    setTrace(null)
+    setTraceError(null)
+    setTracing(sessionId)
+  }
 
   const openCreate = (): void => {
     setTypedName('')
@@ -127,13 +154,19 @@ export function SessionsView(props: ViewProps): React.ReactElement {
     })
   }
 
-  /** session.lineage is read-only: it makes the host re-resolve the chain and refresh the mask. */
+  /** session.lineage is read-only; its answer is the chain and the mask unioned along it. */
   const confirmTrace = (): void => {
     if (tracing === null) return
     const sessionId = tracing.trim()
     if (sessionId === '') return
-    void run(OP_LINEAGE, payloadOf(sessionId)).then(ok => {
-      if (ok) setTracing(null)
+    void runDetailed(OP_LINEAGE, payloadOf(sessionId)).then(outcome => {
+      if (!outcome.ok) {
+        setTrace(null)
+        setTraceError(outcome.error ?? '')
+        return
+      }
+      setTrace(normalizeLineage(outcome.data))
+      setTraceError(null)
     })
   }
 
@@ -164,7 +197,7 @@ export function SessionsView(props: ViewProps): React.ReactElement {
         <Button
           variant="ghost"
           onClick={() => {
-            setTracing('')
+            openTrace('')
           }}
           label={traceLabel}
         >
@@ -206,7 +239,7 @@ export function SessionsView(props: ViewProps): React.ReactElement {
                   <Button
                     variant="ghost"
                     onClick={() => {
-                      setTracing(sessionId)
+                      openTrace(sessionId)
                     }}
                     label={`${traceLabel} ${sessionId}`}
                   >
@@ -350,6 +383,8 @@ export function SessionsView(props: ViewProps): React.ReactElement {
                 placeholder={idLabel}
                 aria-describedby="th-lineage-id-hint"
                 onChange={(event: React.ChangeEvent<HTMLInputElement>) => {
+                  setTrace(null)
+                  setTraceError(null)
                   setTracing(event.target.value)
                 }}
               />
@@ -357,16 +392,24 @@ export function SessionsView(props: ViewProps): React.ReactElement {
             <p className="th-field-hint">
               {label(lang, '宿主沿父链（最多 8 层）解析该会话的覆盖，并刷新工具面。', 'The host resolves this session over its parent chain (up to 8 levels) and refreshes the tool mask.')}
             </p>
-            {traceNames.length === 0 ? (
+            {traceError === null ? null : (
+              <p className="th-field-hint" role="alert">{label(lang, '读取血缘失败，下面只显示本会话自己的覆盖。', 'The lineage read failed; only this session’s own overlay is shown.')}</p>
+            )}
+            {trace !== null ? (
+              <div className="th-section" role="group" aria-label={t('sessions.lineageChain')}>
+                <div className="th-section-title">{t('sessions.lineageChain')}</div>
+                <span className="th-row-meta">{trace.lineage.map(id => <Badge key={id} tone="off">{id}</Badge>)}</span>
+                <div className="th-section-title">{t('sessions.lineageDeny')}</div>
+                {trace.deny.length === 0 ? (
+                  <p className="th-field-hint">{label(lang, '这条链上没有屏蔽任何 MCP 工具。', 'No MCP tool is masked along this chain.')}</p>
+                ) : (
+                  <span className="th-row-meta">{trace.deny.map(name => <Badge key={name} tone="off">{name}</Badge>)}</span>
+                )}
+              </div>
+            ) : traceNames.length === 0 ? (
               <p className="th-field-hint">{label(lang, '该会话没有自己的覆盖，只继承上游。', 'This session has no overlay of its own; it only inherits.')}</p>
             ) : (
-              <span className="th-row-meta">
-                {traceNames.map(name => (
-                  <Badge key={name} tone="off">
-                    {name}
-                  </Badge>
-                ))}
-              </span>
+              <span className="th-row-meta">{traceNames.map(name => <Badge key={name} tone="off">{name}</Badge>)}</span>
             )}
           </>
         )}

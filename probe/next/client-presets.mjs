@@ -18,7 +18,9 @@
  *   8. search filters by name, the mode select switches the apply mode;
  *   9. accessible names on every control, catalogs resolve every t() key;
  *  10. no literal colours, relative imports carry .js, file stays under 450 lines;
- *  11. the view reads the normalised snapshot (optional arrays, index fallback).
+ *  11. the view reads the normalised snapshot (optional arrays, index fallback);
+ *  12. apply is sent through runDetailed, the only caller that needs the host's answer;
+ *  13. a deferred tool dimension waits retryAfterMs and is retried exactly once, then reported.
  *
  * Every line is PASS or FAIL; exit 1 when any check fails.
  */
@@ -60,10 +62,11 @@ assert(existsSync(VIEW), `${rel(VIEW)} is missing`)
 const source = read(VIEW)
 const body = code(source)
 
-/** Balanced body of a top-level `const name = (…) => {…}` declaration. */
+/** Balanced body of a top-level `const name = (…)` or `function name(…)` declaration. */
 function functionBody(text, name) {
-  const at = text.indexOf(`const ${name} = (`)
-  assert(at !== -1, `${name} is not declared as a const arrow function`)
+  const arrow = text.indexOf(`const ${name} = (`)
+  const at = arrow !== -1 ? arrow : text.indexOf(`function ${name}(`)
+  assert(at !== -1, `${name} is not declared at the top level`)
   const open = text.indexOf('{', at)
   assert(open !== -1, `${name} has no body`)
   let depth = 0
@@ -150,22 +153,22 @@ check('required-ops', () => {
 
 check('op-payloads', () => {
   const wanted = [
-    ['run(OP.apply,', ['id', 'name', 'mode']],
-    ['run(OP.save,', ['id', 'name']],
-    ['run(OP.update,', ['id', 'name']],
-    ['run(OP.remove,', ['id', 'name']],
+    ['runDetailed(OP.apply,', 'apply', ['id', 'name', 'mode']],
+    ['run(OP.save,', 'save', ['id', 'name']],
+    ['run(OP.update,', 'update', ['id', 'name']],
+    ['run(OP.remove,', 'remove', ['id', 'name']],
   ]
-  for (const [marker, props] of wanted) {
+  for (const [marker, label, props] of wanted) {
     const payload = runPayload(body, marker)
     for (const prop of props) {
-      assert(hasProp(payload, prop), `${marker.slice(4, -1)} payload has no "${prop}"`)
+      assert(hasProp(payload, prop), `${label} payload has no "${prop}"`)
     }
   }
   return 'name + id on every op, mode on apply (src/domains/presets.ts reads them)'
 })
 
 check('action-apply-mode', () => {
-  const payload = runPayload(body, 'run(OP.apply,')
+  const payload = runPayload(body, 'runDetailed(OP.apply,')
   assert(hasProp(payload, 'mode'), 'apply does not send a mode')
   const domain = read(DOMAIN)
   assert(/export type PresetMode = 'exact' \| 'only-enable'/.test(domain),
@@ -195,14 +198,49 @@ check('empty-state', () => {
 })
 
 check('action-apply-button', () => {
-  assert(count(body, 'run(OP.apply,') === 1, `apply is sent from ${count(body, 'run(OP.apply,')} places`)
-  const applyAt = body.indexOf('run(OP.apply,')
+  assert(count(body, 'runDetailed(OP.apply,') === 1, `apply is sent from ${count(body, 'runDetailed(OP.apply,')} places`)
+  const applyAt = body.indexOf('runDetailed(OP.apply,')
   const firstDialog = body.indexOf('<Dialog')
-  assert(firstDialog !== -1 && applyAt < firstDialog, 'apply is not fired from the row list')
+  assert(firstDialog !== -1 && applyAt < firstDialog, 'apply is not sent from a handler defined above the dialogs')
   const row = body.slice(body.indexOf('rows.map('), firstDialog)
-  assert(row.includes('run(OP.apply,'), 'the row buttons do not include apply')
+  assert(row.includes('applyRow(name)'), 'the row buttons do not call applyRow')
+  assert(functionBody(body, 'applyRow').includes('runDetailed(OP.apply,'), 'applyRow does not send the apply')
   assert(body.includes('busy={busy === `${OP.apply}:${name}`}'), 'the apply button is not marked busy')
-  return 'one call site, from the row, with a busy key'
+  return 'one send site, reached from the row, with a busy key'
+})
+
+check('apply-via-rundetailed', () => {
+  assert(/const \{ snapshot, t, lang, busy, run, runDetailed \} = props/.test(body),
+    'the view does not take runDetailed from props')
+  assert(!body.includes('run(OP.apply,'), 'apply still goes through run, which drops the host answer')
+  assert(count(body, 'runDetailed(OP.apply,') === 1,
+    `runDetailed(OP.apply, …) appears ${count(body, 'runDetailed(OP.apply,')} times`)
+  assert(/import type \{[^}]*RunOutcome[^}]*\} from '\.\.\/types\.js'/.test(body), 'the view does not import RunOutcome')
+  assert(/runDetailed: RunDetailedOp/.test(read(join(ROOT, 'src', 'client', 'types.ts'))),
+    'ViewProps no longer declares runDetailed')
+  const shell = read(SHELL)
+  assert(/presets: <PresetsView[^>]*runDetailed=\{runDetailed\}/.test(shell),
+    'shell.tsx does not pass runDetailed to PresetsView')
+  return 'runDetailed(OP.apply, …) is the only apply path'
+})
+
+check('deferred-retry', () => {
+  const wait = functionBody(body, 'applyTwice')
+  assert(count(wait, 'send()') === 2, `applyTwice sends ${count(wait, 'send()')} times, expected exactly two`)
+  assert(wait.includes('setTimeout'), 'applyTwice does not wait before the retry')
+  assert(!/while\s*\(|for\s*\(/.test(wait), 'applyTwice loops; the retry must be capped at one')
+  assert(!/applyTwice\s*\(/.test(wait), 'applyTwice calls itself')
+  assert(/first\.ok/.test(wait), 'applyTwice retries even when the first apply failed')
+  const parse = functionBody(body, 'deferralOf')
+  assert(parse.includes("'deferred'"), 'deferralOf does not test decision === deferred')
+  assert(parse.includes('retryAfterMs'), 'deferralOf ignores retryAfterMs')
+  assert(/data as \{ tools\?: unknown \}/.test(parse), 'deferralOf does not read data.tools')
+  assert(body.includes('const RETRY_DEFAULT_MS = 1500'), 'the 1500 ms default for a missing retryAfterMs is gone')
+  assert(/if \(retried\) setDeferred\(true\)/.test(body), 'the spent retry is not reported')
+  assert(/setDeferred\(false\)/.test(functionBody(body, 'applyRow')), 'a new apply does not clear the previous deferral')
+  assert(body.includes("t('presets.deferred')"), 'the view does not show presets.deferred after the retry')
+  assert(/<Callout tone=.info.>\{t\(/.test(body), 'the deferral line is not an info Callout')
+  return 'deferred → wait retryAfterMs (default 1500) → one retry → reported, never looped'
 })
 
 check('action-filter', () => {

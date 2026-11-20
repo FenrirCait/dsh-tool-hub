@@ -154,7 +154,16 @@ export interface ConfirmRequest {
 }
 
 /** Sends one op and refreshes the snapshot on success; false means the op failed. */
+/** What a write returns when the caller needs the host's answer, not just success. */
+export interface RunOutcome {
+  ok: boolean
+  data?: unknown
+  error?: string
+}
+
 export type RunOp = (op: string, payload?: unknown) => Promise<boolean>
+
+export type RunDetailedOp = (op: string, payload?: unknown) => Promise<RunOutcome>
 
 /** Props every view receives from the shell. */
 export interface ViewProps {
@@ -163,5 +172,7 @@ export interface ViewProps {
   t: TFunction
   busy: string | null
   run: RunOp
+  /** Same write path, but keeps the host payload so a view can render it. */
+  runDetailed: RunDetailedOp
   reload: () => Promise<void>
 }

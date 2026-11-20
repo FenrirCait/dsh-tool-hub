@@ -12,7 +12,7 @@ import { Button, Callout, Loading } from './components.js'
 import { createT, detectLang, normalizeLang } from './i18n.js'
 import type { Lang } from './i18n.js'
 import { installStyles } from './theme.js'
-import type { HubSnapshot } from './types.js'
+import type { HubSnapshot, RunOutcome } from './types.js'
 import { McpView } from './views/mcp.js'
 import { PluginsView } from './views/plugins.js'
 import { ScenesView } from './views/scenes.js'
@@ -137,8 +137,8 @@ export function Shell(props: ShellProps): React.ReactElement {
     await load(true)
   }, [load])
 
-  const run = React.useCallback(
-    async (op: string, payload?: unknown): Promise<boolean> => {
+  const runDetailed = React.useCallback(
+    async (op: string, payload?: unknown): Promise<RunOutcome> => {
       const id =
         typeof payload === 'object' && payload !== null && 'id' in payload
           ? String((payload as { id: unknown }).id)
@@ -149,14 +149,19 @@ export function Shell(props: ShellProps): React.ReactElement {
       if (!result.ok) {
         setBusy(null)
         setNotice({ tone: 'error', text: t('error.unknown', { message: result.message }) })
-        return false
+        return { ok: false, error: result.message }
       }
       await load(true)
       setBusy(null)
       setNotice({ tone: 'done', text: t('notice.done') })
-      return true
+      return { ok: true, data: result.data }
     },
     [load, t],
+  )
+
+  const run = React.useCallback(
+    async (op: string, payload?: unknown): Promise<boolean> => (await runDetailed(op, payload)).ok,
+    [runDetailed],
   )
 
   const refresh = React.useCallback(() => {
@@ -192,17 +197,17 @@ export function Shell(props: ShellProps): React.ReactElement {
     snapshot === null
       ? { plugins: <div />, skills: <div />, mcp: <div />, tools: <div />, groups: <div />, presets: <div />, sessions: <div />, scenes: <div />, diagnostics: <div />, config: <div />, settings: <div /> }
       : {
-          plugins: <PluginsView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} reload={reload} />,
-          skills: <SkillsView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} reload={reload} />,
-          mcp: <McpView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} reload={reload} />,
-          tools: <ToolsView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} reload={reload} />,
-          groups: <GroupsView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} reload={reload} />,
-          presets: <PresetsView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} reload={reload} />,
-          sessions: <SessionsView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} reload={reload} />,
-          scenes: <ScenesView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} reload={reload} />,
-          diagnostics: <DiagnosticsView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} reload={reload} />,
-          config: <ConfigView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} reload={reload} />,
-          settings: <SettingsView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} reload={reload} />,
+          plugins: <PluginsView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} runDetailed={runDetailed} reload={reload} />,
+          skills: <SkillsView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} runDetailed={runDetailed} reload={reload} />,
+          mcp: <McpView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} runDetailed={runDetailed} reload={reload} />,
+          tools: <ToolsView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} runDetailed={runDetailed} reload={reload} />,
+          groups: <GroupsView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} runDetailed={runDetailed} reload={reload} />,
+          presets: <PresetsView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} runDetailed={runDetailed} reload={reload} />,
+          sessions: <SessionsView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} runDetailed={runDetailed} reload={reload} />,
+          scenes: <ScenesView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} runDetailed={runDetailed} reload={reload} />,
+          diagnostics: <DiagnosticsView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} runDetailed={runDetailed} reload={reload} />,
+          config: <ConfigView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} runDetailed={runDetailed} reload={reload} />,
+          settings: <SettingsView snapshot={snapshot} lang={effectiveLang} t={t} busy={busy} run={run} runDetailed={runDetailed} reload={reload} />,
         }
 
   const statusLine =

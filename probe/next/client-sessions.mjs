@@ -13,13 +13,19 @@
  *   7. colour comes from th-* class names only, never a literal or an inline style;
  *   8. the file stays inside the size budget;
  *   9. one check per interactive action: filter, create, edit, toggle, add, save, trace, cancel;
- *  10. every t('...') resolves in both catalogs; imports, markup and the shell mount stay clean.
+ *  10. every t('...') resolves in both catalogs; imports, markup and the shell mount stay clean;
+ *  11. session.lineage goes through runDetailed and its answer (data.lineage, data.deny) is
+ *      rendered under sessions.lineageChain / sessions.lineageDeny, with the local overlay as
+ *      the fallback when the read fails;
+ *  12. the normalizer is executed, not just grepped: junk entries dropped, chain-less replies
+ *      fall back, and the host's object is never mutated.
  *
  * No third-party libraries. Every line is PASS or FAIL; exit 1 when any check fails.
  */
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { build } from 'esbuild'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const CLIENT = join(ROOT, 'src', 'client')
@@ -153,16 +159,17 @@ check('export-view', () => {
 })
 
 check('ops-wired', () => {
-  for (const pair of [['OP_SET', 'session.set'], ['OP_CLEAR', 'session.clear'], ['OP_LINEAGE', 'session.lineage']]) {
+  for (const pair of [['OP_SET', 'session.set', 'run'], ['OP_CLEAR', 'session.clear', 'run'], ['OP_LINEAGE', 'session.lineage', 'runDetailed']]) {
     const name = pair[0]
     const op = pair[1]
+    const send = pair[2]
     const quoted = "'" + op + "'"
     const declared = numberOf(quoted)
     assert(declared === 1, op + ' must be declared once as ' + quoted + ', found ' + declared)
     assert(source.includes('const ' + name + ' = ' + quoted), name + ' must carry ' + op)
-    assert(numberOf('run(' + name + ',') === 1, op + ' must be sent from exactly one run(' + name + ', ...) call')
+    assert(numberOf(send + '(' + name + ',') === 1, op + ' must be sent from exactly one ' + send + '(' + name + ', ...) call')
   }
-  return 'session.set / session.clear / session.lineage, one call each'
+  return 'session.set / session.clear via run; session.lineage via runDetailed'
 })
 
 check('payload-contract', () => {
@@ -170,7 +177,7 @@ check('payload-contract', () => {
   assert(source.includes('return { id: sessionId, sessionId }'), 'the payload carries sessionId (domain contract) and id (shell busy key)')
   assert(source.includes('void run(OP_SET, { ...payloadOf(sessionId), names: draft.names })'), 'session.set must send sessionId plus names')
   assert(source.includes('void run(OP_CLEAR, payloadOf(sessionId))'), 'session.clear must send only sessionId')
-  assert(source.includes('void run(OP_LINEAGE, payloadOf(sessionId))'), 'session.lineage must send only sessionId')
+  assert(source.includes('void runDetailed(OP_LINEAGE, payloadOf(sessionId))'), 'session.lineage must send only sessionId and keep its answer')
   assert(!body.includes('run(OP_CLEAR, { names'), 'session.clear must not carry a names list')
   return 'set{sessionId,names}, clear{sessionId}, lineage{sessionId}'
 })
@@ -310,11 +317,31 @@ check('action-save', () => {
 
 check('action-trace', () => {
   assert(source.includes('const confirmTrace = (): void => {'), 'tracing needs its own action')
-  assert(source.includes('void run(OP_LINEAGE, payloadOf(sessionId))'), 'tracing must send session.lineage')
-  assert(source.includes('setTracing(sessionId)'), 'the row must open the trace dialog for its id')
-  assert(source.includes("setTracing('')"), 'the toolbar must offer a trace for any session id')
+  assert(source.includes('void runDetailed(OP_LINEAGE, payloadOf(sessionId))'), 'tracing must send session.lineage and keep the host answer')
+  assert(source.includes('const openTrace = (sessionId: string): void => {'), 'opening the dialog resets the previous answer')
+  assert(source.includes('openTrace(sessionId)'), 'the row must open the trace dialog for its id')
+  assert(source.includes("openTrace('')"), 'the toolbar must offer a trace for any session id')
   assert(source.includes('const traceNames = tracing === null ? [] : namesOf(overlays, tracing.trim())'), 'the dialog shows the local overlay before tracing')
-  return 'row and toolbar open the trace dialog; one session.lineage call'
+  return 'row and toolbar open the trace dialog; one runDetailed read'
+})
+
+check('lineage-answer-rendered', () => {
+  assert(source.includes('setTrace(normalizeLineage(outcome.data))'), 'the dialog must render the host answer, not guess it')
+  assert(source.includes('{trace.lineage.map(id => <Badge key={id} tone="off">{id}</Badge>)}'), 'every hop of the chain must render')
+  assert(source.includes('{trace.deny.map(name => <Badge key={name} tone="off">{name}</Badge>)}'), 'every merged mask must render')
+  assert(source.includes("aria-label={t('sessions.lineageChain')}"), 'the chain block needs an accessible name')
+  assert(source.includes("t('sessions.lineageChain')") && source.includes("t('sessions.lineageDeny')"), 'both labels must be visible titles')
+  assert(source.includes("t('sessions.lineageDeny')"), 'the merged masks must be labelled')
+  return 'data.lineage -> sessions.lineageChain, data.deny -> sessions.lineageDeny'
+})
+
+check('lineage-fallback-local', () => {
+  assert(source.includes('if (!outcome.ok) {'), 'a failed read must be recognised')
+  assert(source.includes('setTrace(null)') && source.includes("setTraceError(outcome.error ?? '')"), 'a failed read drops the answer and remembers why')
+  assert(source.includes('const traceNames = tracing === null ? [] : namesOf(overlays, tracing.trim())'), 'the local overlay stays available')
+  assert(source.includes('{traceNames.map(name => <Badge key={name} tone="off">{name}</Badge>)}'), 'the fallback still paints the local masks')
+  assert(source.includes('traceError === null ? null :'), 'the failure is shown without hiding the fallback')
+  return 'failed read -> local overlay, no stale answer'
 })
 
 check('action-cancel', () => {
@@ -336,7 +363,7 @@ check('i18n-keys-exist', () => {
   for (const key of en) assert(zh.has(key), 'zh is missing "' + key + '"')
   const used = keysUsed(body)
   for (const key of used) assert(zh.has(key), "the view calls t('" + key + "') which no catalog defines")
-  const required = ['sessions.title', 'sessions.empty', 'sessions.search', 'sessions.count', 'sessions.overlay', 'sessions.workspace', 'sessions.clear', 'sessions.hint', 'action.create', 'action.edit', 'action.save', 'action.cancel', 'action.confirm', 'action.clear', 'a11y.switch', 'dialog.confirmTitle']
+  const required = ['sessions.title', 'sessions.empty', 'sessions.search', 'sessions.count', 'sessions.overlay', 'sessions.workspace', 'sessions.clear', 'sessions.hint', 'sessions.lineageChain', 'sessions.lineageDeny', 'action.create', 'action.edit', 'action.save', 'action.cancel', 'action.confirm', 'action.clear', 'a11y.switch', 'dialog.confirmTitle']
   for (const key of required) assert(used.has(key), "the view never calls t('" + key + "')")
   return zh.size + ' keys aligned, ' + used.size + ' used by the view'
 })
@@ -373,9 +400,52 @@ check('view-mounted', () => {
   assert(shell.includes("import { SessionsView } from './views/sessions.js'"), 'the shell must import this view')
   assert(shell.split('<SessionsView ').length - 1 === 1, 'the shell must mount the view once')
   // Views get the effective language, so a forced zh/en in Settings reaches inline labels.
-  assert(/<SessionsView snapshot=\{snapshot\} lang=\{effectiveLang\} t=\{t\} busy=\{busy\} run=\{run\} reload=\{reload\} \/>/.test(shell), 'the shell must pass every ViewProps with the effective language')
+  assert(/<SessionsView snapshot=\{snapshot\} lang=\{effectiveLang\} t=\{t\} busy=\{busy\} run=\{run\} runDetailed=\{runDetailed\} reload=\{reload\} \/>/.test(shell), 'the shell must pass every ViewProps with the effective language and runDetailed')
   assert(shell.includes("{ id: 'sessions', label: 'nav.sessions' }"), 'the sidebar keeps one sessions entry')
   return 'one import, one mount, all props'
+})
+
+// -- runtime: the exported lineage helper, bundled and executed ---------------
+
+let lineageApi = null
+try {
+  const openMarker = '// #region lineage-helpers'
+  const closeMarker = '// #endregion lineage-helpers'
+  const regionStart = source.indexOf(openMarker)
+  const regionEnd = source.indexOf(closeMarker)
+  assert(regionStart !== -1 && regionEnd > regionStart, 'sessions.tsx lost its lineage-helpers region')
+  const region = stripComments(source.slice(regionStart + openMarker.length, regionEnd))
+  const bundled = await build({
+    stdin: { contents: region, loader: 'ts', resolveDir: ROOT, sourcefile: 'sessions-helpers.ts' },
+    bundle: true,
+    write: false,
+    format: 'esm',
+    platform: 'neutral',
+    target: 'es2022',
+    logLevel: 'silent',
+  })
+  const text = bundled.outputFiles?.[0]?.text ?? ''
+  assert(text !== '', 'esbuild produced no bundle for the lineage helper')
+  lineageApi = await import('data:text/javascript;base64,' + Buffer.from(text, 'utf8').toString('base64'))
+} catch (error) {
+  failures.push('lineage-helpers-bundle')
+  console.log('FAIL lineage-helpers-bundle -- ' + (error instanceof Error ? error.message : String(error)))
+}
+
+check('runtime-lineage-normalizer', () => {
+  assert(lineageApi !== null, 'the lineage helper did not compile')
+  const mod = lineageApi
+  assert(mod.normalizeLineage(null) === null, 'null must fall back to the local copy')
+  assert(mod.normalizeLineage({}) === null, 'a chain-less answer must fall back')
+  assert(mod.normalizeLineage({ lineage: [] }) === null, 'an empty chain must fall back')
+  const shaped = mod.normalizeLineage({ lineage: ['s1', 7, 's2'], deny: ['mcp__a__x', null] })
+  assert(JSON.stringify(shaped) === JSON.stringify({ lineage: ['s1', 's2'], deny: ['mcp__a__x'] }), 'junk entries must be dropped, got ' + JSON.stringify(shaped))
+  const missingDeny = mod.normalizeLineage({ lineage: ['s1'] })
+  assert(JSON.stringify(missingDeny) === JSON.stringify({ lineage: ['s1'], deny: [] }), 'a missing deny list is empty, got ' + JSON.stringify(missingDeny))
+  const before = { lineage: ['s1'], deny: ['n'] }
+  mod.normalizeLineage(before)
+  assert(JSON.stringify(before) === JSON.stringify({ lineage: ['s1'], deny: ['n'] }), 'the host answer must not be mutated')
+  return 'null/empty fall back; junk dropped; input untouched'
 })
 
 const bundle = join(ROOT, 'dist', 'client.js')

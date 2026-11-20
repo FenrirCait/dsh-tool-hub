@@ -64,6 +64,17 @@ export function selectionAfter(ok: boolean, current: string[]): string[] {
 export function selectableIds(rows: PluginRow[]): string[] {
   return rows.filter(row => row.manageable !== false).map(row => row.id)
 }
+
+/** The host's bulk answer: rows changed, bundled-UI entries skipped, and whether the cap cut it. */
+export type BulkResult = { changed: number; skipped: number; truncated: boolean }
+
+/** bulk's data made total: a host without counts still renders a report instead of a blank line. */
+export function normalizeBulk(raw: unknown): BulkResult | null {
+  const record = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : null
+  if (record === null) return null
+  const count = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0)
+  return { changed: count(record.changed), skipped: count(record.skippedBuiltin), truncated: record.truncated === true }
+}
 // #endregion bulk-helpers
 
 // #region third-helpers
@@ -112,7 +123,7 @@ export function rollbackCount(snapshot: ThirdSnapshot | null): number {
 // #endregion third-helpers
 
 export function PluginsView(props: ViewProps): React.ReactElement {
-  const { snapshot, lang, t, busy, run } = props
+  const { snapshot, lang, t, busy, run, runDetailed } = props
   const [query, setQuery] = React.useState('')
   const [selected, setSelected] = React.useState<string[]>([])
   const [confirming, setConfirming] = React.useState<boolean | null>(null)
@@ -121,6 +132,7 @@ export function PluginsView(props: ViewProps): React.ReactElement {
   const [thirdConfirm, setThirdConfirm] = React.useState(false)
   const [thirdNotice, setThirdNotice] = React.useState('')
   const [thirdReading, setThirdReading] = React.useState(false)
+  const [bulkReport, setBulkReport] = React.useState<BulkResult | null>(null)
 
   const term = query.trim().toLowerCase()
   const rows = snapshot.plugins.filter(row => {
@@ -143,12 +155,15 @@ export function PluginsView(props: ViewProps): React.ReactElement {
     (enabled: boolean): void => {
       const ids = picked
       if (ids.length === 0 || ids.length > cap) return
-      void run(OPS.bulk, { items: bulkItems(ids), enabled }).then(ok => {
-        setSelected(current => selectionAfter(ok, current))
-        if (ok) setConfirming(null)
+      setBulkReport(null)
+      void runDetailed(OPS.bulk, { items: bulkItems(ids), enabled }).then(outcome => {
+        setSelected(current => selectionAfter(outcome.ok, current))
+        if (!outcome.ok) return
+        setConfirming(null)
+        setBulkReport(normalizeBulk(outcome.data))
       })
     },
-    [picked, cap, run],
+    [picked, cap, runDetailed],
   )
 
   const ask = React.useCallback(
@@ -285,6 +300,11 @@ export function PluginsView(props: ViewProps): React.ReactElement {
           <Badge tone="warn">{zh ? `一批最多 ${cap} 个；请减少选择。` : `At most ${cap} per batch; pick fewer rows.`}</Badge>
         </div>
       ) : null}
+      {bulkReport === null ? null : (
+        <div className="th-field-hint" role="status">
+          {t('plugins.bulkDone', { changed: bulkReport.changed, skipped: bulkReport.skipped, truncated: bulkReport.truncated ? (zh ? '是' : 'yes') : (zh ? '否' : 'no') })}
+        </div>
+      )}
       {rows.length === 0 ? (
         <Empty title={t('plugins.emptyFiltered', { query })} />
       ) : (

@@ -6,10 +6,12 @@
  * the exported name the shell imports, the single-row switch and the search box that shipped
  * before this task, the bulk op with the host's exact payload ({ items: [{ kind, id }], enabled }),
  * the 1.x "confirm past 20" rule, the snapshot's batch cap, accessible names on both checkboxes,
- * tokens instead of colours, and the existing empty states. The runtime half cuts the exported
- * helper region out of the same file, bundles it with the project's own esbuild and imports it —
- * so the payload builder, the confirmation line, the selection set and the post-failure rule are
- * executed, not just grepped.
+ * tokens instead of colours, and the existing empty states. It also pins the result path: the
+ * batch reads the host answer through runDetailed and reports it with plugins.bulkDone
+ * ({changed} / {skipped} / {truncated}). The runtime half cuts the exported helper region out of
+ * the same file, bundles it with the project's own esbuild and imports it — so the payload
+ * builder, the confirmation line, the selection set, the post-failure rule and the answer
+ * normalizer are executed, not just grepped.
  *
  * The payload and the threshold are not taste: they are src/domains/plugins.ts (bulk items/enabled,
  * MAX_BULK 400, "the panel confirms past 20"). A view that sent { ids } or confirmed at 20 would
@@ -95,10 +97,10 @@ check('source-and-export', () => {
 })
 
 check('view-props', () => {
-  assert(/const \{ snapshot, lang, t, busy, run \} = props/.test(body),
-    'the view must read snapshot, lang, t, busy and run off ViewProps')
+  assert(/const \{ snapshot, lang, t, busy, run, runDetailed \} = props/.test(body),
+    'the view must read snapshot, lang, t, busy, run and runDetailed off ViewProps')
   assert(/snapshot\.plugins/.test(body), 'plugins must come from the snapshot, not a local fetch')
-  return 'snapshot, lang, t, busy, run'
+  return 'snapshot, lang, t, busy, run, runDetailed'
 })
 
 check('existing-single-switch-kept', () => {
@@ -122,8 +124,8 @@ check('existing-search-and-states-kept', () => {
 })
 
 check('bulk-op-and-payload', () => {
-  assert(/run\(OPS\.bulk, \{ items: bulkItems\(ids\), enabled \}\)/.test(body),
-    'the batch must go through run(OPS.bulk, { items: bulkItems(ids), enabled })')
+  assert(/runDetailed\(OPS\.bulk, \{ items: bulkItems\(ids\), enabled \}\)/.test(body),
+    'the batch must go through runDetailed(OPS.bulk, { items: bulkItems(ids), enabled }) to keep the host counts')
   assert(/bulkItems\(ids\)/.test(commitBlock), 'the payload is built by bulkItems, not inline literals')
   assert(/if \(ids\.length === 0 \|\| ids\.length > cap\) return/.test(commitBlock),
     'an empty or over-cap batch must not be sent')
@@ -172,11 +174,35 @@ check('accessible-labels', () => {
 })
 
 check('selection-clears-on-success', () => {
-  assert(/\.then\(ok => \{/.test(committed), 'the batch must inspect its result')
-  assert(/setSelected\(current => selectionAfter\(ok, current\)\)/.test(committed),
+  assert(/\.then\(outcome => \{/.test(committed), 'the batch must inspect its result')
+  assert(/setSelected\(current => selectionAfter\(outcome\.ok, current\)\)/.test(committed),
     'a failed batch must keep the selection for a retry')
-  assert(/if \(ok\) setConfirming\(null\)/.test(committed), 'the dialog closes only after a successful batch')
-  return 'selectionAfter(ok): clear on success, keep on failure'
+  assert(/if \(!outcome\.ok\) return/.test(committed), 'a failed batch stops before closing the dialog')
+  assert(/setConfirming\(null\)/.test(committed), 'the dialog closes only after a successful batch')
+  return 'selectionAfter(outcome.ok): clear on success, keep on failure'
+})
+
+check('detailed-write-path', () => {
+  const detailed = [...body.matchAll(/\brunDetailed\(OPS\.([A-Za-z0-9_]+)/g)].map(match => match[1])
+  assert(detailed.length === 1 && detailed[0] === 'bulk', 'only the batch needs the host answer, found ' + detailed.join(', '))
+  assert(/runDetailed\(OPS\.bulk, \{ items: bulkItems\(ids\), enabled \}\)/.test(commitBlock),
+    'the batch payload is unchanged; only the call keeps its answer')
+  assert(!/\brun\(OPS\.bulk/.test(body), 'the batch must not fall back to run(), which drops the counts')
+  return 'bulk -> runDetailed; toggle and third-party stay on run'
+})
+
+check('bulk-result-surfaced', () => {
+  assert(/setBulkReport\(null\)/.test(commitBlock), 'a new batch clears the previous report')
+  assert(/setBulkReport\(normalizeBulk\(outcome\.data\)\)/.test(commitBlock),
+    'the batch must keep the host answer for display')
+  assert(/t\('plugins\.bulkDone', \{/.test(body), 'the summary must use the shared plugins.bulkDone copy')
+  for (const key of ['changed: bulkReport.changed', 'skipped: bulkReport.skipped', 'truncated: bulkReport.truncated ?']) {
+    assert(body.includes(key), 'the summary must pass ' + key)
+  }
+  assert(/role="status"/.test(body), 'the summary must be announced as a status line')
+  assert(/truncated: bulkReport\.truncated \? \(zh \? '是' : 'yes'\) : \(zh \? '否' : 'no'\)/.test(body),
+    'truncated is a boolean; the copy takes a word')
+  return 'plugins.bulkDone with changed / skipped / truncated'
 })
 
 check('no-literal-colours', () => {
@@ -366,6 +392,25 @@ check('runtime-selection-after', () => {
   assert(JSON.stringify(mod.selectionAfter(false, picked)) === '["a","b"]', 'a failed batch keeps it for retry')
   assert(mod.selectionAfter(false, picked) === picked, 'the failed path returns the same selection')
   return 'clear on ok, keep on fail'
+})
+
+check('runtime-normalize-bulk', () => {
+  const mod = need()
+  assert(mod.normalizeBulk(null) === null, 'a null answer must not report anything')
+  assert(mod.normalizeBulk('nope') === null, 'a non-object answer must not report anything')
+  const full = { changed: 3, skippedBuiltin: 2, truncated: true, results: [] }
+  assert(JSON.stringify(mod.normalizeBulk(full)) === JSON.stringify({ changed: 3, skipped: 2, truncated: true }),
+    'the host answer must map to changed / skippedBuiltin -> skipped / truncated, got ' + JSON.stringify(mod.normalizeBulk(full)))
+  const partial = mod.normalizeBulk({})
+  assert(JSON.stringify(partial) === JSON.stringify({ changed: 0, skipped: 0, truncated: false }),
+    'an answer without counts reports zeros, got ' + JSON.stringify(partial))
+  const junk = mod.normalizeBulk({ changed: 'many', skippedBuiltin: null, truncated: 'yes' })
+  assert(JSON.stringify(junk) === JSON.stringify({ changed: 0, skipped: 0, truncated: false }),
+    'non-numbers and non-true flags must not leak into the copy, got ' + JSON.stringify(junk))
+  const before = JSON.stringify(full)
+  mod.normalizeBulk(full)
+  assert(JSON.stringify(full) === before, 'the host answer must not be mutated')
+  return 'null/partial/junk answers become a safe report'
 })
 
 check('runtime-selectable-ids', () => {

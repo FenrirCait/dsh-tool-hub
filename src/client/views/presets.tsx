@@ -9,10 +9,16 @@
  * Applying is reversible (apply another preset, or flip the switches back), so it fires straight
  * from the row. Overwriting disposes of a saved snapshot and deleting removes the preset; both
  * open a Dialog first, and that dialog names the preset it is about to touch.
+ *
+ * Apply goes through runDetailed, not run: preset.apply can answer that the tool dimension is
+ * deferred — the servers it just switched on have not registered yet, so there is no live list
+ * to complement against and the domain schedules no timer. The row then re-applies exactly once
+ * after the delay the host asked for, and the line under the toolbar says so; a second deferral
+ * is reported, never chased.
  */
 import * as React from 'react'
-import { Badge, Button, Card, Dialog, Empty, Field, SearchBox, Select } from '../components.js'
-import type { PresetRow, ViewProps } from '../types.js'
+import { Badge, Button, Callout, Card, Dialog, Empty, Field, SearchBox, Select } from '../components.js'
+import type { PresetRow, RunOutcome, ViewProps } from '../types.js'
 
 /** The ops this view sends; api.ts's OPS table covers toggles, scenes and doctor only. */
 const OP = {
@@ -61,13 +67,57 @@ function composition(row: PresetRow, lang: ViewProps['lang']): string {
   return `${noun.plugin} ${plugin} · ${noun.skill} ${skill} · ${noun.tool} ${tool}`
 }
 
+/** The domain's fallback delay when a deferral arrives without one (src/domains/presets.ts). */
+const RETRY_DEFAULT_MS = 1500
+
+/** Past this a deferral is not worth holding the row busy for; one retry covers the usual case. */
+const RETRY_MAX_MS = 5000
+
+/**
+ * How long preset.apply asked to wait before re-applying, or null when it did not defer.
+ * The handler answers `{ tools: { decision: 'deferred', wanted, retryAfterMs } }` when the
+ * servers the apply just switched on have not registered yet: there is nothing to complement
+ * against, and the domain deliberately schedules no timer, leaving the re-apply to the caller.
+ */
+function deferralOf(data: unknown): number | null {
+  if (typeof data !== 'object' || data === null) return null
+  const tools = (data as { tools?: unknown }).tools
+  if (typeof tools !== 'object' || tools === null) return null
+  const report = tools as { decision?: unknown, retryAfterMs?: unknown }
+  if (report.decision !== 'deferred') return null
+  const reported =
+    typeof report.retryAfterMs === 'number' && Number.isFinite(report.retryAfterMs) && report.retryAfterMs > 0
+      ? report.retryAfterMs
+      : RETRY_DEFAULT_MS
+  return Math.min(reported, RETRY_MAX_MS)
+}
+
+/**
+ * Sends one apply and, when the domain deferred its tool dimension, exactly one more after the
+ * delay it asked for. True means the retry was spent. Two sends and no loop: a second deferral
+ * is reported to the user instead of chasing registration that never happened.
+ */
+async function applyTwice(send: () => Promise<RunOutcome>): Promise<boolean> {
+  const first = await send()
+  if (!first.ok) return false
+  const delay = deferralOf(first.data)
+  if (delay === null) return false
+  await new Promise<void>(resolve => {
+    setTimeout(resolve, delay)
+  })
+  await send()
+  return true
+}
+
 export function PresetsView(props: ViewProps): React.ReactElement {
-  const { snapshot, t, lang, busy, run } = props
+  const { snapshot, t, lang, busy, run, runDetailed } = props
   const [query, setQuery] = React.useState('')
   const [mode, setMode] = React.useState<Mode>('exact')
   // null means the save dialog is closed; a string is the name being typed.
   const [draft, setDraft] = React.useState<string | null>(null)
   const [pending, setPending] = React.useState<Pending | null>(null)
+  // True once an apply deferred its tool dimension and the one retry was spent.
+  const [deferred, setDeferred] = React.useState(false)
   const modeId = useLocalId('th-presets-mode')
   const nameId = useLocalId('th-presets-name')
 
@@ -101,6 +151,15 @@ export function PresetsView(props: ViewProps): React.ReactElement {
   const confirmDelete = (name: string): void => {
     setPending(null)
     void run(OP.remove, { id: name, name })
+  }
+
+  // The one place preset.apply is sent. Both calls carry the same id, so the shell's `op:id`
+  // busy key marks the row for each send; between them the wait runs with no op in flight.
+  const applyRow = (name: string): void => {
+    setDeferred(false)
+    void applyTwice(() => runDetailed(OP.apply, { id: name, name, mode })).then(retried => {
+      if (retried) setDeferred(true)
+    })
   }
 
   return (
@@ -145,6 +204,8 @@ export function PresetsView(props: ViewProps): React.ReactElement {
         </Button>
       </div>
 
+      {deferred ? <Callout tone="info">{t('presets.deferred')}</Callout> : null}
+
       {names.length === 0 ? (
         <Empty title={t('presets.empty')} hint={t('presets.create')} />
       ) : rows.length === 0 ? (
@@ -168,7 +229,7 @@ export function PresetsView(props: ViewProps): React.ReactElement {
                     busy={busy === `${OP.apply}:${name}`}
                     label={t('presets.apply') + ': ' + name}
                     onClick={() => {
-                      void run(OP.apply, { id: name, name, mode })
+                      applyRow(name)
                     }}
                   >
                     {t('presets.apply')}
