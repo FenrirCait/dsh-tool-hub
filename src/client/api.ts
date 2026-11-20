@@ -5,7 +5,7 @@
  * value ({ ok: false, code, message }), never as a rejection, so a view can render an error
  * banner instead of relying on a catch somewhere up the tree.
  */
-import type { CollectionRow, GroupRow, HubSnapshot, PluginRow, PresetRow, SceneState, SecretKeys, SkillRootInfo, SkillRow, ToolRow } from './types.js'
+import type { CollectionRow, GroupRow, HistoryEntry, HubSnapshot, PluginRow, PresetRow, SceneState, SecretKeys, SkillRootInfo, SkillRow, ToolRow } from './types.js'
 import type { SettingsField } from '../shared/types.js'
 
 /** Op ids the panel sends. Kept in one table: a host rename is a one-line change here. */
@@ -221,6 +221,18 @@ function groupOf(row: Record<string, unknown>): GroupRow | null {
   }
 }
 
+function historyOf(row: Record<string, unknown>): HistoryEntry | null {
+  const op = asString(row.op)
+  if (op === '') return null
+  return {
+    at: asString(row.at),
+    op,
+    detail: asString(row.detail),
+    ok: asBoolean(row.ok),
+    audit: asBoolean(row.audit),
+  }
+}
+
 function collectionOf(row: Record<string, unknown>): CollectionRow | null {
   const id = asString(row.id)
   if (id === '') return null
@@ -324,6 +336,7 @@ export function normalizeSnapshot(raw: unknown): HubSnapshot {
       skills: asRows(paths.skills, rootOf),
     },
     settings: asRecord(record.settings) as Record<string, unknown>,
+    history: asRows(record.history, historyOf),
     settingsSchema: settingsFieldsOf(record.settingsSchema),
     mcpError: asStringOrNull(record.mcpError),
     limits: typeof limits.bulk === 'number' ? { bulk: limits.bulk } : null,

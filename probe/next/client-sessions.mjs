@@ -372,7 +372,8 @@ check('view-mounted', () => {
   const shell = readFileSync(SHELL, 'utf8')
   assert(shell.includes("import { SessionsView } from './views/sessions.js'"), 'the shell must import this view')
   assert(shell.split('<SessionsView ').length - 1 === 1, 'the shell must mount the view once')
-  assert(shell.includes('<SessionsView snapshot={snapshot} lang={lang} t={t} busy={busy} run={run} reload={reload} />'), 'the shell must pass every ViewProps')
+  // Views get the effective language, so a forced zh/en in Settings reaches inline labels.
+  assert(/<SessionsView snapshot=\{snapshot\} lang=\{effectiveLang\} t=\{t\} busy=\{busy\} run=\{run\} reload=\{reload\} \/>/.test(shell), 'the shell must pass every ViewProps with the effective language')
   assert(shell.includes("{ id: 'sessions', label: 'nav.sessions' }"), 'the sidebar keeps one sessions entry')
   return 'one import, one mount, all props'
 })

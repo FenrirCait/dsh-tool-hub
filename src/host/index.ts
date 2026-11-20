@@ -2,6 +2,7 @@ import { Registry } from '../core/registry.js'
 import { loadState, stateDir } from '../core/io.js'
 import { applySettingsDefaults, normalizeSettings } from '../core/settings.js'
 import { registerAll } from '../domains/index.js'
+import { createCatalogTool } from './catalog-tool.js'
 import type { DomainRegistration, HostEnv } from '../shared/contract.js'
 import type { HubContext } from '../shared/types.js'
 import { Dispatcher, failureOf } from './dispatch.js'
@@ -92,6 +93,29 @@ async function start(ctx: HubContext): Promise<Started> {
   }
   registry.register(core.module)
   dispatcher.bind(core)
+
+  // The catalog tool is the model's only door into a lazily hidden server; 1.x registered it
+  // here and the doctor check 'hub-tools' fails without it.
+  try {
+    // HubContext is the narrow shape the domains see; cordis scopes carry inject at runtime.
+    const inject = (ctx as unknown as {
+      inject?: (services: string[], callback: (scope: unknown) => void, label?: string) => void
+    }).inject
+    inject?.(['tools'], (scope: unknown) => {
+      const hostCtx = scope as { tools?: { register?: (definition: unknown) => void }; get?: (name: string) => unknown }
+      const tools = hostCtx.tools ?? hostCtx.get?.('tools') as { register?: (definition: unknown) => void } | undefined
+      if (tools?.register === undefined) return
+      try {
+        tools.register(createCatalogTool(dispatcher))
+      }
+      catch (error) {
+        logTo(ctx)('warn', '[tool-hub] hub_tools unavailable: ' + String((error as Error)?.message ?? error))
+      }
+    }, 'tool-hub: hub_tools')
+  }
+  catch (error) {
+    logTo(ctx)('warn', '[tool-hub] tools service unavailable: ' + String((error as Error)?.message ?? error))
+  }
 
   const modules = registry.list()
   state.settings = normalizeSettings(applySettingsDefaults(state.settings, modules), modules)

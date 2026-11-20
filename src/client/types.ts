@@ -84,6 +84,14 @@ export interface PresetRow {
   tool?: string[]
 }
 
+export interface HistoryEntry {
+  at: string
+  op: string
+  detail: string
+  ok: boolean
+  audit: boolean
+}
+
 export interface SceneState {
   mode: string | null
   since: number | null
@@ -131,6 +139,8 @@ export interface HubSnapshot {
   settings: Record<string, unknown>
   /** The declarations the Settings page renders; empty when the host is too old to send them. */
   settingsSchema: SettingsField[]
+  /** Newest-first audit lines from the host dispatcher. */
+  history: HistoryEntry[]
   /** When this copy was read, used by the topbar to show staleness. */
   fetchedAt: number
 }
