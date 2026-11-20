@@ -86,13 +86,16 @@ check('component-exports', () => {
 check('entry-contract', () => {
   const source = byName('entry.tsx')
   assert(/export const NS = 'tool-hub'/.test(source), "entry.tsx must export NS = 'tool-hub'")
-  assert(/export function inject\(\)/.test(source), 'entry.tsx must export inject()')
+  // The host reads inject as an array; exporting a function silently skips apply().
+  assert(/export const inject = \['slots', 'locale'\]/.test(source), "entry.tsx must export inject as ['slots', 'locale']")
   assert(/export function apply\(ctx/.test(source), 'entry.tsx must export apply(ctx)')
   assert(/id: NS\b/.test(source), 'the slot registration must use the shared NS as its id')
   const table = /const SURFACES: SurfaceSpec\[\] = \[([\s\S]*?)\]/.exec(source)
   assert(table !== null, 'entry.tsx has no SURFACES table')
   const slots = [...(table[1] ?? '').matchAll(/slot: '([^']+)'/g)].map(match => match[1])
   assert(slots.length === 3, `entry.tsx registers ${slots.length} slots, expected 3`)
+  // The `main` slot is keyed: registering it without options.key throws at apply time.
+  assert(/slot: 'main'[^}]*key: NS/.test(source), 'the main surface must pass key: NS')
   return `NS + inject + apply, ${slots.join(' / ')}`
 })
 
@@ -279,6 +282,8 @@ check('bundle-single-loader', () => {
   for (const pattern of ['innerHTML', 'dangerouslySetInnerHTML']) {
     assert(text.indexOf(pattern) === -1, `dist/client.js contains ${pattern}`)
   }
+  // The host reads `inject` as a dependency array; a function here silently skips apply().
+  assert(/var inject = \["slots", "locale"\]/.test(text), 'bundle must export inject as an array')
   return `dist/client.js ${text.length} bytes, one loader entry`
 })
 

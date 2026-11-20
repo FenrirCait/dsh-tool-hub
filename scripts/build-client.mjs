@@ -26,8 +26,10 @@ await build({
   jsxFragment: 'React.Fragment',
   target: 'es2022',
   legalComments: 'none',
-  banner: { js: 'window.__ModuleLoader__.load({ id: "dsh-tool-hub", factory: (require) => {' },
-  footer: { js: 'return __toolHubClient; } });' },
+  banner: { js: "window.__ModuleLoader__.load({ id: \"dsh-tool-hub\", factory: (require) => {" },
+  // A plain object, not esbuild's __toCommonJS namespace: the host's import shim treats an
+  // `__esModule: true` face as ESM and would read `.default` (undefined) instead of apply.
+  footer: { js: 'const __m = __toolHubClient; return { NS: __m.NS, inject: __m.inject, apply: __m.apply }; } });' },
 })
 
 const text = await readFile(OUT, 'utf8')

@@ -8,18 +8,21 @@
 import * as React from 'react'
 import { Shell } from './shell.js'
 import type { ShellSurface } from './shell.js'
+import { catalogs, createT, detectLang, type TFunction } from './i18n.js'
 
 export const NS = 'tool-hub'
 
 /** Host services this panel uses: slot registration and locale catalogues. */
-export function inject(): string[] {
-  return ['slots', 'locale']
-}
+export const inject = ['slots', 'locale'] as const
 
 interface SlotContext {
   slots: {
     inject(name: string, register: () => unknown): void
     register(meta: Record<string, unknown>, component: () => unknown): unknown
+  }
+  locale?: {
+    register?(ns: string, catalog: unknown): void
+    bind?(ns: string): TFunction
   }
 }
 
@@ -27,21 +30,31 @@ interface SurfaceSpec {
   slot: string
   surface: ShellSurface
   order: number
+  /** Keyed slots (`main`) demand a key; the shared NS keeps one panel behind all three. */
+  key?: string
 }
 
 /** One panel, three surfaces: the plugins tab, the sidebar list, and the main area. */
 const SURFACES: SurfaceSpec[] = [
   { slot: 'plugins.tab', surface: 'tab', order: 100 },
   { slot: 'sidebar.panellist', surface: 'panel', order: 100 },
-  { slot: 'main', surface: 'main', order: 100 },
+  { slot: 'main', surface: 'main', order: 100, key: NS },
 ]
 
 export function apply(ctx: SlotContext): void {
+  // Register the dictionaries first: the tab and sidebar labels are translated by the shell.
+  try {
+    ctx.locale?.register?.(NS, catalogs)
+  }
+  catch {
+    /* an older shell without locale still gets the fallback labels below */
+  }
+  const t = typeof ctx.locale?.bind === 'function' ? ctx.locale.bind(NS) : createT(detectLang())
   for (const spec of SURFACES) {
     const component = (): unknown => React.createElement(Shell, { surface: spec.surface })
     ctx.slots.inject(spec.slot, () =>
       ctx.slots.register(
-        { name: spec.slot, id: NS, order: spec.order, label: () => 'Tool Hub', locale: NS },
+        { name: spec.slot, id: NS, order: spec.order, ...(spec.key === undefined ? {} : { key: spec.key }), label: () => t('app.title'), locale: NS },
         component,
       ),
     )
