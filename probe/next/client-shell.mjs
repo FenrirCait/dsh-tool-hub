@@ -90,6 +90,8 @@ check('entry-contract', () => {
   assert(/export const inject = \['slots', 'locale'\]/.test(source), "entry.tsx must export inject as ['slots', 'locale']")
   assert(/export function apply\(ctx/.test(source), 'entry.tsx must export apply(ctx)')
   assert(/id: NS\b/.test(source), 'the slot registration must use the shared NS as its id')
+  // Registering Shell in the sidebar squeezes the nav into the list row.
+  assert(/surface === 'panel'[\s\S]{0,40}PanelEntry/.test(source), 'sidebar.panellist must register PanelEntry, not Shell')
   const table = /const SURFACES: SurfaceSpec\[\] = \[([\s\S]*?)\]/.exec(source)
   assert(table !== null, 'entry.tsx has no SURFACES table')
   const slots = [...(table[1] ?? '').matchAll(/slot: '([^']+)'/g)].map(match => match[1])

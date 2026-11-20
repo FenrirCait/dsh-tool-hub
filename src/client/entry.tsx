@@ -34,6 +34,26 @@ interface SurfaceSpec {
   key?: string
 }
 
+/** The sidebar list is a row, not a panel: an 18px glyph the shell labels. */
+function PanelEntry(): React.ReactElement {
+  return React.createElement('svg', {
+    width: 18,
+    height: 18,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.7,
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+    'aria-hidden': true,
+  },
+  React.createElement('circle', { cx: 12, cy: 11, r: 3.1, fill: 'currentColor', stroke: 'none' }),
+  React.createElement('circle', { cx: 4.6, cy: 6.4, r: 1.9, fill: 'currentColor', stroke: 'none' }),
+  React.createElement('circle', { cx: 19.4, cy: 6.4, r: 1.9, fill: 'currentColor', stroke: 'none' }),
+  React.createElement('circle', { cx: 12, cy: 20, r: 1.9, fill: 'currentColor', stroke: 'none' }),
+  React.createElement('path', { d: 'M12 11 5.6 7.4M12 11l6.4-3.6M12 11v6.2' }))
+}
+
 /** One panel, three surfaces: the plugins tab, the sidebar list, and the main area. */
 const SURFACES: SurfaceSpec[] = [
   { slot: 'plugins.tab', surface: 'tab', order: 100 },
@@ -51,7 +71,10 @@ export function apply(ctx: SlotContext): void {
   }
   const t = typeof ctx.locale?.bind === 'function' ? ctx.locale.bind(NS) : createT(detectLang())
   for (const spec of SURFACES) {
-    const component = (): unknown => React.createElement(Shell, { surface: spec.surface })
+    // The sidebar slot is one list row; only the tab and main area host the full panel.
+    const component = (): unknown => spec.surface === 'panel'
+      ? React.createElement(PanelEntry)
+      : React.createElement(Shell, { surface: spec.surface })
     ctx.slots.inject(spec.slot, () =>
       ctx.slots.register(
         { name: spec.slot, id: NS, order: spec.order, ...(spec.key === undefined ? {} : { key: spec.key }), label: () => t('app.title'), locale: NS },
