@@ -84,6 +84,9 @@ const CSS = `
   --dsw-alias-bg-base: rgb(255, 255, 255);
   --dsw-alias-bg-elevated: rgb(255, 255, 255);
 }
+/* Native option popups ignore the closed control's colours; declare them per forced theme. */
+.th-root[data-th-theme='dark'] .th-select option { background-color: rgb(28, 28, 30); color: rgb(242, 242, 247); }
+.th-root[data-th-theme='light'] .th-select option { background-color: rgb(255, 255, 255); color: rgb(27, 27, 31); }
 /* palette:end */
 .th-root[data-th-density='compact'] { font-size: 12px; }
 .th-root[data-th-density='compact'] .th-row { padding-top: 6px; padding-bottom: 6px; }

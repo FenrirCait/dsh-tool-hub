@@ -291,6 +291,14 @@ check('bundle-single-loader', () => {
   return `dist/client.js ${text.length} bytes, one loader entry`
 })
 
+check('select-options-themed', () => {
+  const theme = byName('theme.ts')
+  for (const scheme of ['dark', 'light']) {
+    assert(theme.includes(`.th-root[data-th-theme='${scheme}'] .th-select option`), `missing option colours for ${scheme}`)
+  }
+  return 'option popups have declared colours in both forced themes'
+})
+
 // ── report ───────────────────────────────────────────────────────────────────
 
 let failed = 0
