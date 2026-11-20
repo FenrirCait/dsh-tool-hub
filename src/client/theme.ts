@@ -356,6 +356,8 @@ const CSS = `
   color: var(--dsw-alias-label-primary, rgb(27, 27, 31));
   box-shadow: 0 18px 44px var(--dsw-alias-shadow-popover, rgba(0, 0, 0, 0.28));
   padding: 16px 18px;
+  max-height: min(680px, 86vh);
+  overflow-y: auto;
 }
 .th-dialog:focus { outline: none; }
 @media (prefers-color-scheme: dark) {

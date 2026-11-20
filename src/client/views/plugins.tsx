@@ -8,9 +8,12 @@
  *
  * The batch is capped by the snapshot's `limits.bulk` (the host caps at 400) and a failed batch
  * keeps its selection, since retrying is the only useful next move.
+ *
+ * The third-party dialog is the panic switch: `third.status` is a read (runOp), and only that
+ * dialog sends `third.off` (after its own confirm) or `third.restore`, both through run().
  */
 import * as React from 'react'
-import { OPS } from '../api.js'
+import { OPS, runOp } from '../api.js'
 import { Badge, Button, Card, Dialog, Empty, SearchBox, Switch } from '../components.js'
 import type { PluginRow, ViewProps } from '../types.js'
 
@@ -63,11 +66,61 @@ export function selectableIds(rows: PluginRow[]): string[] {
 }
 // #endregion bulk-helpers
 
+// #region third-helpers
+export type ThirdTarget = { kind: string; id: string; name: string; mcp: boolean }
+export type ThirdSnapshot = { file: string; at: string; plugins: string[]; skills: string[] }
+export type ThirdStatus = { targets: ThirdTarget[]; snapshot: ThirdSnapshot | null }
+
+/** Op ids this view adds beyond the shell's shared table: the third-party panic switch. */
+export const THIRD = { status: 'third.status', off: 'third.off', restore: 'third.restore' } as const
+
+const stringList = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+
+/** third.status, made total: a host without the op still renders an empty dialog, not a crash. */
+export function normalizeThird(raw: unknown): ThirdStatus {
+  const record = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {}
+  const targets = (Array.isArray(record.targets) ? record.targets : []).flatMap((entry): ThirdTarget[] => {
+    const row = typeof entry === 'object' && entry !== null ? (entry as Record<string, unknown>) : null
+    if (row === null || typeof row.id !== 'string' || row.id === '') return []
+    return [{ kind: typeof row.kind === 'string' ? row.kind : 'plugin', id: row.id, name: typeof row.name === 'string' ? row.name : row.id, mcp: row.mcp === true }]
+  })
+  const snapshot = typeof record.snapshot === 'object' && record.snapshot !== null ? (record.snapshot as Record<string, unknown>) : null
+  return {
+    targets,
+    snapshot: snapshot === null ? null : {
+      file: typeof snapshot.file === 'string' ? snapshot.file : '',
+      at: typeof snapshot.at === 'string' ? snapshot.at : '',
+      plugins: stringList(snapshot.plugins),
+      skills: stringList(snapshot.skills),
+    },
+  }
+}
+
+/** The summary the dialog prints: enabled targets by kind, and 1 rollback point when one exists. */
+export function thirdCounts(status: ThirdStatus): { plugins: number; skills: number; snapshots: number } {
+  return {
+    plugins: status.targets.filter(target => target.kind === 'plugin').length,
+    skills: status.targets.filter(target => target.kind === 'skill').length,
+    snapshots: status.snapshot === null ? 0 : 1,
+  }
+}
+
+export function rollbackCount(snapshot: ThirdSnapshot | null): number {
+  return snapshot === null ? 0 : snapshot.plugins.length + snapshot.skills.length
+}
+// #endregion third-helpers
+
 export function PluginsView(props: ViewProps): React.ReactElement {
   const { snapshot, lang, t, busy, run } = props
   const [query, setQuery] = React.useState('')
   const [selected, setSelected] = React.useState<string[]>([])
   const [confirming, setConfirming] = React.useState<boolean | null>(null)
+  const [third, setThird] = React.useState<ThirdStatus | null>(null)
+  const [thirdOpen, setThirdOpen] = React.useState(false)
+  const [thirdConfirm, setThirdConfirm] = React.useState(false)
+  const [thirdNotice, setThirdNotice] = React.useState('')
+  const [thirdReading, setThirdReading] = React.useState(false)
 
   const term = query.trim().toLowerCase()
   const rows = snapshot.plugins.filter(row => {
@@ -83,6 +136,8 @@ export function PluginsView(props: ViewProps): React.ReactElement {
   const bulkBusy = busy === OPS.bulk
   const anyBusy = busy !== null
   const zh = lang === 'zh'
+  const thirdTargets = third === null ? 0 : third.targets.length
+  const thirdRollback = rollbackCount(third === null ? null : third.snapshot)
 
   const commit = React.useCallback(
     (enabled: boolean): void => {
@@ -107,6 +162,40 @@ export function PluginsView(props: ViewProps): React.ReactElement {
     },
     [picked, cap, commit],
   )
+
+  // The dialog opens on a read: targets and the rollback point are shown before anything is written.
+  const readThird = async (): Promise<void> => {
+    setThirdReading(true)
+    const result = await runOp(THIRD.status, {})
+    setThird(result.ok ? normalizeThird(result.data) : null)
+    setThirdNotice(result.ok ? '' : result.message)
+    setThirdReading(false)
+  }
+
+  const openThird = async (): Promise<void> => {
+    setThirdConfirm(false)
+    setThirdOpen(true)
+    await readThird()
+  }
+
+  const disableThird = (): void => {
+    const count = thirdTargets
+    void run(THIRD.off, {}).then(ok => {
+      setThirdConfirm(false)
+      if (!ok) return
+      setThirdNotice(t('third.result', { n: count }))
+      void readThird()
+    })
+  }
+
+  const restoreThird = (): void => {
+    const count = thirdRollback
+    void run(THIRD.restore, {}).then(ok => {
+      if (!ok) return
+      setThirdNotice(t('third.restored', { n: count }))
+      void readThird()
+    })
+  }
 
   if (snapshot.plugins.length === 0) {
     return <Empty title={t('plugins.empty')} hint={t('app.subtitle')} />
@@ -137,6 +226,9 @@ export function PluginsView(props: ViewProps): React.ReactElement {
           clearLabel={t('action.clear')}
         />
         <Badge tone="brand">{t('plugins.count', { n: rows.length })}</Badge>
+        <Button variant="ghost" label={t('third.title')} onClick={() => { void openThird() }}>
+          {t('third.title')}
+        </Button>
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
         <label className="th-toolbar" style={{ gap: 6, margin: 0 }}>
           <input
@@ -272,6 +364,54 @@ export function PluginsView(props: ViewProps): React.ReactElement {
         }
       >
         <span>{confirmText}</span>
+      </Dialog>
+      <Dialog
+        open={thirdOpen}
+        title={thirdConfirm ? t('dialog.confirmTitle') : t('third.title')}
+        onClose={() => {
+          if (busy === null) {
+            setThirdOpen(false)
+            setThirdConfirm(false)
+          }
+        }}
+        footer={
+          thirdConfirm ? (
+            <>
+              <Button variant="ghost" disabled={busy !== null} onClick={() => { setThirdConfirm(false) }}>{t('action.cancel')}</Button>
+              <Button variant="danger" busy={busy === THIRD.off} onClick={disableThird}>{t('action.confirm')}</Button>
+            </>
+          ) : (
+            <>
+              <Button variant="ghost" onClick={() => { setThirdOpen(false) }}>{t('action.cancel')}</Button>
+              <Button variant="ghost" disabled={thirdRollback === 0 || busy !== null || thirdReading} onClick={restoreThird}>{t('third.restore')}</Button>
+              <Button variant="danger" disabled={thirdTargets === 0 || busy !== null || thirdReading} onClick={() => { setThirdConfirm(true) }}>{t('third.off')}</Button>
+            </>
+          )
+        }
+      >
+        {thirdConfirm ? (
+          <span>{t('third.confirmOff', { n: thirdTargets })}</span>
+        ) : thirdReading ? (
+          <span>{t('state.busy')}</span>
+        ) : third === null ? (
+          <span>{t('third.none')}</span>
+        ) : (
+          <div>
+            <div>{t('third.status', thirdCounts(third))}</div>
+            {third.targets.length === 0 ? <div>{t('third.none')}</div> : (
+              <ul className="th-list">{third.targets.map(target => (
+                <li className="th-row" key={`${target.kind}:${target.id}`}>
+                  <span className="th-row-name">{target.name}</span>
+                  <span className="th-mono">{target.id}</span>
+                  <Badge>{target.kind}</Badge>
+                  {target.mcp ? <Badge>MCP</Badge> : null}
+                </li>
+              ))}</ul>
+            )}
+            <div>{third.snapshot === null ? t('third.noSnapshot') : `${third.snapshot.file} · ${rollbackCount(third.snapshot)} ${zh ? '项' : 'items'}`}</div>
+          </div>
+        )}
+        {thirdNotice === '' ? null : <div>{thirdNotice}</div>}
       </Dialog>
       <div style={{ marginTop: 12 }}>
         <Button

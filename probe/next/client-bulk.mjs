@@ -259,15 +259,20 @@ check('import-contract', () => {
 })
 
 check('single-write-path', () => {
-  for (const pattern of ['fetch(', 'getSnapshot', 'innerHTML', 'dangerouslySetInnerHTML', 'runOp(']) {
+  for (const pattern of ['fetch(', 'getSnapshot', 'innerHTML', 'dangerouslySetInnerHTML']) {
     assert(body.indexOf(pattern) === -1, 'plugins.tsx uses ' + pattern + '; every write goes through run()')
   }
+  // The third-party dialog reads its status; that one read is the only direct IO allowed.
+  const reads = [...body.matchAll(/runOp\(\s*(THIRD\.[A-Za-z0-9_]+)/g)].map(match => match[1])
+  assert(reads.length === 1 && reads[0] === 'THIRD.status', 'runOp may only read third.status')
   const calls = body.match(/\brun\(/g) ?? []
   assert(calls.length >= 2, 'expected both toggle and bulk to go through run(), found ' + calls.length)
-  assert(calls.length === (body.match(/\brun\(OPS\./g) ?? []).length, 'an op escapes the OPS table')
+  assert(calls.length === (body.match(/\brun\((OPS|THIRD)\./g) ?? []).length, 'an op escapes the op tables')
   const ops = new Set([...body.matchAll(/\brun\(OPS\.([A-Za-z0-9_]+)/g)].map(match => match[1]))
   assert([...ops].every(op => op === 'bulk' || op === 'toggle'), 'unexpected op(s): ' + [...ops].join(', '))
-  return calls.length + ' run() calls: ' + [...ops].join(', ')
+  const third = new Set([...body.matchAll(/\brun\(THIRD\.([A-Za-z0-9_]+)/g)].map(match => match[1]))
+  assert([...third].every(op => op === 'off' || op === 'restore'), 'unexpected third op(s): ' + [...third].join(', '))
+  return calls.length + ' run() calls: ' + [...ops, ...third].join(', ')
 })
 
 check('file-length', () => {

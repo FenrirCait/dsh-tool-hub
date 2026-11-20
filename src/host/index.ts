@@ -3,11 +3,12 @@ import { loadState, stateDir } from '../core/io.js'
 import { applySettingsDefaults, normalizeSettings } from '../core/settings.js'
 import { registerAll } from '../domains/index.js'
 import { createCatalogTool } from './catalog-tool.js'
-import type { DomainRegistration, HostEnv } from '../shared/contract.js'
+import type { DomainRegistration, OpHandler } from '../shared/contract.js'
 import type { HubContext } from '../shared/types.js'
 import { Dispatcher, failureOf } from './dispatch.js'
 import { HEARTBEAT_INJECTS, runDoctor, writeMountHeartbeat } from './diagnostics.js'
 import { installApi } from './routes.js'
+import { PORTABILITY_OPS, portabilityHandlers } from './portability.js'
 import { buildSnapshot } from './snapshot.js'
 
 export const name = 'dsh-tool-hub'
@@ -53,6 +54,30 @@ export function apply(ctx: HubContext): void {
   })
 }
 
+/**
+ * The core domain: snapshot/doctor plus the portability ops (dshmarket status/import and the
+ * third-party off/restore switch). Both halves are one registration so the registry can never end
+ * up knowing an op whose handler is missing.
+ */
+export function createCoreDomain(handlers: { snapshot: OpHandler; doctor: OpHandler }): DomainRegistration {
+  return {
+    module: {
+      id: 'core',
+      title: { zh: '核心', en: 'Core' },
+      ops: [
+        { id: 'snapshot', write: false, audit: false, note: 'Builds the panel snapshot from the registered domains.' },
+        { id: 'doctor', write: false, audit: false, note: 'Runs the ten diagnostics against the live host.' },
+        ...PORTABILITY_OPS,
+      ],
+    },
+    handlers: {
+      snapshot: handlers.snapshot,
+      doctor: handlers.doctor,
+      ...portabilityHandlers(),
+    },
+  }
+}
+
 async function start(ctx: HubContext): Promise<Started> {
   const loaded = await loadState()
   if (loaded.recovered !== null) logTo(ctx)('warn', `state was unreadable; recovered from ${loaded.recovered}`)
@@ -72,25 +97,15 @@ async function start(ctx: HubContext): Promise<Started> {
   })
   for (const registration of registrations) dispatcher.bind(registration)
 
-  const core: DomainRegistration = {
-    module: {
-      id: 'core',
-      title: { zh: '核心', en: 'Core' },
-      ops: [
-        { id: 'snapshot', write: false, audit: false, note: 'Builds the panel snapshot from the registered domains.' },
-        { id: 'doctor', write: false, audit: false, note: 'Runs the ten diagnostics against the live host.' },
-      ],
-    },
-    handlers: {
-      snapshot: async (payload, env: HostEnv) => buildSnapshot({
-        env,
-        registry,
-        fresh: (payload as { fresh?: unknown } | undefined)?.fresh === true,
-        history: () => dispatcher.history(),
-      }),
-      doctor: async () => runDoctor({ ctx, stateDir: stateDir(), expectedInjects: HEARTBEAT_INJECTS }),
-    },
-  }
+  const core = createCoreDomain({
+    snapshot: async (payload, env) => buildSnapshot({
+      env,
+      registry,
+      fresh: (payload as { fresh?: unknown } | undefined)?.fresh === true,
+      history: () => dispatcher.history(),
+    }),
+    doctor: async () => runDoctor({ ctx, stateDir: stateDir(), expectedInjects: HEARTBEAT_INJECTS }),
+  })
   registry.register(core.module)
   dispatcher.bind(core)
 

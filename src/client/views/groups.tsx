@@ -9,6 +9,9 @@
  *   group.clean     { id }
  *   collection.save { id, name }
  *
+ * The dshmarket import is the one read this view makes: `market.status` previews the groups the
+ * host matched by package name, and only the dialog's confirm sends `market.import`.
+ *
  * Deleting a group or dropping its stale members rewrites state the panel cannot undo, so both
  * go through a Dialog first; the group switch is reversible and therefore does not.
  */
@@ -26,6 +29,8 @@ const OPS = {
   collection: 'collection.save',
   autoPreview: 'auto.preview',
   autoApply: 'auto.apply',
+  marketStatus: 'market.status',
+  marketImport: 'market.import',
 } as const
 
 /** Sentinels for the drawer filter: a drawer id matches /^[a-z0-9][a-z0-9_-]{0,31}$/, so neither collides. */
@@ -36,7 +41,7 @@ const DRAWER_NAME_MAX = 40
 const DRAWER_ID_MAX = 32
 const DRAWER_ID = /^[a-z0-9][a-z0-9_-]*$/
 
-type DialogKind = 'create' | 'edit' | 'delete' | 'clean' | 'drawer' | 'auto'
+type DialogKind = 'create' | 'edit' | 'delete' | 'clean' | 'drawer' | 'auto' | 'market'
 
 interface Drawer {
   id: string
@@ -64,6 +69,22 @@ function savePayload(id: string | null, name: string, drawer: string, members: G
   }
 }
 
+// #region market-helpers
+export type MarketGroup = { name: string; members: number; missing: number }
+export type MarketStatus = { available: boolean; file: string | null; groups: MarketGroup[]; error: string | null }
+
+/** market.status, made total: the dialog previews before a single group is written. */
+export function normalizeMarket(raw: unknown): MarketStatus {
+  const record = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {}
+  const groups = (Array.isArray(record.groups) ? record.groups : []).flatMap((entry): MarketGroup[] => {
+    const row = typeof entry === 'object' && entry !== null ? (entry as Record<string, unknown>) : null
+    if (row === null || typeof row.name !== 'string' || row.name === '') return []
+    return [{ name: row.name, members: typeof row.members === 'number' ? row.members : 0, missing: Array.isArray(row.missing) ? row.missing.length : 0 }]
+  })
+  return { available: record.available === true, file: typeof record.file === 'string' ? record.file : null, groups, error: typeof record.error === 'string' ? record.error : null }
+}
+// #endregion market-helpers
+
 export function GroupsView(props: ViewProps): React.ReactElement {
   const { snapshot, lang, t, busy, run } = props
   const groups = snapshot.groups
@@ -79,6 +100,7 @@ export function GroupsView(props: ViewProps): React.ReactElement {
   // the next reload returns it, and a group pointing at an unknown drawer still shows its id.
   const [created, setCreated] = React.useState<Drawer[]>([])
   const [autoPlan, setAutoPlan] = React.useState<Array<{ name: string; members: unknown[] }>>([])
+  const [market, setMarket] = React.useState<MarketStatus | null>(null)
 
   const drawers = React.useMemo(() => {
     const seen = new Map<string, string>()
@@ -141,6 +163,14 @@ export function GroupsView(props: ViewProps): React.ReactElement {
     setDialog('auto')
   }
 
+  // market.status is a read; the import itself only leaves from the dialog's confirm button.
+  const openMarket = async (): Promise<void> => {
+    const result = await runOp(OPS.marketStatus, {})
+    if (!result.ok) return
+    setMarket(normalizeMarket(result.data))
+    setDialog('market')
+  }
+
   // Every write leaves from here: the row buttons only open a dialog, they never send an op.
   const confirmAction = (): void => {
     if (dialog === 'delete') {
@@ -156,6 +186,11 @@ export function GroupsView(props: ViewProps): React.ReactElement {
     if (dialog === 'auto') {
       close()
       void run(OPS.autoApply, {})
+      return
+    }
+    if (dialog === 'market') {
+      close()
+      void run(OPS.marketImport, {})
       return
     }
     if (dialog === 'drawer') {
@@ -203,16 +238,7 @@ export function GroupsView(props: ViewProps): React.ReactElement {
     body = (
       <>
         <Field id="th-group-name" label={t('groups.name')} hint={t('groups.membersHint')}>
-          <input
-            id="th-group-name"
-            className="th-input"
-            type="text"
-            value={formName}
-            maxLength={NAME_MAX}
-            onChange={event => {
-              setFormName(event.target.value)
-            }}
-          />
+          <input id="th-group-name" className="th-input" type="text" value={formName} maxLength={NAME_MAX} onChange={event => { setFormName(event.target.value) }} />
         </Field>
         <Field id="th-group-drawer" label={t('groups.collection')}>
           <Select id="th-group-drawer" value={formDrawer} options={drawerOptions} onChange={setFormDrawer} label={t('groups.collection')} />
@@ -240,32 +266,37 @@ export function GroupsView(props: ViewProps): React.ReactElement {
     body = (
       <div>
         <div>{lang === 'zh' ? `将重建 ${autoPlan.length} 个分组、${total} 个成员，现有手工分组保留。` : `Rebuild ${autoPlan.length} groups with ${total} members; manual groups stay.`}</div>
-        <ul className="th-list">
-          {autoPlan.map(entry => (
-            <li key={entry.name} className="th-row">
-              <span className="th-row-name">{entry.name}</span>
-              <Badge>{t('groups.members', { n: entry.members.length })}</Badge>
-            </li>
-          ))}
-        </ul>
+        <ul className="th-list">{autoPlan.map(entry => (
+          <li key={entry.name} className="th-row"><span className="th-row-name">{entry.name}</span><Badge>{t('groups.members', { n: entry.members.length })}</Badge></li>
+        ))}</ul>
       </div>
     )
     confirmLabel = lang === 'zh' ? '重建自动分组' : 'Rebuild'
     confirmBusy = busy === OPS.autoApply
+  } else if (dialog === 'market') {
+    const list = market === null ? [] : market.groups
+    const totals = { groups: list.length, members: list.reduce((sum, entry) => sum + entry.members, 0) }
+    title = t('market.import')
+    body = (
+      <div>
+        <div>{t('market.importHint')}</div>
+        {list.length === 0 ? <div>{t('market.none')}</div> : (
+          <>
+            <div>{t('market.preview', totals)}</div>
+            <div className="th-row-meta">{list.map(group => (group.missing === 0 ? group.name : `${group.name} −${group.missing}`)).join(', ')}</div>
+          </>
+        )}
+        {market === null || market.error === null ? null : <div>{market.error}</div>}
+      </div>
+    )
+    confirmLabel = t('market.import')
+    confirmDisabled = list.length === 0
+    confirmBusy = busy === OPS.marketImport
   } else if (dialog === 'drawer') {
     title = t('groups.collection')
     body = (
       <Field id="th-drawer-name" label={lang === 'zh' ? '抽屉名称' : 'Drawer name'} hint={drawerIdHint}>
-        <input
-          id="th-drawer-name"
-          className="th-input"
-          type="text"
-          value={drawerName}
-          maxLength={DRAWER_NAME_MAX}
-          onChange={event => {
-            setDrawerName(event.target.value)
-          }}
-        />
+        <input id="th-drawer-name" className="th-input" type="text" value={drawerName} maxLength={DRAWER_NAME_MAX} onChange={event => { setDrawerName(event.target.value) }} />
       </Field>
     )
     confirmLabel = t('action.create')
@@ -306,6 +337,9 @@ export function GroupsView(props: ViewProps): React.ReactElement {
           }}
         >
           {newDrawerLabel}
+        </Button>
+        <Button variant="ghost" label={t('market.import')} title={t('market.importHint')} onClick={() => { void openMarket() }}>
+          {t('market.import')}
         </Button>
         <Button variant="primary" onClick={openCreate}>
           {t('groups.create')}
