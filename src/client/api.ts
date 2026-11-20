@@ -35,6 +35,8 @@ export type ApiResult<T> = ApiOk<T> | ApiFail
 
 const BASE = '/tool-hub/api'
 const TIMEOUT_MS = 15000
+/** A write can legitimately take a minute: a loader reload follows a patch write. */
+export const WRITE_TIMEOUT_MS = 120000
 
 function fail(code: string, message: string, status = 0): ApiFail {
   return { ok: false, code, message, status }
@@ -46,10 +48,10 @@ interface RawAnswer {
 }
 
 /** One fetch, decoded as JSON when it is JSON. Network and timeout failures become ApiFail. */
-async function send(url: string, init: RequestInit): Promise<ApiResult<RawAnswer>> {
+async function send(url: string, init: RequestInit, timeoutMs = TIMEOUT_MS): Promise<ApiResult<RawAnswer>> {
   if (typeof fetch !== 'function') return fail('network', 'fetch is unavailable in this host', 0)
   const controller = typeof AbortController === 'function' ? new AbortController() : null
-  const timer = controller === null ? null : setTimeout(() => controller.abort(), TIMEOUT_MS)
+  const timer = controller === null ? null : setTimeout(() => controller.abort(), timeoutMs)
   try {
     const response = await fetch(url, controller === null ? init : { ...init, signal: controller.signal })
     const text = await response.text()
@@ -90,11 +92,11 @@ function unwrap(answer: RawAnswer): ApiResult<unknown> {
  * During the cutover a host may only have the old routes mounted; a 404 on v1 is not an error
  * the user should see, it is a fallback.
  */
-async function call(path: string, init: RequestInit): Promise<ApiResult<unknown>> {
-  const first = await send(BASE + '/v1' + path, init)
+async function call(path: string, init: RequestInit, timeoutMs = TIMEOUT_MS): Promise<ApiResult<unknown>> {
+  const first = await send(BASE + '/v1' + path, init, timeoutMs)
   if (!first.ok) return first
   if (first.data.status !== 404) return unwrap(first.data)
-  const legacy = await send(BASE + path, init)
+  const legacy = await send(BASE + path, init, timeoutMs)
   if (!legacy.ok) return legacy
   return unwrap(legacy.data)
 }
@@ -107,12 +109,12 @@ export async function getSnapshot(): Promise<ApiResult<HubSnapshot>> {
 }
 
 /** Send one op. The host is the only writer; the caller re-reads the snapshot afterwards. */
-export async function runOp(op: string, payload?: unknown): Promise<ApiResult<unknown>> {
+export async function runOp(op: string, payload?: unknown, timeoutMs = TIMEOUT_MS): Promise<ApiResult<unknown>> {
   const result = await call('/op', {
     method: 'POST',
     headers: { accept: 'application/json', 'content-type': 'application/json' },
     body: JSON.stringify({ op, payload: payload ?? {} }),
-  })
+  }, timeoutMs)
   return result
 }
 

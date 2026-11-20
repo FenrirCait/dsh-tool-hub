@@ -142,6 +142,9 @@ check('auto: every declared op has a handler and every handler a declared op',
   equal(domain.module.ops.map(op => op.id).sort(), Object.keys(domain.handlers).sort()))
 check('auto: op ids stay unique inside the domain',
   new Set(domain.module.ops.map(op => op.id)).size === domain.module.ops.length)
+check('batch: group.batch is declared write+audit and has a handler',
+  ops.get('group.batch')?.write === true && ops.get('group.batch')?.audit === true
+  && typeof domain.handlers['group.batch'] === 'function')
 check('auto: the 1.x group and collection ops are untouched',
   ['group.save', 'group.delete', 'group.toggle', 'group.reorder', 'group.move', 'group.clean',
     'group.add', 'group.remove', 'collection.save', 'collection.delete'].every(id => ops.has(id)))

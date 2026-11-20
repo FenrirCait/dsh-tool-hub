@@ -19,8 +19,12 @@
 import type { DomainRegistration, HostEnv, OpHandler } from '../shared/contract.js'
 import type { StateV2 } from '../core/state.js'
 import { asRecord, asStringList, errorText, fail, failureOf, type ToggleOutcome } from './tool-surface.js'
-import { listBundles, listPluginRows, toggleOne } from './plugins.js'
-import { listSkills } from './skills.js'
+import { readFile } from 'node:fs/promises'
+import { writeFileAtomic } from '../core/atomic.js'
+import { listBundles, listPluginRows, toggleOne, invalidatePluginCache } from './plugins.js'
+import { listSkills, setSkillEnabled } from './skills.js'
+import { patchPathFor } from './mcp.js'
+import { removeRow, setRowDisabled } from '../../lib/patch-rows.js'
 
 export type MemberKind = 'plugin' | 'skill'
 
@@ -846,6 +850,133 @@ const groupToggle: OpHandler = async (payload, env) => {
   }
 }
 
+/**
+ * Whole-group switch in two writes: every plugin member's patch row is edited in one document,
+ * then the loader reloads once. The per-member path reloads the whole tree for every member
+ * (a minute on a large profile), so a generated group of 188 could never finish inside a click.
+ */
+let batchSequence: Promise<unknown> = Promise.resolve()
+
+function serialized<T>(work: () => Promise<T>): Promise<T> {
+  const run = batchSequence.then(work, work)
+  batchSequence = run.then(() => undefined, () => undefined)
+  return run
+}
+
+/** Disable one row, appending an override when the bundle never wrote a patch row for it. */
+function disableRow(text: string, id: string): string {
+  try {
+    return setRowDisabled(text, id, true)
+  }
+  catch {
+    const head = text === '' || text.endsWith('\n') ? text : text + '\n'
+    return head + '- id: ' + JSON.stringify(id) + '\n  disabled: true\n'
+  }
+}
+
+const groupBatch: OpHandler = async (payload, env) => serialized(async () => {
+  const body = asRecord(payload)
+  const catalog = await readCatalog(env)
+  const groups = normalizeGroups(env.state.groups)
+  const enabled = body.enabled === true
+  const plan = planGroupToggle(groups, body.id, catalog.rows, body.skipShared === true)
+  const rows = await listPluginRows(env, true).catch(() => [])
+  const byId = new Map(rows.map(row => [row.id, row]))
+  const patchPath = patchPathFor(env)
+  let text = patchPath === null ? '' : await readFile(patchPath, 'utf8').catch(() => '')
+  const touched: string[] = []
+  const results: Array<{ kind: MemberKind; id: string; ok: boolean; code?: string; message?: string }> = []
+  let skillsChanged = 0
+
+  for (const member of plan.members) {
+    if (member.kind === 'skill') {
+      try {
+        const outcome = await setSkillEnabled(env, member.id, enabled)
+        if (outcome.ok === true) skillsChanged += 1
+        results.push({ kind: 'skill', id: member.id, ok: outcome.ok === true, ...(outcome.ok === true ? {} : failureOf(new Error(outcome.message ?? 'refused'))) })
+      }
+      catch (error) {
+        results.push({ kind: 'skill', id: member.id, ok: false, ...failureOf(error) })
+      }
+      continue
+    }
+    const row = byId.get(member.id)
+    if (row === undefined) {
+      results.push({ kind: 'plugin', id: member.id, ok: false, code: 'unknown-plugin', message: 'no plugin entry answers to ' + member.id })
+      continue
+    }
+    if (row.enabled === enabled) {
+      results.push({ kind: 'plugin', id: member.id, ok: true, code: 'unchanged' })
+      continue
+    }
+    if (!enabled) {
+      if (row.readOnlyReason !== null) {
+        results.push({ kind: 'plugin', id: member.id, ok: false, code: 'read-only', message: row.readOnlyReason })
+        continue
+      }
+      if (row.builtinUi) {
+        results.push({ kind: 'plugin', id: member.id, ok: false, code: 'builtin-ui', message: 'ships inside the client UI bundle' })
+        continue
+      }
+      if (row.self) {
+        results.push({ kind: 'plugin', id: member.id, ok: false, code: 'self-protected', message: 'this panel cannot disable itself' })
+        continue
+      }
+    }
+    if (patchPath === null) {
+      results.push({ kind: 'plugin', id: member.id, ok: false, code: 'patch-missing', message: 'this host exposes no profile patch file' })
+      continue
+    }
+    const patchId = row.patchId ?? member.id
+    text = enabled ? removeRow(text, patchId) : disableRow(text, patchId)
+    touched.push(patchId)
+    results.push({ kind: 'plugin', id: member.id, ok: true })
+  }
+
+  if (patchPath !== null && touched.length > 0) await writeFileAtomic(patchPath, text, 0o644)
+
+  let application = 'none'
+  let reloadError: string | null = null
+  if (touched.length > 0) {
+    const manager = env.services.get('pluginManager') as {
+      reload?: (ids: string[]) => Promise<unknown>
+      configure?: (operation: () => Promise<unknown>) => Promise<unknown>
+    } | undefined
+    if (typeof manager?.reload === 'function') {
+      try {
+        // The HMR reconciler only accepts a reload inside its exclusive section; configure is
+        // the manager's own wrapper for that (setPluginEnabled uses it too).
+        const reload = async (): Promise<unknown> => await manager.reload!(enabled ? touched : [])
+        const outcome = (typeof manager.configure === 'function' ? await manager.configure(reload) : await reload()) as { application?: unknown; error?: unknown; restartReason?: unknown }
+        application = typeof outcome?.application === 'string' ? outcome.application : outcome?.restartReason === undefined ? 'applied' : 'restart-required'
+        if (typeof outcome?.error === 'string' && outcome.error !== '') reloadError = outcome.error
+      }
+      catch (error) {
+        application = 'failed'
+        reloadError = errorText(error)
+      }
+    }
+    else {
+      application = 'pending-restart'
+    }
+    invalidatePluginCache()
+  }
+
+  return {
+    group: plan.group.name,
+    enabled,
+    requested: plan.members.length,
+    changed: results.filter(row => row.ok && row.code !== 'unchanged').length,
+    unchanged: results.filter(row => row.code === 'unchanged').length,
+    skills: skillsChanged,
+    skippedShared: plan.skippedShared,
+    patched: touched.length,
+    application,
+    reloadError,
+    results,
+  }
+})
+
 const autoPreview: OpHandler = async (_payload, env) => {
   const catalog = await readAutoRows(env)
   const plan = buildAutoPlan(catalog.rows)
@@ -905,6 +1036,7 @@ export function groupsDomain(): DomainRegistration {
         { id: 'group.save', write: true, audit: true, note: 'Creates or updates a group; members are filtered to live rows and expanded to whole packages.' },
         { id: 'group.delete', write: true, audit: true, note: 'Removes a group from state.json.' },
         { id: 'group.toggle', write: true, audit: true, note: 'Switches the plugins and skills of a group through the host, honouring skipShared.' },
+        { id: 'group.batch', write: true, audit: true, note: 'Switches a whole group in one patch write and one loader reload; the panel uses this.' },
         { id: 'group.reorder', write: true, audit: true, note: 'Reorders groups in state.json.' },
         { id: 'group.move', write: true, audit: true, note: 'Moves a group into another drawer.' },
         { id: 'group.clean', write: true, audit: true, note: 'Drops group members that no longer resolve to a live plugin or skill.' },
@@ -920,6 +1052,7 @@ export function groupsDomain(): DomainRegistration {
       'group.save': groupSave,
       'group.delete': groupDelete,
       'group.toggle': groupToggle,
+      'group.batch': groupBatch,
       'group.reorder': groupReorder,
       'group.move': groupMove,
       'group.clean': groupClean,

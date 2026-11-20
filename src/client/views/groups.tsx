@@ -25,6 +25,7 @@ const OPS = {
   save: 'group.save',
   del: 'group.delete',
   toggle: 'group.toggle',
+  batch: 'group.batch',
   clean: 'group.clean',
   collection: 'collection.save',
   autoPreview: 'auto.preview',
@@ -112,6 +113,20 @@ export function GroupsView(props: ViewProps): React.ReactElement {
     for (const drawer of created) if (!seen.has(drawer.id)) seen.set(drawer.id, drawer.name)
     return [...seen.entries()].map(([id, name]) => ({ id, name }))
   }, [groups, created, snapshot.collections])
+
+  // A group has no stored on/off flag: read the live state of its members instead.
+  const pluginOn = new Map(snapshot.plugins.map(row => [row.id, row.enabled]))
+  const skillOn = new Map(snapshot.skills.map(row => [row.id, row.enabled]))
+  const isOn = (group: GroupRow): boolean => {
+    let seen = false
+    for (const member of group.members) {
+      const state = member.kind === 'skill' ? skillOn.get(member.id) : pluginOn.get(member.id)
+      if (state === undefined) continue
+      seen = true
+      if (!state) return false
+    }
+    return seen
+  }
 
   const term = query.trim().toLowerCase()
   const rows = groups.filter(group => {
@@ -365,7 +380,7 @@ export function GroupsView(props: ViewProps): React.ReactElement {
           <div className="th-list">
             {rows.map(group => {
               const stale = group.stale ?? 0
-              const on = group.enabled === true
+              const on = isOn(group)
               return (
                 <div className="th-row" key={group.id}>
                   <div className="th-row-body">
@@ -412,11 +427,11 @@ export function GroupsView(props: ViewProps): React.ReactElement {
                   </Button>
                   <Switch
                     checked={on}
-                    busy={busy === `${OPS.toggle}:${group.id}`}
+                    busy={busy === `${OPS.batch}:${group.id}`}
                     label={t('a11y.switch', { name: group.name })}
                     onChange={next => {
                       // skipShared=false flips every member, including one another group lists.
-                      void run(OPS.toggle, { id: group.id, enabled: next, skipShared: false })
+                      void run(OPS.batch, { id: group.id, enabled: next, skipShared: false })
                     }}
                   />
                 </div>

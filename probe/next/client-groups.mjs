@@ -92,9 +92,9 @@ check('group-save-payload', () => {
   return '{ id?, name, members, collection }'
 })
 
-check('group-toggle-payload', () => {
-  assert(/run\(OPS\.toggle, \{ id: group\.id, enabled: next, skipShared: false \}\)/.test(body),
-    'group.toggle must send { id, enabled, skipShared }')
+check('group-batch-payload', () => {
+  assert(/run\(OPS\.batch, \{ id: group\.id, enabled: next, skipShared: false \}\)/.test(body),
+    'group.batch must send { id, enabled, skipShared }')
   return '{ id, enabled, skipShared: false }'
 })
 
@@ -260,7 +260,7 @@ check('busy-keys', () => {
   // The shell sets busy to op:id, with the id taken from the payload: a row keyed by the group
   // name would never light up, so each of these has to name the id the payload sends.
   const pairs = [
-    ['toggle', 'group.id'],
+    ['batch', 'group.id'],
     ['save', 'targetId'],
     ['del', 'group.id'],
     ['del', 'targetId'],
@@ -296,10 +296,10 @@ check('action-edit', () => {
 })
 
 check('action-toggle', () => {
-  assert(/const on = group\.enabled === true/.test(body), 'the switch must read the group enabled state')
+  assert(/const on = isOn\(group\)/.test(body) && /const isOn = \(group: GroupRow\): boolean/.test(body), 'the switch must derive state from the live member rows')
   assert(/checked=\{on\}/.test(body), 'the switch must be bound to that state')
   assert(/<Switch/.test(body), 'the bulk switch must use the Switch component')
-  return 'Switch -> group.toggle, busy group.toggle:id'
+  return 'Switch -> group.batch, busy group.batch:id'
 })
 
 check('action-delete', () => {

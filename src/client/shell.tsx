@@ -6,7 +6,7 @@
  * empty copy on top of a good snapshot.
  */
 import * as React from 'react'
-import { getSnapshot, runOp } from './api.js'
+import { getSnapshot, runOp, WRITE_TIMEOUT_MS } from './api.js'
 import type { ApiFail } from './api.js'
 import { Button, Callout, Loading } from './components.js'
 import { createT, detectLang, normalizeLang } from './i18n.js'
@@ -147,10 +147,10 @@ export function Shell(props: ShellProps): React.ReactElement {
           : null
       setBusy(id === null ? op : `${op}:${id}`)
       setNotice(null)
-      const result = await runOp(op, payload)
+      const result = await runOp(op, payload, WRITE_TIMEOUT_MS)
       if (!result.ok) {
         setBusy(null)
-        setNotice({ tone: 'error', text: t('error.unknown', { message: result.message }) })
+        setNotice({ tone: 'error', text: result.code === 'timeout' ? t('error.timeout') : t('error.unknown', { message: result.message }) })
         return { ok: false, error: result.message }
       }
       await load(true)
