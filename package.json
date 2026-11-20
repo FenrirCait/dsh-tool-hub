@@ -1,6 +1,6 @@
 {
   "name": "dsh-tool-hub",
-  "version": "2.0.0-alpha.20",
+  "version": "2.0.0-alpha.21",
   "description": "One panel to list, group, and switch on or off the plugins, skills and MCP servers an installation runs, with saved presets and rule-based auto grouping.",
   "keywords": [
     "dsh",
@@ -28,7 +28,7 @@
     "build": "npm run build:host && npm run build:client",
     "prepack": "npm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json",
-    "test:next": "npm run build && node probe/next/core-state.mjs && node probe/next/domain-assets.mjs && node probe/next/domain-workflows.mjs && node probe/next/domain-groups.mjs && node probe/next/host-api.mjs && node probe/next/integration.mjs && node probe/next/tool-catalog.mjs && node probe/next/cli-compat.mjs && node probe/next/client-shell.mjs && node probe/next/client-settings.mjs && node probe/next/client-groups.mjs && node probe/next/client-presets.mjs && node probe/next/client-tools.mjs && node probe/next/client-sessions.mjs && node probe/next/client-mcp.mjs && node probe/next/client-skills.mjs && node probe/next/client-diagnostics.mjs && node probe/next/client-bulk.mjs && node probe/size-budget.mjs",
+    "test:next": "npm run build && node probe/next/core-state.mjs && node probe/next/domain-assets.mjs && node probe/next/domain-workflows.mjs && node probe/next/domain-groups.mjs && node probe/next/config-portability.mjs && node probe/next/host-api.mjs && node probe/next/integration.mjs && node probe/next/tool-catalog.mjs && node probe/next/cli-compat.mjs && node probe/next/client-shell.mjs && node probe/next/client-settings.mjs && node probe/next/client-groups.mjs && node probe/next/client-presets.mjs && node probe/next/client-tools.mjs && node probe/next/client-sessions.mjs && node probe/next/client-mcp.mjs && node probe/next/client-skills.mjs && node probe/next/client-diagnostics.mjs && node probe/next/client-bulk.mjs && node probe/next/client-config.mjs && node probe/size-budget.mjs",
     "test:size": "node probe/size-budget.mjs",
     "test:probes": "node probe/host-smoke.mjs && node probe/oauth-smoke.mjs && node probe/skill-pack-smoke.mjs && node probe/cli-smoke.mjs && node probe/mask-probe.mjs && node probe/op-registry-smoke.mjs && node probe/mount-heartbeat-smoke.mjs && node probe/host-contract-smoke.mjs && node probe/client-smoke.mjs && node probe/scene-smoke.mjs && node probe/size-budget.mjs"
   },
