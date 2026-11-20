@@ -189,6 +189,20 @@ window.__ModuleLoader__.load({
                 presetName: '预设名称',
                 presetApply: '应用',
                 presetDelete: '删除',
+                sceneHint: '场景：保存好的一整套工具屏蔽与 MCP 开关',
+                sceneApply: '应用',
+                sceneApplyHint: '先列出将静音、关闭或打开多少，再执行',
+                sceneExit: '退出',
+                sceneExitHint: '把环境恢复成应用场景之前的样子',
+                sceneApplyTitle: '应用场景「{name}」？',
+                sceneToolsUntouched: '工具屏蔽不变',
+                sceneMaskCount: '静音 {n} 个工具',
+                sceneOffCount: '关闭 {n} 个服务器',
+                sceneOnCount: '打开 {n} 个服务器',
+                sceneMissingNames: '未安装：{names}',
+                sceneApplied: '已应用「{name}」：{plan}',
+                sceneExited: '已退出场景「{name}」',
+                sceneNoActive: '当前没有活动场景',
                 presetEmpty: '还没有预设',
                 presetApplied: '已应用 {n}/{total} 项变更',
             presetDeferred: '已换上预设；相关服务器的工具注册后会自动补上屏蔽',
@@ -530,6 +544,20 @@ window.__ModuleLoader__.load({
                 presetName: 'Preset name',
                 presetApply: 'Apply',
                 presetDelete: 'Delete',
+                sceneHint: 'Scenes: a saved set of tool masking and MCP switches',
+                sceneApply: 'Apply',
+                sceneApplyHint: 'Lists what will be masked or switched before it runs',
+                sceneExit: 'Exit',
+                sceneExitHint: 'Restores the environment from before the scene was applied',
+                sceneApplyTitle: 'Apply the scene “{name}”?',
+                sceneToolsUntouched: 'tool masking unchanged',
+                sceneMaskCount: '{n} tool(s) masked',
+                sceneOffCount: '{n} server(s) off',
+                sceneOnCount: '{n} server(s) on',
+                sceneMissingNames: 'not installed: {names}',
+                sceneApplied: 'Applied “{name}”: {plan}',
+                sceneExited: 'Exited the scene “{name}”',
+                sceneNoActive: 'No scene is active',
                 presetEmpty: 'No presets yet',
                 presetApplied: 'Applied {n}/{total} changes',
             presetDeferred: 'Preset applied; masks for its servers land once their tools register',
@@ -1085,6 +1113,8 @@ window.__ModuleLoader__.load({
             }, [view]);
             const [groupId, setGroupId] = useState(null);
             const [query, setQuery] = useState("");
+            // The scene picker keeps a name, not an index: the list can change under it.
+            const [scenePick, setScenePick] = useState("");
             const [picked, setPicked] = useState(() => new Set());
             const [dialog, setDialog] = useState(null);
             const dirty = useRef(false);
@@ -1137,6 +1167,17 @@ window.__ModuleLoader__.load({
                 refresh();
                 void loadThird();
             }, []);
+
+            // Keep the picker on a real name: scenes can arrive from the CLI or another window,
+            // and the active one is the best default.
+            useEffect(() => {
+                const names = data?.scene?.names ?? [];
+                if (names.length === 0) {
+                    if (scenePick !== "") setScenePick("");
+                    return;
+                }
+                if (!names.includes(scenePick)) setScenePick(data?.scene?.mode ?? names[0]);
+            }, [data?.scene?.names, data?.scene?.mode]);
 
             const flash = useCallback((message) => {
                 setNote(message);
@@ -1838,6 +1879,24 @@ window.__ModuleLoader__.load({
                 setTimeout(refresh, 1800);
             };
 
+            /**
+             * What the scene would change, from the same stored definition the host applies.
+             * Counts are per server that exists; names that are not installed are reported apart.
+             */
+            const scenePreview = (name) => {
+                const scene = data?.scene?.scenes?.[name];
+                if (scene === undefined || scene === null) return null;
+                const servers = new Set((data?.mcp ?? []).map(row => row.config?.serverName ?? row.name));
+                const off = scene.mcp?.off ?? [];
+                const on = scene.mcp?.on ?? [];
+                return {
+                    tools: scene.tools === undefined ? null : scene.tools.deny.length,
+                    off: off.filter(server => servers.has(server)).length,
+                    on: on.filter(server => servers.has(server)).length,
+                    missing: [...off, ...on].filter(server => !servers.has(server)),
+                };
+            };
+
             const header = h("div", {
                 style: { display: "flex", alignItems: "flex-start", gap: 12, rowGap: 10, padding: "14px 16px 10px", flexWrap: "wrap" },
             },
@@ -1891,6 +1950,45 @@ window.__ModuleLoader__.load({
                         title: t("marketImportHint"),
                     }, fmt(t, "marketImport", { n: data.market.groups.length }))
                     : null,
+                (data?.scene?.names ?? []).length === 0
+                    ? null
+                    : h("div", { key: "scene", style: { display: "flex", gap: 6, alignItems: "center" } },
+                        h("select", {
+                            value: scenePick,
+                            onChange: (event) => setScenePick(event.target.value),
+                            disabled: busy,
+                            title: t("sceneHint"),
+                            "aria-label": t("sceneHint"),
+                            style: {
+                                height: 30,
+                                maxWidth: 170,
+                                padding: "0 8px",
+                                borderRadius: 8,
+                                border: `1px solid ${T.border}`,
+                                background: T.seg,
+                                color: T.text,
+                                fontSize: 12,
+                            },
+                        }, data.scene.names.map(name => h("option", { key: name, value: name }, name))),
+                        h(Button, {
+                            onClick: () => {
+                                const preview = scenePreview(scenePick);
+                                if (preview !== null) setDialog({ kind: "sceneApply", name: scenePick, preview });
+                            },
+                            disabled: busy || scenePick === "" || scenePick === data.scene.mode,
+                            title: t("sceneApplyHint"),
+                        }, t("sceneApply")),
+                        data.scene.mode === null
+                            ? null
+                            : h(Button, {
+                                onClick: () => {
+                                    void act("scene.exit", {}, result => {
+                                        flash(result?.restored === true ? fmt(t, "sceneExited", { name: result.scene }) : t("sceneNoActive"));
+                                    });
+                                },
+                                disabled: busy,
+                                title: t("sceneExitHint"),
+                            }, t("sceneExit"))),
                 h(Button, { onClick: openPresets, disabled: busy }, t("preset")),
                 h(Button, { tone: "danger", onClick: () => { void openThird(); }, disabled: busy }, busy ? t("thirdWorking") : t("thirdOff")),
                 thirdSnapshot === null
@@ -4836,6 +4934,44 @@ function McpEditDialog({ row, t, busy, onClose, onSave, onProbe, onOpenRaw, onDo
                 ]),
             });
         }
+
+            if (dialog.kind === "sceneApply") {
+                const preview = dialog.preview;
+                const parts = [preview.tools === null ? t("sceneToolsUntouched") : fmt(t, "sceneMaskCount", { n: preview.tools })];
+                if (preview.off > 0) parts.push(fmt(t, "sceneOffCount", { n: preview.off }));
+                if (preview.on > 0) parts.push(fmt(t, "sceneOnCount", { n: preview.on }));
+                if (preview.missing.length > 0) parts.push(fmt(t, "sceneMissingNames", { names: preview.missing.join(", ") }));
+                return h(Dialog, {
+                    title: fmt(t, "sceneApplyTitle", { name: dialog.name }),
+                    hint: parts.join(" · "),
+                    width: 460,
+                    onClose,
+                    footer: foot([
+                        h(Button, { key: "c", onClick: onClose }, t("cancel")),
+                        h(Button, {
+                            key: "a",
+                            tone: "primary",
+                            disabled: busy,
+                            onClick: () => {
+                                onClose();
+                                void act("scene.apply", { name: dialog.name }, result => {
+                                    if (!result) return;
+                                    const plan = result.plan ?? {};
+                                    const masked = plan.tools === null || plan.tools === undefined ? null : (plan.tools.deny ?? []).length;
+                                    const off = (plan.mcp ?? []).filter(item => item.enabled === false).length;
+                                    const on = (plan.mcp ?? []).filter(item => item.enabled === true).length;
+                                    const bits = [masked === null ? t("sceneToolsUntouched") : fmt(t, "sceneMaskCount", { n: masked })];
+                                    if (off > 0) bits.push(fmt(t, "sceneOffCount", { n: off }));
+                                    if (on > 0) bits.push(fmt(t, "sceneOnCount", { n: on }));
+                                    const missing = plan.missing ?? [];
+                                    if (missing.length > 0) bits.push(fmt(t, "sceneMissingNames", { names: missing.join(", ") }));
+                                    flash(fmt(t, "sceneApplied", { name: result.scene, plan: bits.join(" · ") }));
+                                });
+                            },
+                        }, t("sceneApply")),
+                    ]),
+                });
+            }
 
         if (dialog.kind === "presets") {
                 const presets = data === null ? [] : data.presets;

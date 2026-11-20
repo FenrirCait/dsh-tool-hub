@@ -3,10 +3,11 @@
   "history": [
     { "at": "2026-11-20", "change": "lib/index.js 3570 -> 3587 lines (+17): the dispatch gate from lib/op-registry.js (unknown-op refusal + unconditional confirm) and the audit flag on history entries. The split of index.js into op-dispatch / mcp / skills modules is still owed: 587 lines to go." },
     { "at": "2026-11-20", "change": "lib/index.js 3637 -> 3742 lines (+105): scene ops (save/apply/exit), the MCP row reader and the scene io adapter. The engine itself lives in lib/scene-engine.js, outside this file, precisely to keep this number down. Debt left: 742 lines." },
+    { "at": "2026-11-21", "change": "lib/index.js 160593 -> 160677 bytes (+84), lines unchanged at 3742: snapshot.scene gains the stored `scenes` definitions so the panel can preview an apply (read-only field, no behaviour change). Debt left: 742 lines." },
     { "at": "2026-11-20", "change": "lib/index.js 3587 -> 3637 lines (+50): session overlays — `sessions` in the state schema, normalize/prune, `session.set` / `session.clear` handlers, snapshot exposure, and passing the overlay map into the mask on mount and on every apply. Debt left: 637 lines to go before the split." }
   ],
   "files": {
-    "lib/index.js": { "lines": 3742, "bytes": 160593 },
+    "lib/index.js": { "lines": 3742, "bytes": 160677 },
     "client/client.js": { "lines": 4945, "bytes": 264791 }
   }
 }

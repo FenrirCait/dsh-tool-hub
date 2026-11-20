@@ -357,6 +357,7 @@ r = await op('scene.save', { name: 'work', tools: { deny: ['mcp__fixture__alpha'
 check('scene.save stores a scene', r.ok === true && r.data.scenes.includes('work'), JSON.stringify(r.data ?? r.error))
 let sceneSnap = (await get('/tool-hub/api/snapshot')).data
 check('snapshot reports the saved scenes', (sceneSnap.scene?.names ?? []).includes('work') && sceneSnap.scene?.mode === null, JSON.stringify(sceneSnap.scene))
+check('snapshot carries the scene definition for a preview', JSON.stringify(sceneSnap.scene?.scenes?.work?.tools?.deny) === '["mcp__fixture__alpha"]', JSON.stringify(sceneSnap.scene))
 r = await op('scene.apply', { name: 'work' })
 check('scene.apply plans the tool domain', r.ok === true && JSON.stringify(r.data.plan.tools.deny) === '["mcp__fixture__alpha"]', JSON.stringify(r.data ?? r.error))
 sceneSnap = (await get('/tool-hub/api/snapshot')).data
