@@ -39,15 +39,17 @@ export function apply(ctx: HubContext): void {
       return { ok: false, error: failure } as never
     }
   }
-  const dispose = installApi({
+  // installApi registers its own ctx.effect cleanup; a second one here would dispose twice.
+  installApi({
     ctx,
     run,
     snapshot: async ({ fresh }) => {
       const started = await ready
-      return await started.dispatcher.execute('snapshot', { fresh })
+      const outcome = await started.dispatcher.run('snapshot', { fresh })
+      if (!outcome.ok) throw new Error(outcome.error.message)
+      return outcome.data
     },
   })
-  ctx.effect?.(() => dispose)
 }
 
 async function start(ctx: HubContext): Promise<Started> {
