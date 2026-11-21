@@ -32,6 +32,26 @@ function stringList(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : []
 }
 
+/**
+ * The package version this build came from: read once from the package.json above dist/, then
+ * cached. A missing or malformed manifest reads as 'unknown' — a snapshot never fails over a label.
+ */
+let pluginVersionCache: string | null = null
+
+async function pluginVersion(): Promise<string> {
+  if (pluginVersionCache !== null) return pluginVersionCache
+  let version = 'unknown'
+  try {
+    const manifest = asRecord(JSON.parse(await readFile(new URL('../../package.json', import.meta.url), 'utf8')) as unknown)
+    if (typeof manifest.version === 'string' && manifest.version.trim() !== '') version = manifest.version
+  }
+  catch {
+    version = 'unknown'
+  }
+  pluginVersionCache = version
+  return version
+}
+
 function maskInfo(env: HostEnv): unknown {
   try {
     const mask = env.services.get('toolHub.mask') as { info?: () => unknown } | undefined
@@ -122,6 +142,13 @@ export async function buildSnapshot(deps: SnapshotDeps): Promise<Record<string, 
     extensions: deps.extensions ?? [],
     patchInfo,
     mask: maskInfo(env),
+    // What this host is, not what it manages: the version it was built from and the runtime under it.
+    meta: {
+      pluginVersion: await pluginVersion(),
+      node: process.version,
+      platform: process.platform,
+      pid: process.pid,
+    },
     fetchedAt: Date.now(),
   }
 }

@@ -2,6 +2,7 @@ import { Registry } from '../core/registry.js'
 import { loadState, saveState, stateDir } from '../core/io.js'
 import { applySettingsDefaults, normalizeSettings } from '../core/settings.js'
 import { registerAll } from '../domains/index.js'
+import { cleanupTrash } from '../domains/skills.js'
 import { createCatalogTool } from './catalog-tool.js'
 import type { DomainRegistration, OpHandler } from '../shared/contract.js'
 import type { HubContext } from '../shared/types.js'
@@ -60,6 +61,11 @@ export class Runtime {
     if (loaded.recovered !== null) logTo(ctx)('warn', `state was unreadable; recovered from ${loaded.recovered}`)
     const runtime = new Runtime(ctx, loaded.state)
     runtime.build = await runtime.buildOnce()
+    // Fire-and-forget: a trash sweep must never delay or fail a host start. The build above ran
+    // applySettingsDefaults, so the retention setting is readable here; 0 (or a 0 setting) turns
+    // the sweep off, and it only ever removes entries past the retention.
+    void cleanupTrash(Number(runtime.state.settings['skills.trashKeepDays'] ?? 30))
+      .catch(error => logTo(ctx)('warn', '[tool-hub] trash cleanup failed: ' + String((error as Error)?.message ?? error)))
     // Never block the host on the mask: mounting a plugin inside a live agent can wait for that
     // agent's fiber during startup. Services are published synchronously; the first recompute and
     // the existing-agent mounts run on the next turns instead.

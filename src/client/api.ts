@@ -5,7 +5,7 @@
  * value ({ ok: false, code, message }), never as a rejection, so a view can render an error
  * banner instead of relying on a catch somewhere up the tree.
  */
-import type { CollectionRow, ExtensionStatus, ExtensionViewRow, GroupRow, HistoryEntry, HubSnapshot, MaskInfo, PatchInfo, PluginRow, PresetRow, SceneState, SecretKeys, SkillRootInfo, SkillRow, ToolRow } from './types.js'
+import type { CollectionRow, ExtensionStatus, ExtensionViewRow, GroupRow, HistoryEntry, HostMeta, HubSnapshot, MaskInfo, PatchInfo, PluginRow, PresetRow, SceneState, SecretKeys, SkillRootInfo, SkillRow, ToolRow } from './types.js'
 import type { SettingsField } from '../shared/types.js'
 
 /** Op ids the panel sends. Kept in one table: a host rename is a one-line change here. */
@@ -238,6 +238,17 @@ function maskInfoOf(row: Record<string, unknown>): MaskInfo {
   }
 }
 
+/** A host that predates this field still yields a readable card: the version says so, the rest is blank. */
+function metaOf(value: unknown): HostMeta {
+  const row = asRecord(value)
+  return {
+    pluginVersion: asString(row.pluginVersion, 'unknown'),
+    node: asString(row.node),
+    platform: asString(row.platform),
+    pid: typeof row.pid === 'number' && Number.isFinite(row.pid) ? Math.trunc(row.pid) : 0,
+  }
+}
+
 function patchInfoOf(row: Record<string, unknown>): PatchInfo {
   const blocks = Array.isArray(row.blocks) ? row.blocks.map(item => asRecord(item)).filter(item => asString(item.name) !== '').map(item => ({
     name: asString(item.name),
@@ -401,6 +412,7 @@ export function normalizeSnapshot(raw: unknown): HubSnapshot {
     extensions: asRows(record.extensions, extensionOf),
     patchInfo: patchInfoOf(asRecord(record.patchInfo)),
     mask: maskInfoOf(asRecord(record.mask)),
+    meta: metaOf(record.meta),
     settingsSchema: settingsFieldsOf(record.settingsSchema),
     mcpError: asStringOrNull(record.mcpError),
     limits: typeof limits.bulk === 'number' ? { bulk: limits.bulk } : null,

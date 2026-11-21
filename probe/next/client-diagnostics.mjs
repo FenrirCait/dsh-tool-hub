@@ -10,7 +10,8 @@
  *   3. the report parser validates every row instead of trusting the payload;
  *   4. checks render with OK/Fail badges, their detail, and a failing-count summary;
  *   5. history renders time, op, detail and result from snapshot.history, or an empty state;
- *   6. paths render home / state / patch / skill roots from snapshot.paths;
+ *   6. paths render home / state / patch / skill roots from snapshot.paths, and the host card
+ *      shows the plugin version, node, platform and pid from snapshot.meta;
  *   7. the capability summary names missing members and their fallback;
  *   8. doctor is never run on mount, only from an explicit click;
  *   9. the run button reports its own busy state;
@@ -227,6 +228,17 @@ check('paths-card', () => {
   return 'home / state / patch / skill roots'
 })
 
+check('host-meta-card', () => {
+  assert(source.includes("t('diagnostics.host')"), 'the host card needs its own section title')
+  assert(source.includes('role="region" aria-label={t(\'diagnostics.host\')}'), 'the host card needs a named region')
+  assert(source.includes('snapshot.meta.pluginVersion'), 'the card must show the plugin version')
+  assert(source.includes('snapshot.meta.node'), 'the card must show the node version')
+  assert(source.includes('snapshot.meta.platform'), 'the card must show the platform')
+  assert(source.includes('String(snapshot.meta.pid)'), 'the card must show the pid as text')
+  assert(source.includes('{hostRows.map(row => ('), 'the host rows must be rendered from the snapshot')
+  return 'version + node + platform + pid from snapshot.meta'
+})
+
 check('capability-summary', () => {
   assert(source.includes('capabilities.present + \'/\' + capabilities.total'), 'the summary must show present / total')
   assert(source.includes('capabilities.missing.map(row => ('), 'every missing member must be listed')
@@ -291,6 +303,19 @@ check('i18n-keys-exist', () => {
   ]
   for (const key of required) assert(zh.has(key), "no catalog defines t('" + key + "')")
   return zh.size + ' keys aligned, ' + used.size + ' used by the view'
+})
+
+check('host-meta-keys', () => {
+  const i18n = readFileSync(I18N, 'utf8')
+  const zh = catalogKeys(i18n, 'zh')
+  const en = catalogKeys(i18n, 'en')
+  const keys = ['diagnostics.host', 'diagnostics.hostPlugin', 'diagnostics.hostNode', 'diagnostics.hostPlatform']
+  for (const key of keys) {
+    assert(zh.has(key), 'zh is missing "' + key + '"')
+    assert(en.has(key), 'en is missing "' + key + '"')
+    assert(body.includes("t('" + key + "')"), 'the view never resolves "' + key + '"')
+  }
+  return keys.length + ' host keys in zh + en, all used by the view'
 })
 
 check('i18n-key-scope', () => {

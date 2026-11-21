@@ -18,7 +18,7 @@ const FIELDS: SettingsField[] = [
     { value: 'en', label: { zh: 'English', en: 'English' } },
   ] },
   { key: 'tools.lazyDefault', type: 'boolean', default: false, label: { zh: '新 MCP 服务器默认懒启动', en: 'Lazy-load new MCP servers' } },
-  { key: 'tools.showTokenEstimate', type: 'boolean', default: true, label: { zh: '显示工具 token 估算', en: 'Show tool token estimates' } },
+  { key: 'tools.showTokenEstimate', type: 'boolean', default: true, label: { zh: '显示工具 token 估算', en: 'Show tool token estimates' }, hint: { zh: '工具页每行按 schema JSON ÷4 估算，关闭后隐藏。', en: 'The tools page estimates each schema as JSON ÷4; turn this off to hide it.' } },
   { key: 'scenes.confirmApply', type: 'boolean', default: true, label: { zh: '应用场景前确认', en: 'Confirm before applying a scene' } },
   { key: 'scenes.autoApply', type: 'string', default: '', label: { zh: '启动时自动应用的场景', en: 'Scene to apply on mount' }, hint: { zh: '留空表示不自动应用', en: 'Empty means none' } },
   { key: 'diagnostics.includeOptional', type: 'boolean', default: true, label: { zh: '诊断包含可选能力', en: 'Include optional capabilities in diagnostics' } },

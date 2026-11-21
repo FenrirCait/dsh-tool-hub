@@ -184,6 +184,13 @@ export function DiagnosticsView(props: ViewProps): React.ReactElement {
   const failing = checks.filter(row => !row.ok)
   const capabilities = report === null ? null : report.capabilities
   const pathRows = pathRowsOf(snapshot.paths, t, lang)
+  // What the host is, straight off the snapshot: its build version and the runtime under it.
+  const hostRows = [
+    { label: t('diagnostics.hostPlugin'), value: snapshot.meta.pluginVersion },
+    { label: t('diagnostics.hostNode'), value: snapshot.meta.node },
+    { label: t('diagnostics.hostPlatform'), value: snapshot.meta.platform },
+    { label: label(lang, '进程 ID', 'PID'), value: String(snapshot.meta.pid) },
+  ]
   const capabilityLabel = label(lang, '宿主能力', 'Host capabilities')
   const runLabel = running ? t('diagnostics.running') : t('diagnostics.run')
 
@@ -384,6 +391,22 @@ export function DiagnosticsView(props: ViewProps): React.ReactElement {
       <MaintenanceCards {...props} />
 
       <DiagnosticsHistory history={snapshot.history} t={t} lang={lang} busy={busy} run={run} reload={reload} />
+
+      <div className="th-section" role="region" aria-label={t('diagnostics.host')}>
+        <div className="th-section-title">{t('diagnostics.host')}</div>
+        <Card label={t('diagnostics.host')}>
+          <div className="th-list">
+            {hostRows.map(row => (
+              <div className="th-row" key={row.label}>
+                <div className="th-row-body">
+                  <span className="th-row-name">{row.label}</span>
+                  <span className="th-row-meta th-mono">{row.value === '' ? '—' : row.value}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      </div>
 
       <div className="th-section" role="region" aria-label={t('diagnostics.paths')}>
         <div className="th-section-title">{t('diagnostics.paths')}</div>

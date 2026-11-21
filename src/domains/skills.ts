@@ -22,7 +22,7 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } 
 import { inflateRawSync } from 'node:zlib'
 import { stateDir } from '../core/io.js'
 import type { DomainRegistration, HostEnv, OpHandler } from '../shared/contract.js'
-import type { OpDefinition } from '../shared/types.js'
+import type { OpDefinition, SettingsField } from '../shared/types.js'
 
 export const SKILL_FILE = 'SKILL.md'
 export const DISABLED_SUFFIX = '.disabled'
@@ -574,6 +574,61 @@ export async function listTrash(): Promise<TrashItem[]> {
     })
   }
   return items
+}
+
+/** Retention used when neither the payload nor the setting names one. */
+const DEFAULT_TRASH_KEEP_DAYS = 30
+/** A longer retention is a typo rather than a policy; the settings field caps at the same number. */
+const MAX_TRASH_KEEP_DAYS = 3650
+const DAY_MS = 24 * 60 * 60 * 1000
+
+export interface TrashCleanup {
+  deleted: number
+  kept: number
+}
+
+/**
+ * Remove trash entries older than `keepDays`, judged by each entry's own mtime.
+ *
+ * Only directories are swept: every delete writes `<state dir>/trash/<stamp>-<name>/`, so a stray
+ * file in that folder belongs to somebody else and stays — it is counted as kept, never removed.
+ * `keepDays <= 0` (or a value that is not a finite number) disables the sweep before the folder is
+ * read at all; that is the documented way to keep the trash forever, and it is why a disabled sweep
+ * reports zeros instead of counting what it did not look at. A missing folder is a fresh install,
+ * not an error. An entry that cannot be removed (Windows keeps a handle open) stays for the next
+ * sweep instead of failing the whole run.
+ */
+export async function cleanupTrash(keepDays: number): Promise<TrashCleanup> {
+  if (!Number.isFinite(keepDays) || keepDays <= 0) return { deleted: 0, kept: 0 }
+  let names: string[]
+  try {
+    names = await readdir(trashDir())
+  }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { deleted: 0, kept: 0 }
+    throw error
+  }
+  const cutoff = Date.now() - keepDays * DAY_MS
+  let deleted = 0
+  let kept = 0
+  for (const name of names) {
+    const item = join(trashDir(), name)
+    const info = await stat(item).catch(() => null)
+    // Something that vanished while we looked is neither deleted nor kept.
+    if (info === null) continue
+    if (!info.isDirectory() || info.mtimeMs > cutoff) {
+      kept += 1
+      continue
+    }
+    try {
+      await rm(item, { recursive: true, force: true })
+      deleted += 1
+    }
+    catch {
+      kept += 1
+    }
+  }
+  return { deleted, kept }
 }
 
 /**
@@ -1138,6 +1193,7 @@ const OPS: OpDefinition[] = [
   { id: 'skill.delete', write: true, audit: true, note: 'Moves a skill into the trash folder; nothing is deleted from disk.' },
   { id: 'skill.restore', write: true, audit: true, note: 'Moves a trashed skill back to the root its meta.json records.' },
   { id: 'skill.trash', write: false, audit: false, note: 'Lists the trash folder contents, newest first; read-only.' },
+  { id: 'skill.trashClean', write: true, audit: true, note: 'Removes trash folders older than the retention setting; 0 days keeps every entry.' },
   { id: 'skill.import', write: true, audit: false, note: 'Installs skill files from a local bundle (.md, directory or .zip) into a root.' },
   { id: 'skill.move', write: true, audit: true, note: 'Moves a skill between skill roots; an existing destination is refused.' },
 ]
@@ -1158,6 +1214,39 @@ function field(payload: Record<string, unknown>, key: string): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+/**
+ * Days the payload asks for, else the stored setting, else the default. An empty or unusable value
+ * falls back rather than turning into a surprise `0` that silently keeps everything.
+ */
+function keepDaysOf(payload: Record<string, unknown>, env: HostEnv): number {
+  const asked = payload.days
+  if (typeof asked === 'number') return Number.isFinite(asked) ? asked : DEFAULT_TRASH_KEEP_DAYS
+  if (typeof asked === 'string' && asked.trim() !== '') {
+    const parsed = Number(asked)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  const stored = Number(env.state.settings['skills.trashKeepDays'] ?? DEFAULT_TRASH_KEEP_DAYS)
+  return Number.isFinite(stored) ? stored : DEFAULT_TRASH_KEEP_DAYS
+}
+
+/** Settings the skills tab exposes; the client renders them generically from here. */
+function skillsSettings(): SettingsField[] {
+  return [
+    {
+      key: 'skills.trashKeepDays',
+      type: 'number',
+      default: DEFAULT_TRASH_KEEP_DAYS,
+      min: 0,
+      max: MAX_TRASH_KEEP_DAYS,
+      label: { zh: '回收站保留天数', en: 'Days to keep a trashed skill' },
+      hint: {
+        zh: '删除的技能在回收站里保留这么久，过期后由启动清理或「清理回收站」移除；0 表示永久保留。',
+        en: 'A deleted skill stays in the trash this long; the startup sweep or the clean-trash op removes it afterwards. 0 keeps them forever.',
+      },
+    },
+  ]
+}
+
 /** One handler per declared op; every failure comes back as ok:false with a code. */
 export function createSkillsDomain(): DomainRegistration {
   return {
@@ -1166,6 +1255,7 @@ export function createSkillsDomain(): DomainRegistration {
       title: { zh: '技能', en: 'Skills' },
       ops: OPS,
       panels: [{ slot: 'plugins.tab', id: 'skills', order: 20 }],
+      settings: skillsSettings(),
     },
     handlers: {
       'skill.list': guarded(async (_payload, env) => {
@@ -1203,6 +1293,11 @@ export function createSkillsDomain(): DomainRegistration {
       'skill.delete': guarded(async (payload, env) => await deleteSkill(env, field(payload, 'id'))),
       'skill.restore': guarded(async (payload, env) => await restoreSkill(env, field(payload, 'trashPath'))),
       'skill.trash': guarded(async () => ({ ok: true, items: await listTrash() })),
+      'skill.trashClean': guarded(async (payload, env) => {
+        const days = keepDaysOf(payload, env)
+        const result = await cleanupTrash(days)
+        return { ok: true, days, deleted: result.deleted, kept: result.kept }
+      }),
       'skill.import': guarded(async (payload, env) => {
         const roots = skillRoots(env)
         const targetId = field(payload, 'targetId')

@@ -82,6 +82,28 @@ export function ToolsView(props: ViewProps): React.ReactElement {
   const [plan, setPlan] = React.useState<PlanReport | null>(null)
   const [planError, setPlanError] = React.useState<string | null>(null)
   const [planning, setPlanning] = React.useState(false)
+  const [costs, setCosts] = React.useState<Record<string, number>>({})
+  const showCosts = snapshot.settings['tools.showTokenEstimate'] !== false
+
+  React.useEffect(() => {
+    if (!showCosts) return
+    let live = true
+    void runOp('tool.costs', {}).then(result => {
+      if (!live || !result.ok) return
+      const data = result.data !== null && typeof result.data === 'object' ? result.data as Record<string, unknown> : {}
+      const rows = Array.isArray(data.tools) ? data.tools : []
+      const next: Record<string, number> = {}
+      for (const row of rows) {
+        if (row === null || typeof row !== 'object') continue
+        const record = row as Record<string, unknown>
+        if (typeof record.name === 'string' && typeof record.tokens === 'number') next[record.name] = record.tokens
+      }
+      setCosts(next)
+    })
+    return () => { live = false }
+  }, [showCosts])
+
+  const costTotal = Object.values(costs).reduce((sum, value) => sum + value, 0)
 
   // enabled is the installation mask only (snapshot.ts), so the draft starts from it.
   const baseMask = React.useMemo(
@@ -193,6 +215,7 @@ export function ToolsView(props: ViewProps): React.ReactElement {
           clearLabel={t('action.clear')}
         />
         <Badge tone="brand">{t('tools.count', { n: rows.length })}</Badge>
+        {showCosts && costTotal > 0 ? <Badge tone="neutral">{lang === 'zh' ? `合计 ~${costTotal} tok` : `~${costTotal} tok total`}</Badge> : null}
         <Badge tone={dirty ? 'warn' : 'neutral'}>
           {t('tools.masked')} {mask.length}
         </Badge>
@@ -265,6 +288,7 @@ export function ToolsView(props: ViewProps): React.ReactElement {
                           {hidden ? t('tools.masked') : t('tools.visible')}
                         </Badge>
                         {tool.lazy === true ? <Badge tone="off">{t('tools.lazy')}</Badge> : null}
+                        {showCosts && costs[tool.name] !== undefined ? <Badge tone="neutral">{'~' + String(costs[tool.name]) + ' tok'}</Badge> : null}
                       </span>
                     </div>
                     <Switch

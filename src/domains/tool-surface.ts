@@ -529,6 +529,91 @@ export async function applySurface(options: SurfaceApplyOptions): Promise<Surfac
   return { ok: true, status: 'applied', masked: true, deny: merged.deny, description }
 }
 
+// -- schema cost -------------------------------------------------------------
+
+/** The tools service that answers definitions(); the mask port and this reader stay separate. */
+export const TOOLS_SERVICE = 'tools'
+
+/**
+ * The one cost unit this panel reports: the tool's schema JSON, four characters per token.
+ * It is a floor, not a measurement - the PTC view adds its own render overhead on top.
+ */
+export const TOOL_COST_MODE = 'schema-json-4'
+
+export interface ToolCostRow {
+  name: string
+  /** Serialized schema length; the same string the token divisor reads, so the two agree. */
+  bytes: number
+  /** Estimated prompt tokens; never below 1, so even a stub schema shows a cost. */
+  tokens: number
+}
+
+export interface ToolCostReport {
+  tools: ToolCostRow[]
+  /** Estimated tokens for the named tools (sum of the rows), not a row count. */
+  total: number
+  mode: typeof TOOL_COST_MODE
+}
+
+/** One definition measured the way the mode declares. */
+export function costOfDefinition(definition: unknown): { bytes: number; tokens: number } {
+  const text = JSON.stringify(definition) ?? ''
+  const bytes = text.length
+  return { bytes, tokens: Math.max(1, Math.ceil(bytes / 4)) }
+}
+
+/**
+ * Every definition as a cost row. A definition without a name is dropped: the panel keys costs by
+ * tool name, so a row that cannot be attributed would only inflate the total.
+ */
+export function toolCostReport(definitions: readonly unknown[]): ToolCostReport {
+  const tools: ToolCostRow[] = []
+  for (const definition of definitions) {
+    const record = asRecord(definition)
+    const name = typeof record.name === 'string' ? record.name.trim() : ''
+    if (name === '') continue
+    const cost = costOfDefinition(definition)
+    tools.push({ name, bytes: cost.bytes, tokens: cost.tokens })
+  }
+  const total = tools.reduce((sum, row) => sum + row.tokens, 0)
+  return { tools, total, mode: TOOL_COST_MODE }
+}
+
+type DefinitionsCall = (this: unknown, ...args: unknown[]) => unknown
+
+/**
+ * The host's tool definitions, or a capability-missing failure.
+ *
+ * definitions() is optional on the tools service and its arity is not part of the contract: the
+ * panel first asks for the two-argument form (agent scope, filter) and retries with one argument
+ * when the host refuses that call. A host without the service, or whose call fails both ways,
+ * degrades to capability-missing - the tools page still works, it just shows no costs.
+ */
+export async function readToolDefinitions(services: { get(name: string): unknown }): Promise<unknown[]> {
+  const raw = services.get(TOOLS_SERVICE)
+  if (raw === null || typeof raw !== 'object') {
+    throw fail('capability-missing', 'no ' + TOOLS_SERVICE + ' service: cannot estimate tool schema cost')
+  }
+  const definitions = (raw as { definitions?: unknown }).definitions
+  if (typeof definitions !== 'function') {
+    throw fail('capability-missing', TOOLS_SERVICE + '.definitions() is not available: cannot estimate tool schema cost')
+  }
+  const call = definitions as DefinitionsCall
+  let list: unknown
+  try {
+    list = await call.call(raw, undefined, undefined)
+  }
+  catch {
+    try {
+      list = await call.call(raw, undefined)
+    }
+    catch (error) {
+      throw fail('capability-missing', TOOLS_SERVICE + '.definitions() failed: ' + errorText(error))
+    }
+  }
+  return Array.isArray(list) ? list : []
+}
+
 // -- ops ---------------------------------------------------------------------
 
 function requireDeny(payload: unknown): string[] {
@@ -611,6 +696,11 @@ const toolDescribe: OpHandler = async (payload, env) => {
   }
 }
 
+const toolCosts: OpHandler = async (payload, env) => {
+  void payload
+  return toolCostReport(await readToolDefinitions(env.services))
+}
+
 const lazySet: OpHandler = async (payload, env) => {
   const body = asRecord(payload)
   if (typeof body.server !== 'string' || body.server.trim() === '') throw fail('bad-payload', 'server is required')
@@ -645,6 +735,7 @@ export function toolSurfaceDomain(): DomainRegistration {
         { id: 'tool.import', write: true, audit: false, note: 'Merges another panel tool deny list into state.json, filtered to tools this host can restrict.' },
         { id: 'tool.plan', write: false, audit: false, note: 'Reports the merged deny list and its per-source attribution; touches nothing.' },
         { id: 'tool.describe', write: false, audit: false, note: 'Renders the surface report plus the lazy catalog prompt; touches nothing.' },
+        { id: 'tool.costs', write: false, audit: false, note: 'Estimates each tool schema as JSON ÷4 tokens and sums the catalog; reads tools.definitions() and writes nothing.' },
         { id: 'lazy.set', write: true, audit: false, note: 'Turns lazy mode on or off for one MCP server and re-applies the mask.' },
         { id: 'lazy.load', write: true, audit: false, note: 'Loads tool names back into the model view and re-applies the mask.' },
         { id: 'lazy.unload', write: true, audit: false, note: 'Unloads tool names from the model view and re-applies the mask.' },
@@ -655,6 +746,7 @@ export function toolSurfaceDomain(): DomainRegistration {
       'tool.import': toolImport,
       'tool.plan': toolPlan,
       'tool.describe': toolDescribe,
+      'tool.costs': toolCosts,
       'lazy.set': lazySet,
       'lazy.load': lazyToggle,
       'lazy.unload': lazyToggle,

@@ -101,6 +101,14 @@ export interface MaskInfo {
   problems: string[]
 }
 
+/** What the host says about itself: the build it runs and the runtime under it. */
+export interface HostMeta {
+  pluginVersion: string
+  node: string
+  platform: string
+  pid: number
+}
+
 export interface PatchInfo {
   path: string | null
   rows: number
@@ -192,6 +200,8 @@ export interface HubSnapshot {
   patchInfo: PatchInfo
   /** The per-agent tool mask: mounted agents, deny list and problems. */
   mask: MaskInfo
+  /** The host's own version and runtime, shown on the Diagnostics page. */
+  meta: HostMeta
   /** When this copy was read, used by the topbar to show staleness. */
   fetchedAt: number
 }
