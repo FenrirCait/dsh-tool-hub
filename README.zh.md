@@ -24,9 +24,8 @@ dsh plugin install ./dsh-tool-hub
 
 装完打开**插件 → 总控台**，或侧边栏的**工具总控台**。不需要重启，插件热加载。
 
-发布包内还带官方兼容包 `compat/codex-ui-glass/`。复制到
-`<profile>/.sandbox/extensions/codex-ui-glass/`（或 `~/.dsh/tool-hub/extensions/codex-ui-glass/`）
-并启用，面板、Dock 按钮和侧边栏入口就会跟随 codex-ui 的云母/平铺玻璃设置。
+发布包内还带官方兼容包 `compat/codex-ui-glass/`。它会从安装包自动出现在**扩展**页，不需要复制；
+在那里启用后，面板、Dock 按钮和侧边栏入口就会跟随 codex-ui 的云母/平铺玻璃设置。默认关闭。
 
 ## 能做什么
 

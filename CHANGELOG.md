@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.0-alpha.60
+
+- `compat/` is now an extension root: official compat packs appear in **Extensions** straight
+  from the installed package, with no profile copy. A profile copy still wins on an id clash.
+- The pack stays opt-in; it is listed and loadable, not auto-enabled.
+
 ## 2.0.0-alpha.59
 
 - Promote the codex-ui glass pack from `examples/` to the first-party `compat/codex-ui-glass/`

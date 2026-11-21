@@ -8,8 +8,8 @@
  */
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { stateDir } from '../core/io.js'
 import type { DomainRegistration } from '../shared/contract.js'
 import type { DomainModule, LocalizedText } from '../shared/types.js'
@@ -81,9 +81,14 @@ export interface ExtensionManagerOptions {
   log: (level: 'info' | 'warn', message: string) => void
 }
 
-/** Profile-scoped first, then the shared home folder; a profile extension wins on an id clash. */
+/**
+ * Profile-scoped first, then the shared home folder, then the packs bundled with the package.
+ * A profile copy wins on an id clash; bundled packs are read-only until the owner enables them,
+ * so they appear in the Extensions page without being copied into the profile.
+ */
 export function extensionRoots(): string[] {
-  const roots = [join(stateDir(), 'extensions'), join(homedir(), '.dsh', 'tool-hub', 'extensions')]
+  const bundled = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'compat')
+  const roots = [join(stateDir(), 'extensions'), join(homedir(), '.dsh', 'tool-hub', 'extensions'), bundled]
   return [...new Set(roots.map(root => resolve(root)))]
 }
 

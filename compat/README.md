@@ -7,11 +7,12 @@ First-party compatibility packs that ship with dsh-tool-hub. They are normal loc
 |---|---|
 | `codex-ui-glass` | Makes the tool hub panel, dock button and sidebar entry follow codex-ui's glass / mica settings. |
 
-## Install
+## Use
 
-Copy the pack folder into an extension root and enable it in **Extensions**:
+The package's `compat/` folder is an extension root, so every pack here appears in **Extensions**
+as soon as the plugin is installed — no copying. Enable the pack there.
 
-- profile: `<profile>/.sandbox/extensions/codex-ui-glass/`
-- shared: `~/.dsh/tool-hub/extensions/codex-ui-glass/`
+A profile copy under `<profile>/.sandbox/extensions/codex-ui-glass/` (or the shared
+`~/.dsh/tool-hub/extensions/`) wins over the bundled one if you need to customize it.
 
 Compat packs are **not auto-enabled**: they change how the panel looks, so the owner opts in.
