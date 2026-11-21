@@ -74,7 +74,26 @@ function toolRows(env: HostEnv): Array<{ name: string; enabled: boolean; server:
   const tools = env.services.get('tools') as Record<string, unknown> | null | undefined
   const view = typeof tools?.view === 'function' ? (tools.view as (arg: unknown) => unknown)(undefined) : null
   const record = asRecord(view)
-  const names = [...new Set([...stringList(record.knownNames), ...stringList(record.restrictableNames)])]
+  // The root view only carries root-scope registrations; MCP tools live in agent scope, so the
+  // definitions list is the only complete inventory the panel can render.
+  let definitions: unknown = null
+  if (typeof tools?.definitions === 'function') {
+    try {
+      definitions = (tools.definitions as (scope?: unknown, set?: unknown) => unknown)(undefined, undefined)
+    }
+    catch {
+      try {
+        definitions = (tools.definitions as (scope?: unknown) => unknown)(undefined)
+      }
+      catch {
+        definitions = null
+      }
+    }
+  }
+  const definedNames = Array.isArray(definitions)
+    ? definitions.map(item => (item !== null && typeof item === 'object' ? (item as Record<string, unknown>).name : undefined)).filter((name): name is string => typeof name === 'string')
+    : []
+  const names = [...new Set([...stringList(record.knownNames), ...stringList(record.restrictableNames), ...definedNames])]
   const restrictable = new Set(stringList(record.restrictableNames))
   const deny = new Set(env.state.toolDeny)
   const lazy = readLazy(env.state)

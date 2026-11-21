@@ -434,13 +434,16 @@ export function replaceMcpConfig(text: string, id: string, config: Record<string
  */
 export function appendMcpRow(text: string, id: string, config: Record<string, unknown>, disabled: boolean): string {
   const doc = splitDocument(text)
+  // A top-level `- id:` entry only overrides an existing module; new modules must be nested in an
+  // `- insert:` list or the loader never starts them.
   const body = [
-    '- id: ' + scalarText(id),
-    '  name: "' + MCP_MODULE + '"',
-    '  config:',
-    ...(Object.keys(config).length === 0 ? ['    {}'] : configLines(config, 4)),
+    '- insert:',
+    '  - id: ' + scalarText(id),
+    '    name: "' + MCP_MODULE + '"',
+    '    config:',
+    ...(Object.keys(config).length === 0 ? ['      {}'] : configLines(config, 6)),
   ]
-  if (disabled) body.push('  disabled: true')
+  if (disabled) body.push('    disabled: true')
   const firstBegin = doc.lines.findIndex(line => /^[ \t]*#[ \t]*>>>.*:begin[ \t]*$/.test(line))
   const at = firstBegin >= 0 ? firstBegin : doc.lines.length
   // No trimming: leading comments, blank separators and the file's own ending all survive.
@@ -452,7 +455,25 @@ export function removeMcpRow(text: string, id: string): string {
   const row = parseMcpRows(text).find(candidate => candidate.id === id)
   if (row === undefined) fail('unknown-mcp', 'mcp row "' + id + '" is not in this profile patch')
   const doc = splitDocument(text)
-  return finishDocument(doc, [...doc.lines.slice(0, row.startLine), ...doc.lines.slice(row.endLine)])
+  let lines = [...doc.lines.slice(0, row.startLine), ...doc.lines.slice(row.endLine)]
+  // Drop the `- insert:` header when its last row is gone, so create+delete restores the bytes.
+  if (row.indent > 0) {
+    let header = row.startLine - 1
+    while (header >= 0 && lines[header]?.trim() === '') header -= 1
+    if (header >= 0 && /^- insert:\s*$/.test(lines[header] ?? '')) {
+      let remaining = false
+      for (let cursor = header + 1; cursor < lines.length; cursor += 1) {
+        const current = lines[cursor]
+        if (current === undefined) break
+        if (current.trim() === '') continue
+        if (!/^\s/.test(current)) break
+        remaining = true
+        break
+      }
+      if (!remaining) lines = [...lines.slice(0, header), ...lines.slice(header + 1)]
+    }
+  }
+  return finishDocument(doc, lines)
 }
 
 export async function readPatchText(path: string): Promise<string> {
