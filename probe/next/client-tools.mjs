@@ -175,6 +175,14 @@ check('confirm-before-write', () => {
 
 // ── empty states ────────────────────────────────────────────────────────────
 
+check('lazy-session-selector', () => {
+  assert(includes(body, 'th-lazy-session'), 'the lazy card needs a scope selector')
+  assert(includes(body, 'snapshot.sessionList.map'), 'the selector must offer the host session list')
+  assert(includes(body, "'全局（所有会话）'"), 'the default option is global')
+  assert(includes(body, "sessionId: lazySession"), 'loads must carry the chosen session')
+  return 'global default + session option'
+})
+
 check('empty-state', () => {
   assert(/if \(snapshot\.tools\.length === 0\)/.test(body), 'an empty inventory needs its own branch')
   assert((body.match(/t\('tools\.empty'\)/g) ?? []).length >= 2, 'both empty states must use tools.empty')
@@ -320,14 +328,14 @@ check('action-lazy-switch', () => {
 })
 
 check('action-lazy-load', () => {
-  assert(includes(body, 'fire(LAZY_LOAD, entry.server, { names: entry.tools, load: true })'), 'load must send the server names')
+  assert(includes(body, 'fire(LAZY_LOAD, entry.server, { names: entry.tools, load: true, ...(lazySession === \'\' ? {} : { sessionId: lazySession }) })'), 'load must send the server names and the chosen session')
   assert(includes(body, 'busy === `${LAZY_LOAD}:${entry.server}`'), 'load must key its busy state')
   assert(includes(body, "lang === 'zh' ? '全部加载' : 'Load all'"), 'the load button needs a bilingual label')
   return 'names + load:true, per row'
 })
 
 check('action-lazy-unload', () => {
-  assert(includes(body, 'fire(LAZY_UNLOAD, entry.server, { names: entry.tools, load: false })'), 'unload must send the server names')
+  assert(includes(body, 'fire(LAZY_UNLOAD, entry.server, { names: entry.tools, load: false, ...(lazySession === \'\' ? {} : { sessionId: lazySession }) })'), 'unload must send the server names and the chosen session')
   assert(includes(body, 'busy === `${LAZY_UNLOAD}:${entry.server}`'), 'unload must key its busy state')
   assert(includes(body, "lang === 'zh' ? '全部卸载' : 'Unload all'"), 'the unload button needs a bilingual label')
   return 'names + load:false, per row'

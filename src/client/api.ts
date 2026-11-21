@@ -415,6 +415,13 @@ export function normalizeSnapshot(raw: unknown): HubSnapshot {
     presets: presetsOf(record.presets),
     tools: asRows(record.tools, toolOf),
     sessions: sessionsOf(record.sessions),
+    sessionList: Array.isArray(record.sessionList)
+      ? record.sessionList.map(item => asRecord(item)).filter(item => asString(item.id) !== '').map(item => ({
+          id: asString(item.id),
+          title: asString(item.title, asString(item.id)),
+          ...(typeof item.updatedAt === 'number' ? { updatedAt: item.updatedAt } : {}),
+        }))
+      : [],
     scene: sceneOf(record.scene),
     paths: {
       home: asString(paths.home),

@@ -196,6 +196,7 @@ export interface HubSnapshot {
   presets: Record<string, PresetRow>
   tools: ToolRow[]
   sessions: Record<string, string[]>
+  sessionList: Array<{ id: string; title: string; updatedAt?: number }>
   scene: SceneState
   paths: SnapshotPaths
   mcpError: string | null

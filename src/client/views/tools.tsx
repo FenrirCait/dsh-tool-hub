@@ -12,7 +12,7 @@
  */
 import * as React from 'react'
 import { runOp } from '../api.js'
-import { Badge, Button, Callout, Card, Dialog, Empty, SearchBox, Switch, Toolbar } from '../components.js'
+import { Badge, Button, Callout, Card, Dialog, Empty, SearchBox, Select, Switch, Toolbar } from '../components.js'
 import type { ToolRow, ViewProps } from '../types.js'
 import { ScopeCard } from './scope-card.js'
 import { OnDemandCard } from './on-demand-card.js'
@@ -91,6 +91,7 @@ export function ToolsView(props: ViewProps): React.ReactElement {
   const [plan, setPlan] = React.useState<PlanReport | null>(null)
   const [planError, setPlanError] = React.useState<string | null>(null)
   const [planning, setPlanning] = React.useState(false)
+  const [lazySession, setLazySession] = React.useState('')
   const [costs, setCosts] = React.useState<Record<string, number>>({})
   const showCosts = snapshot.settings['tools.showTokenEstimate'] !== false
 
@@ -333,6 +334,18 @@ export function ToolsView(props: ViewProps): React.ReactElement {
         ) : (
           <Card label={t('tools.lazy')}>
             <div className="th-row-meta">
+              <Select
+                id="th-lazy-session"
+                value={lazySession}
+                label={copyLabel(lang, '作用域', 'Scope')}
+                options={[
+                  { value: '', label: copyLabel(lang, '全局（所有会话）', 'Global (all sessions)') },
+                  ...snapshot.sessionList.map(item => ({ value: item.id, label: item.title === item.id ? item.id : item.title + ' · ' + item.id.slice(0, 8) })),
+                ]}
+                onChange={setLazySession}
+              />
+            </div>
+            <div className="th-row-meta">
               {copyLabel(lang, '面板「加载」是全局的；模型用 hub_tools 加载只对当前会话。会话结束或超过设置里的 TTL 会清理。', 'Panel loads are global; hub_tools loads apply to the current session only. Session end or the TTL in settings clears them.')}
             </div>
             <div className="th-list">
@@ -349,14 +362,14 @@ export function ToolsView(props: ViewProps): React.ReactElement {
                           <Button
                             variant="ghost"
                             busy={busy === `${LAZY_LOAD}:${entry.server}`}
-                            onClick={() => { fire(LAZY_LOAD, entry.server, { names: entry.tools, load: true }) }}
+                            onClick={() => { fire(LAZY_LOAD, entry.server, { names: entry.tools, load: true, ...(lazySession === '' ? {} : { sessionId: lazySession }) }) }}
                           >
                             {loadAll}
                           </Button>
                           <Button
                             variant="ghost"
                             busy={busy === `${LAZY_UNLOAD}:${entry.server}`}
-                            onClick={() => { fire(LAZY_UNLOAD, entry.server, { names: entry.tools, load: false }) }}
+                            onClick={() => { fire(LAZY_UNLOAD, entry.server, { names: entry.tools, load: false, ...(lazySession === '' ? {} : { sessionId: lazySession }) }) }}
                           >
                             {unloadAll}
                           </Button>
@@ -364,7 +377,7 @@ export function ToolsView(props: ViewProps): React.ReactElement {
                             variant="ghost"
                             busy={busy === `${LAZY_RESET}:${entry.server}`}
                             disabled={entry.hidden >= entry.tools.length}
-                            onClick={() => { fire(LAZY_RESET, entry.server, { server: entry.server }) }}
+                            onClick={() => { fire(LAZY_RESET, entry.server, { server: entry.server, ...(lazySession === '' ? {} : { sessionId: lazySession }) }) }}
                           >
                             {copyLabel(lang, '清除已加载', 'Reset loaded')}
                           </Button>

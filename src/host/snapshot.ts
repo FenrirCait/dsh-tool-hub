@@ -1,6 +1,6 @@
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { dirname } from 'node:path'
+import { dirname, join } from 'node:path'
 import type { HostEnv } from '../shared/contract.js'
 import type { Registry } from '../core/registry.js'
 import { stateFile } from '../core/io.js'
@@ -50,6 +50,91 @@ async function pluginVersion(): Promise<string> {
   }
   pluginVersionCache = version
   return version
+}
+
+interface SessionOptionRow {
+  id: string
+  title: string
+  updatedAt?: number
+}
+
+let sessionCache: { at: number; rows: SessionOptionRow[] } = { at: 0, rows: [] }
+
+/** Session titles from the projection cache: the one place a readable title is cheap to read. */
+async function cachedSessionOptions(): Promise<SessionOptionRow[]> {
+  if (Date.now() - sessionCache.at < 10_000) return sessionCache.rows
+  const dir = join(homedir(), '.dsh', 'storages', 'session_projcache', 'sessions')
+  const rows: SessionOptionRow[] = []
+  try {
+    const names = (await readdir(dir)).filter(name => name.endsWith('.json'))
+    const dated: Array<{ name: string; mtime: number }> = []
+    for (const name of names) {
+      try {
+        dated.push({ name, mtime: Number((await stat(join(dir, name))).mtimeMs) })
+      }
+      catch {
+        /* a cache file that vanished between readdir and stat is skipped */
+      }
+    }
+    const newest = dated.sort((left, right) => right.mtime - left.mtime).slice(0, 120)
+    for (const item of newest) {
+      try {
+        const record = JSON.parse(await readFile(join(dir, item.name), 'utf8')) as { record?: { rows?: { title?: { val?: unknown } } } }
+        const raw = record?.record?.rows?.title?.val
+        const title = typeof raw === 'string' ? raw : ''
+        const id = item.name.slice(0, -'.json'.length)
+        if (id !== '') rows.push({ id, title: title === '' ? id : title, updatedAt: item.mtime })
+      }
+      catch {
+        /* a half-written cache file is skipped, not fatal */
+      }
+    }
+  }
+  catch {
+    /* no projection cache on this host */
+  }
+  sessionCache = { at: Date.now(), rows }
+  return rows
+}
+
+/** Known sessions: the host's list when it answers, plus ids the state already mentions. */
+async function sessionOptions(env: HostEnv): Promise<SessionOptionRow[]> {
+  const out = new Map<string, SessionOptionRow>()
+  const add = (id: unknown, title?: unknown, updatedAt?: unknown): void => {
+    if (typeof id !== 'string' || id.trim() === '' || out.has(id)) return
+    const label = typeof title === 'string' && title.trim() !== '' ? title.trim() : id
+    out.set(id, { id, title: label, ...(typeof updatedAt === 'number' ? { updatedAt } : {}) })
+  }
+  try {
+    const service = env.services.get('sessions') as { list?: unknown } | undefined
+    const list = service?.list
+    let raw: unknown = null
+    if (list !== null && typeof list === 'object' && typeof (list as { getSnapshot?: unknown }).getSnapshot === 'function') {
+      raw = (list as { getSnapshot: () => unknown }).getSnapshot()
+    }
+    else if (typeof list === 'function') raw = await (list as () => unknown)()
+    const record = asRecord(raw)
+    const ids = Array.isArray(record.ids) ? record.ids : []
+    const byId = asRecord(record.byId)
+    for (const id of ids) {
+      const row = asRecord(byId[String(id)])
+      add(row.id ?? row.sessionId ?? id, row.title ?? row.name, row.updatedAt ?? row.lastActiveAt)
+    }
+    const rows = Array.isArray(raw) ? raw : record.sessions
+    if (Array.isArray(rows)) {
+      for (const item of rows) {
+        const row = asRecord(item)
+        add(row.id ?? row.sessionId, row.title ?? row.name, row.updatedAt ?? row.lastActiveAt)
+      }
+    }
+  }
+  catch {
+    /* a host without a session list still gets the ids the state knows */
+  }
+  for (const row of await cachedSessionOptions()) add(row.id, row.title, row.updatedAt)
+  for (const id of Object.keys(env.state.sessions)) add(id)
+  for (const id of Object.keys(readLazy(env.state).sessions)) add(id)
+  return [...out.values()].sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0) || left.id.localeCompare(right.id))
 }
 
 function maskInfo(env: HostEnv): unknown {
@@ -154,6 +239,7 @@ export async function buildSnapshot(deps: SnapshotDeps): Promise<Record<string, 
     }])),
     tools: toolRows(env),
     sessions: env.state.sessions,
+    sessionList: await sessionOptions(env),
     scene: {
       mode: mode === null ? null : mode.name,
       since: mode?.at ?? null,
