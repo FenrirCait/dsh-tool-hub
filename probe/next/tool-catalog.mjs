@@ -26,6 +26,7 @@ function dispatcherWith(snapshot) {
     async execute(op, payload) {
       calls.push({ op, payload })
       if (op === 'snapshot') return snapshot
+      if (op === 'lazy.state') return { servers: ['alpha'], loaded: ['mcp__alpha__one'], sessions: { s1: ['mcp__alpha__three'] } }
       return { ok: true, op }
     },
   }
@@ -35,6 +36,7 @@ const snapshot = {
   tools: [
     { name: 'mcp__alpha__one', server: 'alpha', enabled: true, lazy: false },
     { name: 'mcp__alpha__two', server: 'alpha', enabled: false, lazy: true, lazyHidden: true },
+    { name: 'mcp__alpha__three', server: 'alpha', enabled: true, lazy: true, lazyHidden: true },
     { name: 'mcp__beta__one', server: null, enabled: true, lazy: false },
   ],
 }
@@ -49,24 +51,28 @@ check('definition-render', JSON.stringify(tool.output.render({}, { a: 1 })) === 
 const listed = await tool.execute({ action: 'list' })
 check('list-groups-servers', listed.servers.length === 2, String(listed.servers.length))
 const alpha = listed.servers.find(row => row.server === 'alpha')
-check('list-server-total', alpha.total === 2, String(alpha.total))
+check('list-server-total', alpha.total === 3, String(alpha.total))
 check('list-loaded-count', alpha.loaded === 1, String(alpha.loaded))
 check('list-hidden-count', Array.isArray(alpha.hidden) && alpha.hidden.includes('mcp__alpha__two'), JSON.stringify(alpha.hidden))
 check('list-effective-deny', Array.isArray(alpha.effectiveDeny) && alpha.effectiveDeny.includes('mcp__alpha__two'), JSON.stringify(alpha.effectiveDeny))
 check('list-tool-flags', alpha.tools.some(row => row.name === 'mcp__alpha__two' && row.lazy === true && row.enabled === false))
 check('list-falls-back-to-name', listed.servers.some(row => row.server === 'beta'))
 
+const sessionList = await tool.execute({ action: 'list' }, { agent: { session: { id: 's1' } } })
+const sessionAlpha = sessionList.servers.find(row => row.server === 'alpha')
+check('list-session-scope', sessionAlpha.loaded === 2 && sessionAlpha.hidden.length === 1, JSON.stringify(sessionAlpha))
+
 calls.length = 0
-const enabled = await tool.execute({ action: 'enable', server: 'alpha' })
-check('enable-server-unlazies', calls[0]?.op === 'lazy.set' && calls[0].payload.server === 'alpha' && calls[0].payload.on === false, JSON.stringify(calls[0]))
+const enabled = await tool.execute({ action: 'enable', server: 'alpha' }, { agent: { session: { id: 's1' } } })
+check('enable-server-loads', calls[0]?.op === 'lazy.load' && calls[0].payload.server === 'alpha' && calls[0].payload.load === true, JSON.stringify(calls[0]))
 
 calls.length = 0
 await tool.execute({ action: 'disable', server: 'alpha' })
-check('disable-server-lazies', calls[0]?.op === 'lazy.set' && calls[0].payload.on === true, JSON.stringify(calls[0]))
+check('disable-server-unloads', calls[0]?.op === 'lazy.unload' && calls[0].payload.server === 'alpha' && calls[0].payload.load === false, JSON.stringify(calls[0]))
 
 calls.length = 0
-await tool.execute({ action: 'enable', names: ['mcp__alpha__two', ''] })
-check('enable-names-loads', calls[0]?.op === 'lazy.load' && calls[0].payload.load === true && calls[0].payload.names.length === 1, JSON.stringify(calls[0]))
+await tool.execute({ action: 'enable', names: ['mcp__alpha__two', ''] }, { agent: { session: { id: 's1' } } })
+check('enable-names-loads', calls[0]?.op === 'lazy.load' && calls[0].payload.load === true && calls[0].payload.names.length === 1 && calls[0].payload.sessionId === 's1', JSON.stringify(calls[0]))
 
 calls.length = 0
 await tool.execute({ action: 'disable', names: ['mcp__alpha__two'] })

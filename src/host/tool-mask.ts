@@ -15,6 +15,7 @@
  */
 import { maskable } from '../core/tool-names.js'
 import { onDemandDeny, onDemandToolNames, type GroupRecord } from '../domains/groups.js'
+import { lazyDeny, type LazyState } from '../domains/tool-surface.js'
 import { DISCOVERY_NAMES, restoredOpenGroups, type SessionLogLike } from '../domains/group-exposure.js'
 import { agentScopeOf, resolveScopedDeny, type AgentScope, type ScopeResolution } from './scope-policy.js'
 
@@ -180,6 +181,9 @@ export class ToolMask {
   private readonly problems: string[] = []
   /** Where on-demand groups, the live tool view and the open cache come from; null until wired. */
   private onDemand: OnDemandSource | null = null
+  /** Lazy servers and their loads; resolved per agent because a session load is private. */
+  private lazy: LazyState | null = null
+  private lazyKnown: string[] | null = null
   /** Replay results keyed by (sessionId, seq): the O(seq) walk runs once per watermark. */
   private readonly openCache = new Map<string, ReadonlySet<string>>()
   /** Opens this process applied before the session log carried their result. */
@@ -223,8 +227,31 @@ export class ToolMask {
     }
   }
 
+  /** Wire the lazy lists; call again after every lazy op. */
+  setLazySource(lazy: LazyState | null, known: readonly string[] | null): void {
+    this.lazy = lazy === null ? null : {
+      servers: [...lazy.servers],
+      loaded: [...lazy.loaded],
+      sessions: Object.fromEntries(Object.entries(lazy.sessions).map(([id, names]) => [id, [...names]])),
+      loadedAt: { ...lazy.loadedAt },
+    }
+    this.lazyKnown = known === null ? null : [...known]
+    this.refresh()
+  }
+
+  private lazyDenyFor(agent: AgentLike | undefined): string[] {
+    if (this.lazy === null || this.lazyKnown === null) return []
+    return lazyDeny(this.lazy, this.lazyKnown, this.sessionIdOf(agent))
+  }
+
   private refresh(): void {
     if (this.disposed) return
+    // A lazy source installed before the tool view was up keeps no inventory; tools/change is the
+    // moment the names arrive. Refresh it here rather than keeping a stale null forever.
+    if (this.lazy !== null && (this.lazyKnown === null || this.lazyKnown.length === 0)) {
+      const known = knownToolNames(this.ctx)
+      if (known !== null && known.length > 0) this.lazyKnown = known
+    }
     if (!this.hasWork()) {
       this.unmountAll()
       return
@@ -237,6 +264,7 @@ export class ToolMask {
   private hasWork(): boolean {
     if (this.deny().length > 0 || this.sessionDeny.size > 0 || this.sessionAllow.size > 0) return true
     if (this.workspaceDeny.size > 0 || this.subagentAllow.length > 0 || this.subagentDeny.length > 0) return true
+    if ((this.lazy?.servers.length ?? 0) > 0) return true
     return this.onDemandGroups().length > 0
   }
 
@@ -301,6 +329,9 @@ export class ToolMask {
   denyFor(agent: AgentLike | undefined): string[] {
     const names = new Set(this.resolve(agent).resolution.deny)
     for (const name of this.onDemandDenyFor(agent)) names.add(name)
+    // Lazy tools are per session: a global load is visible everywhere, a hub_tools load only in
+    // the session that made it. This is why lazy never goes into the installation layer.
+    for (const name of this.lazyDenyFor(agent)) names.add(name)
     return [...names].sort()
   }
 
@@ -875,6 +906,7 @@ export function surfacePort(mask: ToolMask): {
 
 /** Read-only control surface for ops that own a session overlay. */
 export interface MaskControl {
+  setLazy(lazy: LazyState, known: readonly string[] | null): void
   setSessionDeny(sessionId: string, names: string[]): void
   setSessionAllow(sessionId: string, names: string[]): void
   setWorkspaceDeny(key: string, names: string[]): void
@@ -892,6 +924,7 @@ export interface MaskControl {
 
 export function maskControl(mask: ToolMask): MaskControl {
   return {
+    setLazy: (lazy, known) => mask.setLazySource(lazy, known),
     setSessionDeny: (sessionId, names) => mask.setSessionDeny(sessionId, names),
     setSessionAllow: (sessionId, names) => mask.setSessionAllow(sessionId, names),
     setWorkspaceDeny: (key, names) => mask.setWorkspaceDeny(key, names),

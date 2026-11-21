@@ -211,7 +211,12 @@ export function planSurface(previous: readonly string[] | null, merged: MergedSu
 
 export interface LazyState {
   servers: string[]
+  /** Loads the panel applied: visible in every session. */
   loaded: string[]
+  /** Loads applied from a session (hub_tools): visible only there. */
+  sessions: Record<string, string[]>
+  /** Load timestamps keyed by tool name (global) or `<sessionId>\u0000<name>`. */
+  loadedAt: Record<string, number>
 }
 
 /** Where 2.0 keeps the lazy lists. 1.x kept them at the state top level. */
@@ -236,6 +241,8 @@ export function readLazy(state: StateV2): LazyState {
   return {
     servers: cleanServers(record.servers ?? legacy.lazyServers),
     loaded: mcpNames(record.loaded ?? legacy.lazyLoaded),
+    sessions: cleanLazySessions(record.sessions),
+    loadedAt: cleanLoadedAt(record.loadedAt),
   }
 }
 
@@ -246,9 +253,40 @@ export function readLazy(state: StateV2): LazyState {
  * of replaced: a lazy toggle must never drop which groups a session has opened.
  */
 export function writeLazy(state: StateV2, next: LazyState): LazyState {
-  const cleaned: LazyState = { servers: cleanServers(next.servers), loaded: mcpNames(next.loaded) }
-  state.modules[LAZY_STATE_KEY] = { ...asRecord(state.modules[LAZY_STATE_KEY]), servers: cleaned.servers, loaded: cleaned.loaded }
+  const cleaned: LazyState = {
+    servers: cleanServers(next.servers),
+    loaded: mcpNames(next.loaded),
+    sessions: cleanLazySessions(next.sessions),
+    loadedAt: cleanLoadedAt(next.loadedAt),
+  }
+  state.modules[LAZY_STATE_KEY] = {
+    ...asRecord(state.modules[LAZY_STATE_KEY]),
+    servers: cleaned.servers,
+    loaded: cleaned.loaded,
+    sessions: cleaned.sessions,
+    loadedAt: cleaned.loadedAt,
+  }
   return cleaned
+}
+
+function cleanLazySessions(value: unknown): Record<string, string[]> {
+  const out: Record<string, string[]> = {}
+  for (const [rawId, names] of Object.entries(asRecord(value))) {
+    const sessionId = rawId.trim()
+    if (sessionId === '' || sessionId.length > 400) continue
+    const cleaned = mcpNames(names)
+    if (cleaned.length > 0) out[sessionId] = cleaned
+  }
+  return out
+}
+
+function cleanLoadedAt(value: unknown): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const [key, stamp] of Object.entries(asRecord(value))) {
+    if (key === '' || key.length > 600 || typeof stamp !== 'number' || !Number.isFinite(stamp)) continue
+    out[key] = stamp
+  }
+  return out
 }
 
 /** Session id to the on-demand groups it has opened; the durable cache behind the log replay. */
@@ -300,11 +338,20 @@ export function serverOf(name: unknown): string | null {
   return cut <= 0 ? null : rest.slice(0, cut)
 }
 
+/** Global loads plus one session's own loads. */
+export function lazyLoadedFor(lazy: LazyState, sessionId?: string): Set<string> {
+  const loaded = new Set(lazy.loaded)
+  if (typeof sessionId === 'string' && sessionId !== '') {
+    for (const name of lazy.sessions[sessionId] ?? []) loaded.add(name)
+  }
+  return loaded
+}
+
 /** Tools of lazy servers the user has not loaded; 1.x effectiveDeny minus the explicit list. */
-export function lazyDeny(lazy: LazyState, known: readonly string[]): string[] {
+export function lazyDeny(lazy: LazyState, known: readonly string[], sessionId?: string): string[] {
   const servers = new Set(lazy.servers)
   if (servers.size === 0) return []
-  const loaded = new Set(lazy.loaded)
+  const loaded = lazyLoadedFor(lazy, sessionId)
   const out: string[] = []
   for (const name of known) {
     const server = serverOf(name)
@@ -321,10 +368,10 @@ export interface LazyServerReport {
 }
 
 /** Lazy servers with how many of their tools are currently visible. */
-export function lazyReport(lazy: LazyState, known: readonly string[]): LazyServerReport[] {
+export function lazyReport(lazy: LazyState, known: readonly string[], sessionId?: string): LazyServerReport[] {
   const rows = new Map<string, LazyServerReport>()
   for (const server of lazy.servers) rows.set(server, { server, total: 0, loaded: 0, tools: [] })
-  const loaded = new Set(lazy.loaded)
+  const loaded = lazyLoadedFor(lazy, sessionId)
   for (const name of known) {
     const server = serverOf(name)
     const row = server === null ? undefined : rows.get(server)
@@ -351,43 +398,127 @@ export function lazyPrompt(lazy: LazyState, known: readonly string[]): string {
 }
 
 /**
- * Apply one lazy patch, mirroring 1.x changeLazy exactly - including its quirk: a patch that
- * carries only server and no on turns lazy off for that server and loads all its tools.
+ * Apply one lazy patch. A patch with names and a sessionId loads for that session only; without a
+ * session it is the panel's global load. Turning lazy on/off clears every scope for the server.
  */
 export interface LazyPatch {
   server?: string
   on?: boolean
   load?: boolean
   names?: string[]
+  sessionId?: string
 }
 
-export function changeLazy(state: StateV2, patch: LazyPatch, known: readonly string[]): LazyState {
+function loadedKey(sessionId: string | undefined, name: string): string {
+  return sessionId === undefined || sessionId === '' ? name : sessionId + '\u0000' + name
+}
+
+function addLoaded(lazy: LazyState, names: readonly string[], sessionId: string | undefined, now: number): void {
+  const key = sessionId === undefined || sessionId === '' ? null : sessionId
+  const current = key === null ? lazy.loaded : (lazy.sessions[key] ?? [])
+  const merged = [...new Set([...current, ...names])]
+  if (key === null) lazy.loaded = merged
+  else lazy.sessions[key] = merged
+  for (const name of names) lazy.loadedAt[loadedKey(key ?? undefined, name)] = now
+}
+
+function removeLoaded(lazy: LazyState, names: readonly string[], sessionId: string | undefined): void {
+  const key = sessionId === undefined || sessionId === '' ? null : sessionId
+  if (key === null) lazy.loaded = lazy.loaded.filter(name => !names.includes(name))
+  else lazy.sessions[key] = (lazy.sessions[key] ?? []).filter(name => !names.includes(name))
+  for (const name of names) delete lazy.loadedAt[loadedKey(key ?? undefined, name)]
+}
+
+function clearServerLazy(lazy: LazyState, server: string): void {
+  const names = new Set([...lazy.loaded, ...Object.values(lazy.sessions).flat()].filter(name => serverOf(name) === server))
+  lazy.loaded = lazy.loaded.filter(name => serverOf(name) !== server)
+  for (const [sessionId, list] of Object.entries(lazy.sessions)) {
+    const kept = list.filter(name => serverOf(name) !== server)
+    if (kept.length === 0) delete lazy.sessions[sessionId]
+    else lazy.sessions[sessionId] = kept
+  }
+  for (const key of Object.keys(lazy.loadedAt)) {
+    const name = key.includes('\u0000') ? key.slice(key.indexOf('\u0000') + 1) : key
+    if (names.has(name) || serverOf(name) === server) delete lazy.loadedAt[key]
+  }
+}
+
+export function changeLazy(state: StateV2, patch: LazyPatch, known: readonly string[], now = Date.now()): LazyState {
   const lazy = readLazy(state)
+  const sessionId = typeof patch.sessionId === 'string' && patch.sessionId.trim() !== '' ? patch.sessionId.trim() : undefined
   if (typeof patch.server === 'string') {
     const server = patch.server.trim()
     if (!SERVER_NAME.test(server)) throw fail('bad-server', 'server names are letters, digits, - and _')
-    const listed = lazyReport({ ...lazy, servers: [server] }, known)[0]
     if (patch.on === true) {
       if (!lazy.servers.includes(server)) lazy.servers.push(server)
-      // Turning lazy on hides everything that was loaded before: the user asked for a quiet server.
-      lazy.loaded = lazy.loaded.filter(name => serverOf(name) !== server)
-      if (listed !== undefined) lazy.loaded = lazy.loaded.filter(name => !listed.tools.includes(name))
+      // Turning lazy on hides everything loaded before, in every scope.
+      clearServerLazy(lazy, server)
     }
     else {
       lazy.servers = lazy.servers.filter(name => name !== server)
       // Leaving the lazy list makes the server fully visible again; stale entries would otherwise
       // resurrect as "loaded" if the server is marked lazy later.
-      lazy.loaded = lazy.loaded.filter(name => serverOf(name) !== server)
+      clearServerLazy(lazy, server)
     }
+  }
+  if (!Array.isArray(patch.names) && typeof patch.server === 'string' && typeof patch.load === 'boolean') {
+    const server = patch.server.trim()
+    const names = known.filter(name => serverOf(name) === server)
+    if (patch.load) addLoaded(lazy, names, sessionId, now)
+    else removeLoaded(lazy, names, sessionId)
   }
   if (Array.isArray(patch.names)) {
     const wanted = patch.names.filter((name): name is string => typeof name === 'string' && name.startsWith(MCP_TOOL_PREFIX))
     const lazyServers = new Set(lazy.servers)
     const usable = wanted.filter(name => lazyServers.has(serverOf(name) ?? ''))
-    if (patch.load === true) lazy.loaded = [...new Set([...lazy.loaded, ...usable])]
-    else lazy.loaded = lazy.loaded.filter(name => !usable.includes(name))
+    if (patch.load === true) addLoaded(lazy, usable, sessionId, now)
+    else removeLoaded(lazy, usable, sessionId)
   }
   return writeLazy(state, lazy)
+}
+
+/** Remove session loads and their timestamps; called when the host disposes the agent. */
+export function clearSessionLazy(state: StateV2, sessionId: string): boolean {
+  const id = sessionId.trim()
+  if (id === '') return false
+  const lazy = readLazy(state)
+  if (lazy.sessions[id] === undefined) return false
+  delete lazy.sessions[id]
+  const prefix = id + '\u0000'
+  for (const key of Object.keys(lazy.loadedAt)) if (key.startsWith(prefix)) delete lazy.loadedAt[key]
+  writeLazy(state, lazy)
+  return true
+}
+
+/** Drop loads older than ttlMinutes; 0 disables expiry. Returns true when anything changed. */
+export function pruneLazy(state: StateV2, now: number, ttlMinutes: number): boolean {
+  if (!Number.isFinite(ttlMinutes) || ttlMinutes <= 0) return false
+  const lazy = readLazy(state)
+  const cutoff = now - ttlMinutes * 60_000
+  let changed = false
+  const expired = (name: string, key: string): boolean => {
+    const stamp = lazy.loadedAt[key]
+    if (stamp !== undefined && stamp >= cutoff) return false
+    return true
+  }
+  const keptGlobal: string[] = []
+  for (const name of lazy.loaded) {
+    if (expired(name, name)) { delete lazy.loadedAt[name]; changed = true }
+    else keptGlobal.push(name)
+  }
+  lazy.loaded = keptGlobal
+  for (const [sessionId, list] of Object.entries(lazy.sessions)) {
+    const kept: string[] = []
+    for (const name of list) {
+      const key = sessionId + '\u0000' + name
+      if (expired(name, key)) { delete lazy.loadedAt[key]; changed = true }
+      else kept.push(name)
+    }
+    if (kept.length === 0) delete lazy.sessions[sessionId]
+    else lazy.sessions[sessionId] = kept
+  }
+  if (changed) writeLazy(state, lazy)
+  return changed
 }
 
 // -- host ports --------------------------------------------------------------
@@ -480,6 +611,8 @@ export interface SurfaceInputOptions {
    * would hide them from every session at once.
    */
   onDemand?: boolean
+  /** false for the installation mask: lazy loads are resolved per agent in ToolMask. */
+  lazy?: boolean
 }
 
 /** The four sources as the state currently holds them, ready for mergeSurface. */
@@ -501,7 +634,7 @@ export function surfaceInputFor(
   return {
     install: ctx.state.toolDeny,
     session: unionNames(lists),
-    lazy: lazyDeny(readLazy(ctx.state), known ?? []),
+    lazy: options?.lazy === false ? [] : lazyDeny(readLazy(ctx.state), known ?? []),
     onDemand,
     known,
   }
@@ -548,7 +681,7 @@ export async function applySurface(options: SurfaceApplyOptions): Promise<Surfac
   const port = resolveSurfacePort(options.services)
   // The installation layer owns install/session/lazy only; on-demand denial is per agent and is
   // merged in ToolMask.denyFor, never here.
-  const merged = mergeSurface(surfaceInputFor(options, options.sessionId, port, { onDemand: false }))
+  const merged = mergeSurface(surfaceInputFor(options, options.sessionId, port, { onDemand: false, lazy: false }))
   const description = describeSurface(merged)
   const key = options.sessionId ?? '*'
   const records = applied.get(options.state) ?? new Map<string, AppliedEntry>()
@@ -713,6 +846,9 @@ function requireDeny(payload: unknown): string[] {
 }
 
 async function maskAfter(state: StateV2, env: HostEnv, sessionId?: string): Promise<SurfaceApplyResult> {
+  const port = resolveSurfacePort(env.services)
+  const mask = env.services.get('toolHub.mask') as { setLazy?: (lazy: LazyState, known: readonly string[] | null) => void } | undefined
+  mask?.setLazy?.(readLazy(state), port?.known() ?? null)
   const result = await applySurface({ state, services: env.services, sessionId })
   if (!result.ok) env.log('warn', '[tool-hub] tool mask refused: ' + (result.message ?? result.status))
   return result
@@ -801,21 +937,47 @@ const lazySet: OpHandler = async (payload, env) => {
   return { lazy: lazy.servers, loaded: lazy.loaded, backup, mask: await maskAfter(env.state, env) }
 }
 
+const lazyStateOp: OpHandler = async (_payload, env) => {
+  const lazy = readLazy(env.state)
+  return { servers: lazy.servers, loaded: lazy.loaded, sessions: lazy.sessions }
+}
+
 const lazyReset: OpHandler = async (payload, env) => {
   const body = asRecord(payload)
   const server = typeof body.server === 'string' && body.server.trim() !== '' ? body.server.trim() : null
+  const sessionId = typeof body.sessionId === 'string' && body.sessionId.trim() !== '' ? body.sessionId.trim() : null
   const lazy = readLazy(env.state)
-  lazy.loaded = server === null ? [] : lazy.loaded.filter(name => serverOf(name) !== server)
+  const matches = (name: string): boolean => server === null || serverOf(name) === server
+  if (sessionId === null) {
+    lazy.loaded = lazy.loaded.filter(name => !matches(name))
+    for (const [id, list] of Object.entries(lazy.sessions)) {
+      const kept = list.filter(name => !matches(name))
+      if (kept.length === 0) delete lazy.sessions[id]
+      else lazy.sessions[id] = kept
+    }
+  }
+  else {
+    lazy.sessions[sessionId] = (lazy.sessions[sessionId] ?? []).filter(name => !matches(name))
+    if (lazy.sessions[sessionId]?.length === 0) delete lazy.sessions[sessionId]
+  }
+  for (const key of Object.keys(lazy.loadedAt)) {
+    if (sessionId !== null && !key.startsWith(sessionId + '\u0000')) continue
+    const name = key.includes('\u0000') ? key.slice(key.indexOf('\u0000') + 1) : key
+    if (sessionId === null || key.startsWith(sessionId + '\u0000')) {
+      if (matches(name)) delete lazy.loadedAt[key]
+    }
+  }
   writeLazy(env.state, lazy)
   const backup = await env.save('lazy-reset')
   const next = readLazy(env.state)
-  return { lazy: next.servers, loaded: next.loaded, backup, mask: await maskAfter(env.state, env) }
+  return { lazy: next.servers, loaded: next.loaded, sessions: next.sessions, backup, mask: await maskAfter(env.state, env) }
 }
 
 const lazyToggle: OpHandler = async (payload, env) => {
   const body = asRecord(payload)
   const patch: LazyPatch = { load: body.load === true }
   if (typeof body.server === 'string' && body.server.trim() !== '') patch.server = body.server
+  if (typeof body.sessionId === 'string' && body.sessionId.trim() !== '') patch.sessionId = body.sessionId.trim()
   if (Array.isArray(body.names)) patch.names = asStringList(body.names)
   if (patch.server === undefined && patch.names === undefined) throw fail('bad-payload', 'pass server or names')
   const known = resolveSurfacePort(env.services)?.known() ?? []
@@ -975,6 +1137,7 @@ export function toolSurfaceDomain(): DomainRegistration {
         { id: 'lazy.load', write: true, audit: false, note: 'Loads tool names back into the model view and re-applies the mask.' },
         { id: 'lazy.unload', write: true, audit: false, note: 'Unloads tool names from the model view and re-applies the mask.' },
         { id: 'lazy.reset', write: true, audit: false, note: 'Clears lazily loaded names (one server or all) so they start hidden again.' },
+        { id: 'lazy.state', write: false, audit: false, note: 'Reports lazy servers and the global/per-session loaded lists; touches nothing.' },
       ],
     },
     handlers: {
@@ -991,6 +1154,7 @@ export function toolSurfaceDomain(): DomainRegistration {
       'lazy.load': lazyToggle,
       'lazy.unload': lazyToggle,
       'lazy.reset': lazyReset,
+      'lazy.state': lazyStateOp,
     },
   }
 }

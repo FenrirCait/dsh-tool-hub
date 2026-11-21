@@ -25,7 +25,11 @@ const {
   changeLazy,
   describeSurface,
   lazyDeny,
+  lazyLoadedFor,
   lazyPrompt,
+  lazyReport,
+  pruneLazy,
+  clearSessionLazy,
   mergeSurface,
   planSurface,
   readLazy,
@@ -566,6 +570,27 @@ check('lazy: the catalog prompt exists while a server is lazy',
 changeLazy(lazyState, { server: 'srv' }, lazyKnown)
 check('lazy: a server-only patch mirrors 1.x and turns lazy off', equal(readLazy(lazyState).servers, []))
 check('lazy: leaving the lazy list clears that server\'s loaded names', equal(readLazy(lazyState).loaded, []))
+const scoped = makeState()
+changeLazy(scoped, { server: 'srv', on: true }, lazyKnown)
+changeLazy(scoped, { names: ['mcp__srv__a'], load: true, sessionId: 's1' }, lazyKnown)
+check('lazy: a session load is visible only in that session',
+  equal(lazyDeny(readLazy(scoped), lazyKnown, 's1'), ['mcp__srv__b'])
+  && equal(lazyDeny(readLazy(scoped), lazyKnown, 's2'), ['mcp__srv__a', 'mcp__srv__b']))
+check('lazy: lazyReport counts session loads separately',
+  lazyReport(readLazy(scoped), lazyKnown, 's1')[0].loaded === 1
+  && lazyReport(readLazy(scoped), lazyKnown, 's2')[0].loaded === 0)
+check('lazy: removing session loads clears the session key',
+  changeLazy(scoped, { names: ['mcp__srv__a'], load: false, sessionId: 's1' }, lazyKnown) && readLazy(scoped).sessions.s1 === undefined)
+changeLazy(scoped, { names: ['mcp__srv__a'], load: true, sessionId: 's1' }, lazyKnown)
+check('lazy: clearSessionLazy drops that session only',
+  clearSessionLazy(scoped, 's1') === true && readLazy(scoped).sessions.s1 === undefined && readLazy(scoped).servers.includes('srv'))
+const aged = makeState()
+changeLazy(aged, { server: 'srv', on: true }, lazyKnown, 1_000)
+changeLazy(aged, { names: ['mcp__srv__a'], load: true }, lazyKnown, 1_000)
+check('lazy: pruneLazy expires old loads and keeps fresh ones',
+  pruneLazy(aged, 1_000 + 61 * 60_000, 60) === true
+  && equal(readLazy(aged).loaded, [])
+  && pruneLazy(aged, 1_000 + 61 * 60_000, 0) === false)
 check('lazy: serverOf splits an MCP name and rejects the rest',
   serverOf('mcp__a__b') === 'a' && serverOf('plain') === null)
 

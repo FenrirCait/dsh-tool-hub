@@ -16,7 +16,7 @@ import { PORTABILITY_OPS, portabilityHandlers } from './portability.js'
 import { buildSnapshot } from './snapshot.js'
 import { ExtensionManager, extensionRoots, type ExtensionStatus } from './extensions.js'
 import { attachToolMask, knownToolNames, maskControl, surfacePort, type ToolMask } from './tool-mask.js'
-import { applySurface, readOpen } from '../domains/tool-surface.js'
+import { applySurface, clearSessionLazy, pruneLazy, readLazy, readOpen } from '../domains/tool-surface.js'
 import { normalizeGroups } from '../domains/groups.js'
 import { createGroupTool } from './group-tool.js'
 
@@ -48,6 +48,7 @@ const EXTENSION_ID = /^[a-z0-9][a-z0-9_-]{0,31}$/
 export class Runtime {
   private build!: Build
   private mask: ToolMask | null = null
+  private lazyTimer: ReturnType<typeof setInterval> | null = null
   private chain: Promise<void> = Promise.resolve()
   private readonly manager: ExtensionManager
 
@@ -106,6 +107,47 @@ export class Runtime {
     await attempt
   }
 
+  /** Sweep expired lazy loads and clear a session's loads when its agent is disposed. */
+  private startLazyMaintenance(mask: ToolMask): void {
+    const ttl = (): number => Number(this.state.settings['tools.lazyLoadTtlMinutes'] ?? 60)
+    const refresh = (): void => {
+      mask.setLazySource(readLazy(this.state), knownToolNames(this.ctx as unknown as { get(name: string): unknown }))
+    }
+    try {
+      if (pruneLazy(this.state, Date.now(), ttl())) void saveState(this.state, 'lazy-ttl')
+    }
+    catch (error) {
+      logTo(this.ctx)('warn', '[tool-hub] lazy ttl sweep failed: ' + String((error as Error)?.message ?? error))
+    }
+    if (this.lazyTimer === null) {
+      this.lazyTimer = setInterval(() => {
+        try {
+          if (pruneLazy(this.state, Date.now(), ttl())) {
+            void saveState(this.state, 'lazy-ttl')
+            refresh()
+          }
+        }
+        catch (error) {
+          logTo(this.ctx)('warn', '[tool-hub] lazy ttl sweep failed: ' + String((error as Error)?.message ?? error))
+        }
+      }, 60_000)
+      this.lazyTimer.unref?.()
+    }
+    const on = (this.ctx as unknown as { on?: (event: string, callback: (payload: unknown) => void) => (() => void) | void }).on
+    on?.('agent/disposed', payload => {
+      try {
+        const agent = payload !== null && typeof payload === 'object' ? (payload as { agent?: { id?: unknown; session?: { id?: unknown } } }).agent : undefined
+        const sessionId = typeof agent?.session?.id === 'string' ? agent.session.id : typeof agent?.id === 'string' ? agent.id : ''
+        if (sessionId === '' || !clearSessionLazy(this.state, sessionId)) return
+        void saveState(this.state, 'lazy-session-disposed')
+        refresh()
+      }
+      catch (error) {
+        logTo(this.ctx)('warn', '[tool-hub] lazy session cleanup failed: ' + String((error as Error)?.message ?? error))
+      }
+    })
+  }
+
   /**
    * Mount the per-agent tool mask and publish it as toolHub.surface. This is what makes the deny
    * list real after a restart: agents that already exist get a scope plugin, later ones are
@@ -127,6 +169,8 @@ export class Runtime {
       known: () => knownToolNames(this.ctx as unknown as { get(name: string): unknown }),
       cached: sessionId => (sessionId === undefined || sessionId === '' ? [] : readOpen(this.state)[sessionId] ?? []),
     })
+    mask.setLazySource(readLazy(this.state), knownToolNames(this.ctx as unknown as { get(name: string): unknown }))
+    this.startLazyMaintenance(mask)
     const provide = (this.ctx as unknown as { provide?: (name: string, value: unknown) => void }).provide
     if (typeof provide !== 'function') {
       logTo(this.ctx)('warn', '[tool-hub] this host has no ctx.provide(); the tool mask cannot be published')

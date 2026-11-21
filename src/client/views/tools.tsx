@@ -332,6 +332,9 @@ export function ToolsView(props: ViewProps): React.ReactElement {
           <Empty title={t('tools.empty')} />
         ) : (
           <Card label={t('tools.lazy')}>
+            <div className="th-row-meta">
+              {copyLabel(lang, '面板「加载」是全局的；模型用 hub_tools 加载只对当前会话。会话结束或超过设置里的 TTL 会清理。', 'Panel loads are global; hub_tools loads apply to the current session only. Session end or the TTL in settings clears them.')}
+            </div>
             <div className="th-list">
               {servers.map(entry => (
                 <div className="th-row" key={entry.server}>

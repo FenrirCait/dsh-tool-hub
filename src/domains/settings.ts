@@ -18,6 +18,7 @@ const FIELDS: SettingsField[] = [
     { value: 'en', label: { zh: 'English', en: 'English' } },
   ] },
   { key: 'tools.lazyDefault', type: 'boolean', default: false, label: { zh: '新 MCP 服务器默认懒启动', en: 'Lazy-load new MCP servers' } },
+  { key: 'tools.lazyLoadTtlMinutes', type: 'number', default: 60, min: 0, max: 10080, label: { zh: '懒加载自动卸载（分钟）', en: 'Auto-unload lazy tools after (minutes)' }, hint: { zh: '0 = 不按时间清理；会话结束仍会清掉该会话的加载。', en: '0 disables the time sweep; session-end cleanup still applies.' } },
   { key: 'tools.showTokenEstimate', type: 'boolean', default: true, label: { zh: '显示工具 token 估算', en: 'Show tool token estimates' }, hint: { zh: '工具页每行按 schema JSON ÷4 估算，关闭后隐藏。', en: 'The tools page estimates each schema as JSON ÷4; turn this off to hide it.' } },
   { key: 'scenes.confirmApply', type: 'boolean', default: true, label: { zh: '应用场景前确认', en: 'Confirm before applying a scene' } },
   { key: 'scenes.autoApply', type: 'string', default: '', label: { zh: '启动时自动应用的场景', en: 'Scene to apply on mount' }, hint: { zh: '留空表示不自动应用', en: 'Empty means none' } },

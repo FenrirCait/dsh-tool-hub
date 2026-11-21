@@ -273,6 +273,22 @@ check('subagent policy: origin=subagent is enough without a parent header', () =
   mask.setSubagentPolicy(['mcp__a__y'], [])
   equal(mask.denyFor(host.agents[0]), ['mcp__a__y'])
 })
+check('lazy: a session load is visible only to that session', () => {
+  const host = makeHost()
+  host.addAgent('a', { session: 's1' })
+  host.addAgent('b', { session: 's2' })
+  const mask = attachToolMask(host.ctx, {})
+  mask.setLazySource({ servers: ['srv'], loaded: [], sessions: { s1: ['mcp__srv__a'] }, loadedAt: {} }, ['mcp__srv__a', 'mcp__srv__b'])
+  equal(mask.denyFor(host.agents[0]), ['mcp__srv__b'])
+  equal(mask.denyFor(host.agents[1]), ['mcp__srv__a', 'mcp__srv__b'])
+})
+check('lazy: a global load is visible in every session', () => {
+  const host = makeHost()
+  host.addAgent('a', { session: 's1' })
+  const mask = attachToolMask(host.ctx, {})
+  mask.setLazySource({ servers: ['srv'], loaded: ['mcp__srv__a'], sessions: {}, loadedAt: {} }, ['mcp__srv__a'])
+  equal(mask.denyFor(host.agents[0]), [])
+})
 check('agent disposed: its id is forgotten, a recreated id mounts again', () => {
   const host = makeHost()
   const first = host.addAgent('a1')

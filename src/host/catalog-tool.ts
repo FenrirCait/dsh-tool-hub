@@ -21,7 +21,7 @@ export interface CatalogToolDefinition {
     schema: Record<string, unknown>
     render: (args: unknown, value: unknown) => Array<{ type: 'text'; text: string }>
   }
-  execute: (args: CatalogToolArgs) => Promise<unknown>
+  execute: (args: CatalogToolArgs, exec?: { agent?: { session?: { id?: string } } }) => Promise<unknown>
 }
 
 interface SnapshotTool {
@@ -41,18 +41,45 @@ function serverOf(name: string): string | null {
   return match === null ? null : match[1] ?? null
 }
 
+interface LazyStateView {
+  servers?: unknown
+  loaded?: unknown
+  sessions?: unknown
+}
+
 /** One call: the catalog, or a load/unload that goes through the same lazy ops as the panel. */
-async function handle(dispatcher: Pick<Dispatcher, 'execute'>, args: CatalogToolArgs): Promise<unknown> {
+async function handle(
+  dispatcher: Pick<Dispatcher, 'execute'>,
+  args: CatalogToolArgs,
+  exec?: { agent?: { session?: { id?: string } } },
+): Promise<unknown> {
   const action = args?.action
+  const sessionId = typeof exec?.agent?.session?.id === 'string' ? exec.agent.session.id : ''
   if (action === 'list') {
     const snapshot = await dispatcher.execute('snapshot', {}) as { tools?: SnapshotTool[] }
     const rows = Array.isArray(snapshot?.tools) ? snapshot.tools : []
+    let lazy: LazyStateView | null = null
+    try {
+      lazy = await dispatcher.execute('lazy.state', {}) as LazyStateView
+    }
+    catch {
+      lazy = null
+    }
+    const lazyServers = new Set(listOf(lazy?.servers))
+    const loaded = new Set(listOf(lazy?.loaded))
+    if (sessionId !== '') {
+      const sessions = lazy?.sessions !== null && typeof lazy?.sessions === 'object' ? lazy.sessions as Record<string, unknown> : {}
+      for (const name of listOf(sessions[sessionId])) loaded.add(name)
+    }
     const byServer = new Map<string, Array<{ name: string; enabled: boolean; lazy: boolean; lazyHidden: boolean }>>()
     for (const row of rows) {
       const name = typeof row.name === 'string' ? row.name : ''
       const server = (typeof row.server === 'string' ? row.server : null) ?? serverOf(name) ?? 'unknown'
       const list = byServer.get(server) ?? []
-      list.push({ name, enabled: row.enabled !== false, lazy: row.lazy === true, lazyHidden: row.lazyHidden === true })
+      // The snapshot only knows global loads; lazy.state makes the per-session answer exact.
+      const lazyServer = lazy === null ? row.lazy === true : lazyServers.has(server)
+      const lazyHidden = lazy === null ? row.lazyHidden === true : lazyServer && !loaded.has(name)
+      list.push({ name, enabled: row.enabled !== false, lazy: lazyServer, lazyHidden })
       byServer.set(server, list)
     }
     return {
@@ -72,10 +99,14 @@ async function handle(dispatcher: Pick<Dispatcher, 'execute'>, args: CatalogTool
     const names = listOf(args?.names)
     const server = typeof args?.server === 'string' ? args.server.trim() : ''
     if (server !== '' && names.length === 0) {
-      return await dispatcher.execute('lazy.set', { server, on: !load })
+      const payload: Record<string, unknown> = { server, load }
+      if (sessionId !== '') payload.sessionId = sessionId
+      return await dispatcher.execute(load ? 'lazy.load' : 'lazy.unload', payload)
     }
     if (names.length === 0) throw new Error('action ' + action + ' needs a server or names')
-    return await dispatcher.execute(load ? 'lazy.load' : 'lazy.unload', { names, load })
+    const payload: Record<string, unknown> = { names, load }
+    if (sessionId !== '') payload.sessionId = sessionId
+    return await dispatcher.execute(load ? 'lazy.load' : 'lazy.unload', payload)
   }
   throw new Error('action must be list, enable or disable')
 }
@@ -93,6 +124,6 @@ export function createCatalogTool(dispatcher: Pick<Dispatcher, 'execute'>): Cata
       schema: { type: 'object', properties: {} },
       render: (_args: unknown, value: unknown) => [{ type: 'text', text: JSON.stringify(value) }],
     },
-    execute: async (args: CatalogToolArgs) => await handle(dispatcher, args),
+    execute: async (args: CatalogToolArgs, exec?: { agent?: { session?: { id?: string } } }) => await handle(dispatcher, args, exec),
   }
 }
