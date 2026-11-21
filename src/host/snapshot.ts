@@ -97,9 +97,21 @@ function toolRows(env: HostEnv): Array<{ name: string; enabled: boolean; server:
   const restrictable = new Set(stringList(record.restrictableNames))
   const deny = new Set(env.state.toolDeny)
   const lazy = readLazy(env.state)
+  const lazyServers = new Set(lazy.servers)
+  const loaded = new Set(lazy.loaded)
   return names.sort().map(name => {
     const server = serverOf(name)
-    return { name, enabled: !deny.has(name), server, lazy: server !== null && lazy.servers.includes(server), fixed: !restrictable.has(name) }
+    const lazyServer = server !== null && lazyServers.has(server)
+    const lazyHidden = lazyServer && !loaded.has(name)
+    return {
+      name,
+      enabled: !deny.has(name),
+      server,
+      lazy: lazyServer,
+      lazyHidden,
+      effective: !deny.has(name) && !lazyHidden,
+      fixed: !restrictable.has(name),
+    }
   })
 }
 

@@ -29,6 +29,7 @@ interface SnapshotTool {
   server?: unknown
   enabled?: unknown
   lazy?: unknown
+  lazyHidden?: unknown
 }
 
 function listOf(value: unknown): string[] {
@@ -46,12 +47,12 @@ async function handle(dispatcher: Pick<Dispatcher, 'execute'>, args: CatalogTool
   if (action === 'list') {
     const snapshot = await dispatcher.execute('snapshot', {}) as { tools?: SnapshotTool[] }
     const rows = Array.isArray(snapshot?.tools) ? snapshot.tools : []
-    const byServer = new Map<string, Array<{ name: string; enabled: boolean; lazy: boolean }>>()
+    const byServer = new Map<string, Array<{ name: string; enabled: boolean; lazy: boolean; lazyHidden: boolean }>>()
     for (const row of rows) {
       const name = typeof row.name === 'string' ? row.name : ''
       const server = (typeof row.server === 'string' ? row.server : null) ?? serverOf(name) ?? 'unknown'
       const list = byServer.get(server) ?? []
-      list.push({ name, enabled: row.enabled !== false, lazy: row.lazy === true })
+      list.push({ name, enabled: row.enabled !== false, lazy: row.lazy === true, lazyHidden: row.lazyHidden === true })
       byServer.set(server, list)
     }
     return {
@@ -59,7 +60,9 @@ async function handle(dispatcher: Pick<Dispatcher, 'execute'>, args: CatalogTool
       servers: [...byServer.entries()].map(([server, tools]) => ({
         server,
         total: tools.length,
-        loaded: tools.filter(tool => tool.enabled).length,
+        loaded: tools.filter(tool => tool.enabled && !tool.lazyHidden).length,
+        hidden: tools.filter(tool => tool.lazyHidden).map(tool => tool.name),
+        effectiveDeny: tools.filter(tool => !tool.enabled).map(tool => tool.name),
         tools,
       })),
     }

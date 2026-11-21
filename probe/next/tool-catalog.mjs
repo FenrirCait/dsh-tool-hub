@@ -34,7 +34,7 @@ function dispatcherWith(snapshot) {
 const snapshot = {
   tools: [
     { name: 'mcp__alpha__one', server: 'alpha', enabled: true, lazy: false },
-    { name: 'mcp__alpha__two', server: 'alpha', enabled: false, lazy: true },
+    { name: 'mcp__alpha__two', server: 'alpha', enabled: false, lazy: true, lazyHidden: true },
     { name: 'mcp__beta__one', server: null, enabled: true, lazy: false },
   ],
 }
@@ -51,6 +51,8 @@ check('list-groups-servers', listed.servers.length === 2, String(listed.servers.
 const alpha = listed.servers.find(row => row.server === 'alpha')
 check('list-server-total', alpha.total === 2, String(alpha.total))
 check('list-loaded-count', alpha.loaded === 1, String(alpha.loaded))
+check('list-hidden-count', Array.isArray(alpha.hidden) && alpha.hidden.includes('mcp__alpha__two'), JSON.stringify(alpha.hidden))
+check('list-effective-deny', Array.isArray(alpha.effectiveDeny) && alpha.effectiveDeny.includes('mcp__alpha__two'), JSON.stringify(alpha.effectiveDeny))
 check('list-tool-flags', alpha.tools.some(row => row.name === 'mcp__alpha__two' && row.lazy === true && row.enabled === false))
 check('list-falls-back-to-name', listed.servers.some(row => row.server === 'beta'))
 

@@ -375,7 +375,9 @@ export function changeLazy(state: StateV2, patch: LazyPatch, known: readonly str
     }
     else {
       lazy.servers = lazy.servers.filter(name => name !== server)
-      if (listed !== undefined) lazy.loaded = [...new Set([...lazy.loaded, ...listed.tools])]
+      // Leaving the lazy list makes the server fully visible again; stale entries would otherwise
+      // resurrect as "loaded" if the server is marked lazy later.
+      lazy.loaded = lazy.loaded.filter(name => serverOf(name) !== server)
     }
   }
   if (Array.isArray(patch.names)) {
@@ -799,6 +801,17 @@ const lazySet: OpHandler = async (payload, env) => {
   return { lazy: lazy.servers, loaded: lazy.loaded, backup, mask: await maskAfter(env.state, env) }
 }
 
+const lazyReset: OpHandler = async (payload, env) => {
+  const body = asRecord(payload)
+  const server = typeof body.server === 'string' && body.server.trim() !== '' ? body.server.trim() : null
+  const lazy = readLazy(env.state)
+  lazy.loaded = server === null ? [] : lazy.loaded.filter(name => serverOf(name) !== server)
+  writeLazy(env.state, lazy)
+  const backup = await env.save('lazy-reset')
+  const next = readLazy(env.state)
+  return { lazy: next.servers, loaded: next.loaded, backup, mask: await maskAfter(env.state, env) }
+}
+
 const lazyToggle: OpHandler = async (payload, env) => {
   const body = asRecord(payload)
   const patch: LazyPatch = { load: body.load === true }
@@ -961,6 +974,7 @@ export function toolSurfaceDomain(): DomainRegistration {
         { id: 'lazy.set', write: true, audit: false, note: 'Turns lazy mode on or off for one MCP server and re-applies the mask.' },
         { id: 'lazy.load', write: true, audit: false, note: 'Loads tool names back into the model view and re-applies the mask.' },
         { id: 'lazy.unload', write: true, audit: false, note: 'Unloads tool names from the model view and re-applies the mask.' },
+        { id: 'lazy.reset', write: true, audit: false, note: 'Clears lazily loaded names (one server or all) so they start hidden again.' },
       ],
     },
     handlers: {
@@ -976,6 +990,7 @@ export function toolSurfaceDomain(): DomainRegistration {
       'lazy.set': lazySet,
       'lazy.load': lazyToggle,
       'lazy.unload': lazyToggle,
+      'lazy.reset': lazyReset,
     },
   }
 }

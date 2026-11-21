@@ -23,6 +23,7 @@ const PLAN = 'tool.plan'
 const LAZY_SET = 'lazy.set'
 const LAZY_LOAD = 'lazy.load'
 const LAZY_UNLOAD = 'lazy.unload'
+const LAZY_RESET = 'lazy.reset'
 
 function copyLabel(lang: 'zh' | 'en', zh: string, en: string): string {
   return lang === 'zh' ? zh : en
@@ -54,6 +55,7 @@ interface ServerEntry {
   server: string
   tools: string[]
   lazy: boolean
+  hidden: number
 }
 
 function readPlan(value: unknown): PlanReport {
@@ -72,9 +74,10 @@ function serversOf(tools: ToolRow[]): ServerEntry[] {
   const rows = new Map<string, ServerEntry>()
   for (const tool of tools) {
     if (tool.server === null || tool.server === undefined) continue
-    const entry = rows.get(tool.server) ?? { server: tool.server, tools: [], lazy: false }
+    const entry = rows.get(tool.server) ?? { server: tool.server, tools: [], lazy: false, hidden: 0 }
     entry.tools.push(tool.name)
     if (tool.lazy === true) entry.lazy = true
+    if (tool.lazyHidden === true) entry.hidden += 1
     rows.set(tool.server, entry)
   }
   return [...rows.values()].sort((left, right) => (left.server < right.server ? -1 : 1))
@@ -295,6 +298,7 @@ export function ToolsView(props: ViewProps): React.ReactElement {
                         </Badge>
                         {tool.lazy === true ? <Badge tone="off">{t('tools.lazy')}</Badge> : null}
                         {tool.fixed === true ? <Badge tone="warn">{copyLabel(lang, '固定', 'fixed')}</Badge> : null}
+                        {tool.lazyHidden === true ? <Badge tone="off">{copyLabel(lang, '懒加载隐藏', 'lazy-hidden')}</Badge> : null}
                         {showCosts && costs[tool.name] !== undefined ? <Badge tone="neutral">{'~' + String(costs[tool.name]) + ' tok'}</Badge> : null}
                       </span>
                     </div>
@@ -312,7 +316,18 @@ export function ToolsView(props: ViewProps): React.ReactElement {
       </div>
 
       <div className="th-section">
-        <div className="th-section-title">{t('tools.lazy')}</div>
+        <div className="th-section-title">
+          {t('tools.lazy')}
+          {servers.length === 0 ? null : (
+            <Button
+              variant="ghost"
+              busy={busy === `${LAZY_RESET}:all`}
+              onClick={() => { void run(LAZY_RESET, {}).then(ok => { if (ok) reload() }) }}
+            >
+              {copyLabel(lang, '清除全部已加载', 'Reset all loaded')}
+            </Button>
+          )}
+        </div>
         {servers.length === 0 ? (
           <Empty title={t('tools.empty')} />
         ) : (
@@ -325,6 +340,7 @@ export function ToolsView(props: ViewProps): React.ReactElement {
                     <span className="th-row-meta">
                       <Badge>{t('tools.count', { n: entry.tools.length })}</Badge>
                       {entry.lazy ? <Badge tone="off">{t('tools.lazy')}</Badge> : null}
+                      {entry.hidden > 0 ? <Badge tone="off">{copyLabel(lang, `${entry.hidden} 个隐藏`, `${entry.hidden} hidden`)}</Badge> : null}
                       {entry.lazy ? (
                         <>
                           <Button
@@ -340,6 +356,14 @@ export function ToolsView(props: ViewProps): React.ReactElement {
                             onClick={() => { fire(LAZY_UNLOAD, entry.server, { names: entry.tools, load: false }) }}
                           >
                             {unloadAll}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            busy={busy === `${LAZY_RESET}:${entry.server}`}
+                            disabled={entry.hidden >= entry.tools.length}
+                            onClick={() => { fire(LAZY_RESET, entry.server, { server: entry.server }) }}
+                          >
+                            {copyLabel(lang, '清除已加载', 'Reset loaded')}
                           </Button>
                         </>
                       ) : null}

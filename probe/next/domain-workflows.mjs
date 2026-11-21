@@ -565,6 +565,7 @@ check('lazy: the catalog prompt exists while a server is lazy',
   lazyPrompt(readLazy(lazyState), lazyKnown).includes('srv'))
 changeLazy(lazyState, { server: 'srv' }, lazyKnown)
 check('lazy: a server-only patch mirrors 1.x and turns lazy off', equal(readLazy(lazyState).servers, []))
+check('lazy: leaving the lazy list clears that server\'s loaded names', equal(readLazy(lazyState).loaded, []))
 check('lazy: serverOf splits an MCP name and rejects the rest',
   serverOf('mcp__a__b') === 'a' && serverOf('plain') === null)
 

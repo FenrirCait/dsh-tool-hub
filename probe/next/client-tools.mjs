@@ -157,7 +157,9 @@ check('mask-draft', () => {
 
 check('confirm-before-write', () => {
   assert((body.match(/op: SAVE/g) ?? []).length === 1, 'tool.save may only be asked from the save handler')
-  assert((body.match(/void run\(/g) ?? []).length === 2, 'writes may only leave fire() and confirm()')
+  assert((body.match(/void run\(/g) ?? []).length === 3, 'writes leave fire(), confirm() and the reset-all action')
+  assert((body.match(/void run\(op, payload\)/g) ?? []).length === 1, 'the confirm handler is the only generic write')
+  assert((body.match(/void run\(LAZY_RESET, \{\}\)/g) ?? []).length === 1, 'the third write is the reset-all action')
   const confirm = section('const confirm = React.useCallback(', '}, [pending, run])')
   const clear = confirm.indexOf('setPending(null)')
   const send = confirm.indexOf('void run(op, payload)')
@@ -243,10 +245,10 @@ check('file-length', () => {
 check('tool-row-fields', () => {
   const stripped = body.replace(/'[^']*'/g, "''")
   const fields = new Set([...stripped.matchAll(/\btool\.([A-Za-z]+)/g)].map(match => match[1]))
-  for (const field of fields) assert(['name', 'enabled', 'server', 'lazy', 'fixed'].includes(field), 'ToolRow has no field ' + field)
-  for (const field of ['name', 'enabled', 'server', 'lazy', 'fixed']) assert(fields.has(field), 'the view never reads tool.' + field)
+  for (const field of fields) assert(['name', 'enabled', 'server', 'lazy', 'lazyHidden', 'fixed'].includes(field), 'ToolRow has no field ' + field)
+  for (const field of ['name', 'enabled', 'server', 'lazy', 'lazyHidden', 'fixed']) assert(fields.has(field), 'the view never reads tool.' + field)
   const entries = new Set([...stripped.matchAll(/\bentry\.([A-Za-z]+)/g)].map(match => match[1]))
-  for (const field of entries) assert(['server', 'tools', 'lazy'].includes(field), 'ServerEntry has no field ' + field)
+  for (const field of entries) assert(['server', 'tools', 'lazy', 'hidden'].includes(field), 'ServerEntry has no field ' + field)
   return [...fields].sort().join(', ') + ' / entry ' + [...entries].sort().join(', ')
 })
 

@@ -179,6 +179,10 @@ export interface ToolRow {
   enabled: boolean
   server?: string | null
   lazy?: boolean
+  /** On a lazy server and not loaded: present in the registry, absent from the model view. */
+  lazyHidden?: boolean
+  /** Installation mask is clear AND the tool is not lazy-hidden. */
+  effective?: boolean
   /** Agent-scope registrations cannot be restricted; the panel shows them as fixed. */
   fixed?: boolean
 }
