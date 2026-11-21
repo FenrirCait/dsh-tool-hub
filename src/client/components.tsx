@@ -267,16 +267,22 @@ export function Dialog(props: DialogProps): React.ReactElement | null {
   const titleId = useUid('th-dialog-title')
   const bodyId = useUid('th-dialog-body')
   const ref = React.useRef<HTMLDivElement | null>(null)
+  // Callers pass inline closures; keeping them in refs means typing in a field never re-runs the
+  // focus effect (which would return focus to the previous element and break IME composition).
+  const closeRef = React.useRef(props.onClose)
+  closeRef.current = props.onClose
+  const returnRef = React.useRef(props.returnFocusTo)
+  returnRef.current = props.returnFocusTo
 
   React.useEffect(() => {
     if (!props.open || typeof document === 'undefined') return undefined
-    const previous = props.returnFocusTo ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null)
+    const previous = returnRef.current ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null)
     const node = ref.current
     node?.focus()
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') {
         event.preventDefault()
-        props.onClose()
+        closeRef.current()
         return
       }
       if (event.key !== 'Tab' || node === null) return
@@ -298,7 +304,7 @@ export function Dialog(props: DialogProps): React.ReactElement | null {
       document.removeEventListener('keydown', onKeyDown)
       previous?.focus()
     }
-  }, [props.open, props.onClose, props.returnFocusTo])
+  }, [props.open])
 
   if (!props.open) return null
   return (

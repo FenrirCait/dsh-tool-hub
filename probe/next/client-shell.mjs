@@ -83,6 +83,15 @@ check('component-exports', () => {
   return wanted.join(', ')
 })
 
+check('dialog-focus', () => {
+  const source = byName('components.tsx')
+  const start = source.indexOf('export function Dialog')
+  const region = source.slice(start, source.indexOf('export function ', start + 10))
+  assert(/closeRef\.current = props\.onClose/.test(region), 'Dialog must keep onClose in a ref')
+  assert(/\}, \[props\.open\]\)/.test(region), 'the focus effect must depend only on props.open')
+  assert(!/\}, \[props\.open, props\.onClose/.test(region), 'onClose must not be a focus-effect dependency')
+})
+
 check('entry-contract', () => {
   const source = byName('entry.tsx')
   assert(/export const NS = 'tool-hub'/.test(source), "entry.tsx must export NS = 'tool-hub'")
