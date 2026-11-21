@@ -31,6 +31,11 @@ dsh plugin install ./dsh-tool-hub
 Then open **Plugins → Hub**, or the **Tool Hub** entry in the sidebar. A restart is not required;
 the plugin hot-loads.
 
+The package also ships `examples/compat-codex-ui/` — the codex-ui glass compatibility extension.
+Copy it to `<profile>/.sandbox/extensions/codex-ui-glass/` (or
+`~/.dsh/tool-hub/extensions/codex-ui-glass/`) and enable it to make the panel, dock button and
+sidebar entry follow codex-ui's mica/flat glass settings.
+
 ## What it does
 
 - **One list** of every loader entry plus every skill found under the known skill roots. Each row
