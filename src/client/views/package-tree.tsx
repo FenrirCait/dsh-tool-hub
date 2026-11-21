@@ -4,6 +4,13 @@
  * Expansion is remembered per view in localStorage; a non-empty search forces every rendered
  * parent open so matches are never hidden behind a collapsed row. The parent switch is optional:
  * views without a safe bulk operation pass no onBulk and get no switch.
+ *
+ * An expanded parent paints one page (GROUP_PAGE_SIZE rows) and offers a show-more row for the
+ * rest, so a bundle with hundreds of entries costs fifty rows of DOM instead of all of them.
+ * Paging is a render rule, not a filter: the group object and its counts, the parent switch and
+ * the view's select-all still describe every filtered row that survived the search. A changed
+ * resetKey (the search term) folds every parent back to its first page. Group heads pin to the
+ * top of the scrolling content; that rule lives with the other classes in theme.ts.
  */
 import * as React from 'react'
 import { Badge, Switch } from '../components.js'
@@ -22,6 +29,41 @@ export interface TreeGroup<T> {
   switchable?: boolean
   /** True when the parent switch should read as on (usually all rows enabled). */
   allEnabled?: boolean
+}
+
+/** Rows one expanded parent paints before its show-more row: the cap that keeps a huge group cheap. */
+export const GROUP_PAGE_SIZE = 50
+
+/** What one page of a group holds: the rows to paint and how many still wait behind the button. */
+export interface GroupPage<T> {
+  rows: T[]
+  hidden: number
+}
+
+/**
+ * One page of a group. `page` counts the pages already revealed (1 = the first page) rather than
+ * a row offset, so pressing show-more is always "+1" and the caller remembers no index. A page
+ * below one is treated as the first; a size of zero or less disables the cap and keeps every row.
+ */
+export function groupPage<T>(rows: T[], page: number, size: number = GROUP_PAGE_SIZE): GroupPage<T> {
+  const limit = size <= 0 ? rows.length : Math.max(1, Math.trunc(page)) * size
+  const shown = Math.min(rows.length, limit)
+  return { rows: rows.slice(0, shown), hidden: rows.length - shown }
+}
+
+/** The page counts a render may trust: a new reset key (the search term) drops every one of them. */
+export function livePages(pages: { reset: string; pages: Record<string, number> }, resetKey: string): Record<string, number> {
+  return pages.reset === resetKey ? pages.pages : {}
+}
+
+/** The counts after one more press on a group's show-more row: that group moves to its next page. */
+export function revealPage(pages: Record<string, number>, key: string): Record<string, number> {
+  return { ...pages, [key]: (pages[key] ?? 1) + 1 }
+}
+
+/** The show-more row's text. The generated catalogs live elsewhere, so this label stays local. */
+export function showMoreLabel(lang: Lang, hidden: number): string {
+  return lang === 'zh' ? `显示更多 (${hidden})` : `Show more (${hidden})`
 }
 
 export function useTreeExpansion(storageKey: string): {
@@ -66,16 +108,25 @@ export interface GroupTreeProps<T> {
   renderRow: (row: T) => React.ReactNode
   onBulk?: (group: TreeGroup<T>, next: boolean) => void
   busyKey?: string | null
+  /** Rows one expanded group paints before its show-more row; defaults to GROUP_PAGE_SIZE. */
+  pageSize?: number
+  /** Changing this value (the search term) folds every group back to its first page. */
+  resetKey?: string
 }
 
 export function GroupTree<T>(props: GroupTreeProps<T>): React.ReactElement {
-  const { groups, lang, forceOpen, expansion, renderRow, onBulk, busyKey } = props
+  const { groups, lang, forceOpen, expansion, renderRow, onBulk, busyKey, pageSize = GROUP_PAGE_SIZE, resetKey = '' } = props
   const t = createT(lang)
+  // Which page each group is on, tagged with the term it was revealed under: a new search starts
+  // from the first page in the same render, without an effect that would paint the old one once.
+  const [revealed, setRevealed] = React.useState<{ reset: string; pages: Record<string, number> }>({ reset: resetKey, pages: {} })
+  const pages = livePages(revealed, resetKey)
   return (
     <div className="th-groups">
       {groups.map(group => {
         const open = forceOpen || expansion.isOpen(group.key)
         const allOn = group.allEnabled ?? group.enabled >= group.rows.length
+        const page = groupPage(group.rows, pages[group.key] ?? 1, pageSize)
         return (
           <div className="th-group" key={group.key}>
             <div className="th-group-head">
@@ -101,7 +152,22 @@ export function GroupTree<T>(props: GroupTreeProps<T>): React.ReactElement {
                 />
               )}
             </div>
-            {open ? <div className="th-list th-group-body">{group.rows.map(renderRow)}</div> : null}
+            {open ? (
+              <div className="th-list th-group-body">
+                {page.rows.map(renderRow)}
+                {page.hidden === 0 ? null : (
+                  <button
+                    type="button"
+                    className="th-more"
+                    onClick={() => {
+                      setRevealed({ reset: resetKey, pages: revealPage(pages, group.key) })
+                    }}
+                  >
+                    {showMoreLabel(lang, page.hidden)}
+                  </button>
+                )}
+              </div>
+            ) : null}
           </div>
         )
       })}

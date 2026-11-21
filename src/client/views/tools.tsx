@@ -305,6 +305,7 @@ export function ToolsView(props: ViewProps): React.ReactElement {
               costs={costs}
               showCosts={showCosts}
               forceOpen={term !== ''}
+              term={term}
               busyKey={bulkBusy}
               onToggle={toggleMask}
               onBulk={bulkGroup}

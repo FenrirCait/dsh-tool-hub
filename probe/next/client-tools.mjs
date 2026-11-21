@@ -22,7 +22,9 @@
  *      deny list from the snapshot through tool.save;
  *   7. the lazy card, the scope card and the on-demand card are untouched;
  *   8. names on every control, th-* layout, no raw form element, both files inside their length;
- *   9. every t() key resolves in both catalogs.
+ *   9. every t() key resolves in both catalogs;
+ *  10. each row's host-computed deny reasons render as one badge with a tooltip, in the host's
+ *      order, and the client enum, the host enum and the render order agree.
  *
  * No dependencies beyond the esbuild already in devDependencies; PASS/FAIL lines, exit 1 when
  * anything fails.
@@ -528,8 +530,9 @@ check('file-length', () => {
 check('tool-row-fields', () => {
   const stripped = (bodies.view + '\n' + bodies.tree).replace(/'[^']*'/g, "''")
   const fields = new Set([...stripped.matchAll(/\btool\.([A-Za-z]+)/g)].map(match => match[1]))
-  for (const field of fields) assert(['name', 'enabled', 'server', 'lazy', 'lazyHidden', 'fixed'].includes(field), 'ToolRow has no field ' + field)
-  for (const field of ['name', 'enabled', 'server', 'lazy', 'lazyHidden', 'fixed']) assert(fields.has(field), 'the tools views never read tool.' + field)
+  const known = ['name', 'enabled', 'server', 'lazy', 'lazyHidden', 'fixed', 'denyReasons']
+  for (const field of fields) assert(known.includes(field), 'ToolRow has no field ' + field)
+  for (const field of known) assert(fields.has(field), 'the tools views never read tool.' + field)
   const entries = new Set([...bodies.view.replace(/'[^']*'/g, "''").matchAll(/\bentry\.([A-Za-z]+)/g)].map(match => match[1]))
   for (const field of entries) assert(['server', 'tools', 'lazy', 'hidden'].includes(field), 'ServerEntry has no field ' + field)
   return [...fields].sort().join(', ') + ' / entry ' + [...entries].sort().join(', ')
@@ -657,6 +660,60 @@ check('busy-keys', () => {
   assert(includes(bodies.view, 'busyKey={bulkBusy}'), 'the tree must receive the parent busy key')
   assert(includes(bodies.tree, 'busyKey={busyKey}'), 'the component must forward the busy key')
   return keys.length + ' op:id keys, ids travel in the payload'
+})
+
+// ── deny reasons: why a row is missing ──────────────────────────────────────
+
+check('deny-reasons-helpers', () => {
+  const api = requireTree()
+  for (const name of ['reasonsOf', 'denyReasonLabel', 'denyReasonHint', 'REASON_ORDER']) {
+    assert(api[name] !== undefined, 'tools-tree.tsx does not export ' + name)
+  }
+  assert(JSON.stringify(api.REASON_ORDER) === JSON.stringify(['install', 'scope', 'preset', 'onDemand', 'lazy']), 'REASON_ORDER must be the host order: ' + JSON.stringify(api.REASON_ORDER))
+  assert(api.reasonsOf({ denyReasons: ['lazy', 'install', 'install'] }).join(',') === 'install,lazy', 'reasons are deduped and put in reporting order')
+  assert(api.reasonsOf({}).join(',') === '', 'a row without reasons renders none')
+  assert(api.reasonsOf({ denyReasons: ['future', 'scope', 'future'] }).join(',') === 'scope,future', 'an unknown reason keeps its arrival order after the known ones')
+  return 'order, dedupe, unknown tail'
+})
+
+check('deny-reasons-labels', () => {
+  const api = requireTree()
+  for (const reason of api.REASON_ORDER) {
+    const zh = api.denyReasonLabel('zh', reason)
+    const en = api.denyReasonLabel('en', reason)
+    assert(zh !== '' && en !== '', reason + ' needs both labels, got ' + JSON.stringify([zh, en]))
+    assert(zh !== en, reason + ' needs distinct labels, got ' + zh + ' twice')
+    assert(api.denyReasonHint('zh', reason) !== '' && api.denyReasonHint('en', reason) !== '', reason + ' needs both hints')
+  }
+  assert(api.denyReasonLabel('zh', 'future') === 'future', 'an unknown reason shows its raw id')
+  assert(api.denyReasonHint('zh', 'future') === '', 'an unknown reason has no tooltip')
+  return api.REASON_ORDER.length + ' bilingual labels + hints'
+})
+
+check('deny-reasons-contract', () => {
+  // Host enum, client type and render order are three declarations of one list: compare all three.
+  const host = read(join(ROOT, 'src', 'domains', 'tool-surface.ts'))
+  const declaration = /export const TOOL_DENY_REASONS: readonly ToolDenyReason\[\] = \[([^\]]+)\]/.exec(host)
+  assert(declaration !== null, 'tool-surface.ts must declare TOOL_DENY_REASONS')
+  const hostValues = [...declaration[1].matchAll(/'([^']+)'/g)].map(match => match[1])
+  const types = read(join(ROOT, 'src', 'client', 'types.ts'))
+  const union = /export type ToolDenyReason = ([^\n]+)/.exec(types)
+  assert(union !== null, 'types.ts must declare ToolDenyReason')
+  const clientValues = [...union[1].matchAll(/'([^']+)'/g)].map(match => match[1])
+  assert(/denyReasons\?: ToolDenyReason\[\]/.test(types), 'ToolRow must type denyReasons with the enum')
+  assert(JSON.stringify(clientValues) === JSON.stringify(hostValues), 'client and host enums disagree: ' + JSON.stringify({ host: hostValues, client: clientValues }))
+  assert(JSON.stringify([...requireTree().REASON_ORDER]) === JSON.stringify(hostValues), 'the render order disagrees with the host: ' + JSON.stringify([...requireTree().REASON_ORDER]))
+  return hostValues.join(',')
+})
+
+check('deny-reasons-render', () => {
+  assert(includes(bodies.tree, '{reasonsOf(tool).map(reason => ('), 'the row must render one badge per reason')
+  assert(/title=\{denyReasonHint\(lang, reason\)\}/.test(bodies.tree), 'each reason badge needs its tooltip')
+  assert(includes(bodies.tree, '{denyReasonLabel(lang, reason)}'), 'each reason badge needs its bilingual label')
+  assert(/tone=\{reason === 'onDemand' \|\| reason === 'lazy' \? 'off' : 'warn'\}/.test(bodies.tree), 'the reason badges need a tone')
+  assert(/key=\{reason\}/.test(bodies.tree), 'reason badges need a stable key')
+  assert(!includes(bodies.tree, 'lazy-hidden'), 'the lazy reason replaces the old lazy-hidden badge')
+  return 'one badge per reason with tooltip, no duplicate lazy badge'
 })
 
 // ── report ──────────────────────────────────────────────────────────────────

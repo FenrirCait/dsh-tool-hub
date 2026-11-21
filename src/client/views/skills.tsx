@@ -273,6 +273,7 @@ export function SkillsView(props: ViewProps): React.ReactElement {
             groups={groups}
             lang={lang}
             forceOpen={term !== ''}
+            resetKey={term}
             busyKey={bulkKey}
             onBulk={(group, next) => { void bulkToggle(group, next) }}
             renderRow={row => {

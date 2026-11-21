@@ -27,6 +27,56 @@ import type { ExtensionStatus, ExtensionViewRow, ViewProps } from '../types.js'
 /** The panel's own writes; an extension's ops arrive in the snapshot and are never spelled here. */
 export const EXT = { set: 'extension.set', reload: 'extension.reload' } as const
 
+// ── source filter: the plugin package's compat/ directory vs a local folder ──
+
+/** Where an extension came from; the toolbar always offers these three, in this order. */
+export type ExtensionSource = 'all' | 'bundled' | 'local'
+
+/** The chips' order, with the default first. */
+export const EXTENSION_SOURCES: readonly ExtensionSource[] = ['all', 'bundled', 'local']
+
+/** The one field the filter reads, so a plain row works as well as a full ExtensionStatus. */
+export interface ExtensionSourceRow {
+  bundled?: boolean
+}
+
+/** Bundled only when the host says so; a missing flag is a local extension, not an unknown one. */
+export function extensionSourceOf(entry: ExtensionSourceRow): Exclude<ExtensionSource, 'all'> {
+  return entry.bundled === true ? 'bundled' : 'local'
+}
+
+/** The rows one source shows, in snapshot order; 'all' keeps everything and returns a copy. */
+export function filterExtensions<T extends ExtensionSourceRow>(entries: readonly T[], source: ExtensionSource): T[] {
+  if (source === 'all') return entries.slice()
+  return entries.filter(entry => extensionSourceOf(entry) === source)
+}
+
+/** Counts over the whole snapshot, so every chip keeps its number while another source is active. */
+export function extensionSourceCounts(entries: readonly ExtensionSourceRow[]): Record<ExtensionSource, number> {
+  let bundled = 0
+  for (const entry of entries) {
+    if (entry.bundled === true) bundled += 1
+  }
+  return { all: entries.length, bundled, local: entries.length - bundled }
+}
+
+/** The bundled chip reuses its catalog key; the other two labels are local copy, no new keys. */
+export function sourceLabel(source: ExtensionSource, lang: ViewProps['lang'], t: ViewProps['t']): string {
+  if (source === 'bundled') return t('extensions.bundled')
+  if (source === 'local') return lang === 'zh' ? '本地' : 'Local'
+  return lang === 'zh' ? '全部' : 'All'
+}
+
+/** The radio group's accessible name. */
+export function sourceHeading(lang: ViewProps['lang']): string {
+  return lang === 'zh' ? '按来源筛选' : 'Filter by source'
+}
+
+/** Shown when the chosen source has no rows although the installation does. */
+export function sourceEmptyLabel(lang: ViewProps['lang']): string {
+  return lang === 'zh' ? '该来源没有扩展' : 'No extensions from this source'
+}
+
 // ── normalising helpers ─────────────────────────────────────────────────────
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -593,6 +643,9 @@ function ExtensionPanel(props: PanelProps): React.ReactElement {
 
 export function ExtensionsView(props: ViewProps): React.ReactElement {
   const { snapshot, lang, t, busy, run, runDetailed, reload } = props
+  const [source, setSource] = React.useState<ExtensionSource>('all')
+  const counts = extensionSourceCounts(snapshot.extensions)
+  const shown = filterExtensions(snapshot.extensions, source)
   if (snapshot.extensions.length === 0) {
     return <Empty title={t('extensions.empty')} hint={t('extensions.enableHint')} />
   }
@@ -615,11 +668,42 @@ export function ExtensionsView(props: ViewProps): React.ReactElement {
       <p className="th-field-hint" style={{ marginBottom: SP.lg }}>
         {t('extensions.local')}
       </p>
-      <div className="th-list">
-        {snapshot.extensions.map(entry => (
-          <ExtensionPanel key={entry.id} entry={entry} lang={lang} t={t} busy={busy} run={run} runDetailed={runDetailed} />
-        ))}
+      <div className="th-toolbar" role="radiogroup" aria-label={sourceHeading(lang)}>
+        {EXTENSION_SOURCES.map(item => {
+          const active = source === item
+          return (
+            <label key={item} className={'th-btn' + (active ? ' th-btn--primary' : ' th-btn--ghost')}>
+              <input
+                type="radio"
+                name="extensions-source"
+                value={item}
+                checked={active}
+                onChange={() => {
+                  setSource(item)
+                }}
+              />
+              <span>{sourceLabel(item, lang, t) + ' (' + counts[item] + ')'}</span>
+            </label>
+          )
+        })}
       </div>
+      {shown.length === 0 ? (
+        <Empty title={sourceEmptyLabel(lang)} />
+      ) : (
+        <div className="th-list">
+          {shown.map(entry => (
+            <ExtensionPanel
+              key={entry.id}
+              entry={entry}
+              lang={lang}
+              t={t}
+              busy={busy}
+              run={run}
+              runDetailed={runDetailed}
+            />
+          ))}
+        </div>
+      )}
     </div>
   )
 }

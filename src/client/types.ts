@@ -189,6 +189,15 @@ export interface SnapshotPaths {
   skills?: SkillRootInfo[]
 }
 
+/**
+ * Why a tool row is out of the model view; the host computes each row's list.
+ *
+ * Stable values (src/domains/tool-surface.ts TOOL_DENY_REASONS owns the order): install is the
+ * installation mask, scope a session/workspace/subagent rule, preset a preset tool policy that
+ * wrote that mask, onDemand an unopened on-demand group, lazy an unloaded lazy server.
+ */
+export type ToolDenyReason = 'install' | 'scope' | 'preset' | 'onDemand' | 'lazy'
+
 export interface ToolRow {
   name: string
   enabled: boolean
@@ -200,6 +209,8 @@ export interface ToolRow {
   effective?: boolean
   /** Agent-scope registrations cannot be restricted; the panel shows them as fixed. */
   fixed?: boolean
+  /** The layers the host says hide this row, in its reporting order; empty when nothing does. */
+  denyReasons?: ToolDenyReason[]
 }
 
 /** The normalised snapshot: arrays are always present, so a view can map without a guard. */

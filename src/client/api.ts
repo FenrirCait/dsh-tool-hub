@@ -322,7 +322,7 @@ function collectionOf(row: Record<string, unknown>): CollectionRow | null {
 function toolOf(row: Record<string, unknown>): ToolRow | null {
   const name = asString(row.name)
   if (name === '') return null
-  return { name, enabled: asBoolean(row.enabled), server: asStringOrNull(row.server), lazy: asBoolean(row.lazy), lazyHidden: asBoolean(row.lazyHidden), effective: asBoolean(row.effective), fixed: asBoolean(row.fixed) }
+  return { name, enabled: asBoolean(row.enabled), server: asStringOrNull(row.server), lazy: asBoolean(row.lazy), lazyHidden: asBoolean(row.lazyHidden), effective: asBoolean(row.effective), fixed: asBoolean(row.fixed), denyReasons: asStringList(row.denyReasons) as ToolRow['denyReasons'] }
 }
 
 function rootOf(row: Record<string, unknown>): SkillRootInfo | null {

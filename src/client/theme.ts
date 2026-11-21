@@ -170,18 +170,30 @@ const CSS = `
 .th-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
 .th-list { display: flex; flex-direction: column; gap: 8px; }
 .th-groups { display: flex; flex-direction: column; gap: 10px; }
-.th-group-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--dsw-alias-border-subtle, rgba(127,127,127,0.24)); border-radius: 8px; background: var(--dsw-alias-card-fill, rgba(127,127,127,0.06)); }
+/* A group head pins to the top of the scroller, so a long group keeps its name and its switch in
+   view while its rows pass underneath. The top offset cancels .th-content's 16px top padding: a
+   padded scroller pins its sticky children 16px down, and rows then slide through that gap. The
+   card tint rides on the panel colour as an image layer, because card-fill alone is translucent
+   and the rows would show through the pinned head. */
+.th-group-head { position: sticky; top: -16px; z-index: 2; display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--dsw-alias-border-subtle, rgba(127,127,127,0.24)); border-radius: 8px; background-color: var(--dsw-alias-bg-base, transparent); background-image: linear-gradient(var(--dsw-alias-card-fill, rgba(127,127,127,0.06)), var(--dsw-alias-card-fill, rgba(127,127,127,0.06))); }
 .th-group-toggle { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; margin: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .th-chevron { display: inline-block; width: 14px; flex: 0 0 auto; color: var(--dsw-alias-label-tertiary, rgba(127,127,127,0.8)); transition: transform 120ms ease; }
 .th-chevron.is-open { transform: rotate(90deg); }
 .th-group-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .th-group-meta { flex: 0 0 auto; font-size: 11px; color: var(--dsw-alias-label-tertiary, rgba(127,127,127,0.8)); }
 .th-group-body { margin-left: 18px; padding-left: 8px; border-left: 1px solid var(--dsw-alias-border-subtle, rgba(127,127,127,0.24)); }
+/* The show-more row: one more page of a long group, revealed on demand instead of on first paint. */
+.th-more { align-self: stretch; padding: 7px 10px; border: 1px dashed var(--dsw-alias-border-subtle, rgba(127,127,127,0.24)); border-radius: 8px; background: transparent; color: var(--dsw-alias-label-secondary, rgba(127,127,127,0.96)); font: inherit; font-size: 12px; cursor: pointer; }
+.th-more:hover { background: var(--dsw-alias-card-fill-hover, rgba(127,127,127,0.12)); }
+.th-more:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, rgba(76, 111, 255, 1)); outline-offset: 1px; }
 .th-card {
   border: 1px solid var(--dsw-alias-border-l1, rgba(127, 127, 127, 0.14));
   border-radius: 12px;
   background: var(--dsw-alias-card-fill, rgba(127, 127, 127, 0.07));
+  /* clip, not hidden: hidden would make the card the scrollport of the sticky group heads inside
+     it, so they would never travel to the real scroller. clip still cuts content at the corners. */
   overflow: hidden;
+  overflow: clip;
 }
 .th-row {
   display: flex;

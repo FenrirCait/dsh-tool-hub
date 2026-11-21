@@ -9,7 +9,10 @@
  * writes the manageable children of its own group through the same OPS.bulk payload and the same
  * "confirm past twenty" dialog as the toolbar, the shared GroupTree stays the only renderer, and
  * expansion is remembered under 'tool-hub-tree-plugins' with a non-empty search forcing every group
- * open. The runtime half cuts the exported helper region out of plugins-tree.tsx, bundles it with
+ * open, and an expanded bundle paints one page of GROUP_PAGE_SIZE rows with a show-more row for the
+ * rest, reset by the same search term. Sticky group heads are pinned here too: the CSS is theme.ts'
+ * job, but the rule that a long group keeps its head in view is this page's behaviour.
+ * The runtime half cuts the exported helper region out of plugins-tree.tsx, bundles it with
  * the project's own esbuild and imports it, so grouping, membership, counting and filtering are
  * executed against fixtures instead of grepped.
  *
@@ -29,6 +32,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const VIEW = join(ROOT, 'src', 'client', 'views', 'plugins.tsx')
 const TREE = join(ROOT, 'src', 'client', 'views', 'plugins-tree.tsx')
 const SHARED = join(ROOT, 'src', 'client', 'views', 'package-tree.tsx')
+const THEME = join(ROOT, 'src', 'client', 'theme.ts')
 const I18N = join(ROOT, 'src', 'client', 'i18n.ts')
 
 let passed = 0
@@ -53,12 +57,16 @@ function assert(condition, message) {
 
 const source = readFileSync(VIEW, 'utf8')
 const treeSource = readFileSync(TREE, 'utf8')
+const sharedSource = readFileSync(SHARED, 'utf8')
+const themeSource = readFileSync(THEME, 'utf8')
 const i18n = readFileSync(I18N, 'utf8')
 
 /** Source with comments removed: a doc comment may name an op or a field in prose. */
 const code = text => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*(?:\/\/|\*).*$/gm, '')
 const body = code(source)
 const tree = code(treeSource)
+const shared = code(sharedSource)
+const theme = code(themeSource)
 const lineCount = source.split('\n').length
 
 /** Body of one declaration, from its marker to the next one. */
@@ -278,6 +286,79 @@ check('i18n-keys', () => {
   assert(missing.length === 0, 'no catalog defines ' + missing.join(', '))
   assert(zh.has('tree.ungrouped'), 'tree.ungrouped must exist: the tree names the leftover group')
   return used.length + ' calls, ' + new Set(used).size + ' distinct keys, all defined twice'
+})
+
+// ── one page per expanded parent, sticky heads ──────────────────────────────
+
+check('group-pagination-cap', () => {
+  assert(/export const GROUP_PAGE_SIZE = 50\b/.test(shared),
+    'one page of an expanded parent is 50 rows; GROUP_PAGE_SIZE must say so')
+  assert(/export function groupPage<T>\(rows: T\[\], page: number, size: number = GROUP_PAGE_SIZE\): GroupPage<T>/.test(shared),
+    'the page slice is a named pure function, so the cap is executable rather than a comment')
+  assert(/const page = groupPage\(group\.rows, pages\[group\.key\] \?\? 1, pageSize\)/.test(shared),
+    'GroupTree paints one page of the group, not every row')
+  assert(/\{page\.rows\.map\(renderRow\)\}/.test(shared),
+    'the painted rows are the page rows: the DOM stops at the cap')
+  assert(!/\{group\.rows\.map\(renderRow\)\}/.test(shared),
+    'a group may no longer map every row straight into the DOM')
+  return '50 rows per expanded parent, sliced by groupPage'
+})
+
+check('show-more-row', () => {
+  for (const needle of ['className="th-more"', '{showMoreLabel(lang, page.hidden)}', 'pages: revealPage(pages, group.key)']) {
+    assert(shared.includes(needle), 'the show-more row is missing ' + needle)
+  }
+  assert(/<button\s+type="button"\s+className="th-more"/.test(shared), 'show more is a real button, not a clickable div')
+  assert(/\{page\.hidden === 0 \? null : \(/.test(shared), 'the button disappears when nothing is hidden')
+  assert(/return lang === 'zh' \? `显示更多 \(\$\{hidden\}\)` : `Show more \(\$\{hidden\}\)`/.test(shared),
+    'the label is local and bilingual: 显示更多 (N) / Show more (N)')
+  assert(/\.th-more \{/.test(theme), 'the show-more row takes its look from a th-* class, never inline style')
+  return '显示更多 (N) reveals the next page of the group'
+})
+
+check('pagination-resets-on-search', () => {
+  assert(/const \{ groups, lang, forceOpen, expansion, renderRow, onBulk, busyKey, pageSize = GROUP_PAGE_SIZE, resetKey = '' \} = props/.test(shared),
+    'GroupTree reads pageSize and resetKey with defaults, so tools-tree keeps compiling')
+  assert(/const pages = livePages\(revealed, resetKey\)/.test(shared),
+    'the pages of another term are never trusted')
+  assert(/setRevealed\(\{ reset: resetKey, pages: revealPage\(pages, group\.key\) \}\)/.test(shared),
+    'a reveal is tagged with the term it was made under')
+  assert(/resetKey=\{term\}/.test(tree), 'the plugins tree hands its term down as GroupTree resetKey')
+  assert(/forceOpen=\{term !== ''\}/.test(tree), 'the same search still forces every group open')
+  assert(/const term = query\.trim\(\)\.toLowerCase\(\)/.test(body), 'the term still comes from the search box')
+  return 'a new term folds every group back to its first page'
+})
+
+check('paging-does-not-narrow-the-group', () => {
+  assert(/onChange=\{next => onBulk\(group, next\)\}/.test(shared), 'the parent switch still hands over the whole group')
+  assert(/<Badge tone="neutral">\{group\.rows\.length\}<\/Badge>/.test(shared), 'the header badge keeps counting every row')
+  assert(/\{group\.enabled\}\/\{group\.rows\.length\}/.test(shared), 'the enabled/total line keeps counting every row')
+  assert(/const rows = group\.rows\.filter\(matches\)/.test(tree), 'membership is still the search filter, not the page')
+  assert(/const visibleRows = groups\.flatMap\(group => group\.rows\)/.test(body),
+    'the toolbar still sees every filtered row, so select-all is unchanged')
+  return 'the cap is a render rule: switch, counts and select-all see every row'
+})
+
+check('sticky-group-heads', () => {
+  const head = /\.th-group-head \{([^}]*)\}/.exec(theme)
+  assert(head !== null, 'theme.ts lost .th-group-head')
+  assert(/position:\s*sticky/.test(head[1]), '.th-group-head must pin inside the scrolling content')
+  const content = /\.th-content \{([^}]*)\}/.exec(theme)
+  assert(content !== null, 'theme.ts lost .th-content, the scroller the head pins to')
+  const padTop = /padding:\s*(\d+)px/.exec(content[1])
+  assert(padTop !== null, '.th-content must declare its padding, or the sticky offset cannot be checked')
+  assert(new RegExp('top:\\s*-' + padTop[1] + 'px').test(head[1]),
+    'the sticky offset must cancel .th-content padding-top (' + padTop[1] + 'px), or the head pins ' + padTop[1] + 'px down and rows slide through the gap')
+  assert(/z-index:\s*\d/.test(head[1]), 'a pinned head must paint above the rows it covers')
+  assert(/background-image:\s*linear-gradient\(var\(--dsw-alias-card-fill/.test(head[1]),
+    'the translucent card tint needs the panel colour under it, or rows show through the pinned head')
+  assert(/background-color:\s*var\(--dsw-alias-bg-base/.test(head[1]), 'the opaque layer under the tint is the panel colour')
+  const card = /\.th-card \{([^}]*)\}/.exec(theme)
+  assert(card !== null, 'theme.ts lost .th-card')
+  assert(/overflow:\s*clip/.test(card[1]),
+    'the card clips with overflow: clip; overflow: hidden would become the scrollport and the heads would never pin')
+  assert(/overflow:\s*hidden/.test(card[1]), 'overflow: hidden stays first as the fallback for engines without clip')
+  return 'heads pin to .th-content, the card no longer swallows the stickiness'
 })
 
 // ── runtime: the exported helpers, bundled and executed ──────────────────────
@@ -501,6 +582,147 @@ check('runtime-purity', () => {
   assert(JSON.stringify(rows) === JSON.stringify(beforeRows), 'grouping must not mutate the rows')
   assert(JSON.stringify(bundles) === JSON.stringify(beforeBundles), 'grouping must not mutate the bundles')
   return 'inputs untouched'
+})
+
+// ── runtime: GroupTree painted with a two-hook React stand-in ────────────────
+
+/**
+ * The page slice is pure and proven above, but the button that moves to the next page and the
+ * reset on a new term are component state: they only exist in a render. This stand-in keeps one
+ * hook slot per render pass, so paint -> click -> paint runs the same sequence the browser runs,
+ * and the element tree it returns is ours to inspect. Nothing here mimics React beyond useState
+ * and createElement; a component that needed more would fail loudly, which is the point.
+ */
+const reactStandSource = `
+const slots = []
+let cursor = 0
+export function useState(seed) {
+  const at = cursor++
+  if (!(at in slots)) slots[at] = typeof seed === 'function' ? seed() : seed
+  return [slots[at], next => { slots[at] = typeof next === 'function' ? next(slots[at]) : next }]
+}
+export function createElement(type, props, ...children) {
+  const flat = children.flat(Infinity).filter(child => child !== null && child !== undefined && child !== false)
+  return { type, props: props === null || props === undefined ? {} : props, children: flat }
+}
+export const Fragment = 'fragment'
+export const __reset = () => { slots.length = 0 }
+export const __render = (component, props) => { cursor = 0; return component(props) }
+export default { useState, createElement, Fragment }
+`
+
+const reactStand = {
+  name: 'react-stand',
+  setup(context) {
+    context.onResolve({ filter: /^react$/ }, () => ({ path: 'react', namespace: 'react-stand' }))
+    context.onResolve({ filter: /components\.js$/ }, () => ({ path: 'components', namespace: 'react-stand' }))
+    context.onResolve({ filter: /i18n\.js$/ }, () => ({ path: 'i18n', namespace: 'react-stand' }))
+    context.onLoad({ filter: /.*/, namespace: 'react-stand' }, args => {
+      if (args.path === 'react') return { contents: reactStandSource, loader: 'js' }
+      if (args.path === 'components') return { contents: 'export const Badge = () => null\nexport const Switch = () => null', loader: 'js' }
+      return { contents: 'export const createT = () => key => key', loader: 'js' }
+    })
+  },
+}
+
+let pageApi = null
+try {
+  const bundled = await build({
+    stdin: {
+      contents: "export { GroupTree } from './src/client/views/package-tree.tsx'\nexport { __render, __reset } from 'react'\n",
+      loader: 'ts',
+      resolveDir: ROOT,
+      sourcefile: 'package-tree-page.ts',
+    },
+    bundle: true,
+    write: false,
+    format: 'esm',
+    platform: 'neutral',
+    target: 'es2022',
+    logLevel: 'silent',
+    plugins: [reactStand],
+  })
+  const text = bundled.outputFiles?.[0]?.text ?? ''
+  assert(text !== '', 'esbuild produced no bundle for the paging render')
+  pageApi = await import('data:text/javascript;base64,' + Buffer.from(text, 'utf8').toString('base64'))
+} catch (error) {
+  failed += 1
+  failedNames.push('page-bundle')
+  console.log('FAIL page-bundle -- ' + (error instanceof Error ? error.message : String(error)))
+}
+
+function needPage() {
+  assert(pageApi !== null, 'package-tree did not compile against the React stand-in')
+  return pageApi
+}
+
+/** Every element in a rendered tree, depth first; strings stay strings. */
+const elements = node => {
+  if (node === null || node === undefined || node === false) return []
+  if (Array.isArray(node)) return node.flatMap(elements)
+  if (typeof node !== 'object') return []
+  return node.children === undefined ? [node] : [node, ...node.children.flatMap(elements)]
+}
+/** The rows a render painted: the probe's renderRow marks each one. */
+const paintedRows = tree => elements(tree).filter(node => node.type === 'row').length
+/** The show-more buttons a render painted. */
+const moreButtons = tree => elements(tree).filter(node => node.type === 'button' && node.props.className === 'th-more')
+const buttonText = node => node.children.filter(child => typeof child === 'string').join('')
+
+/** One group with n rows, a renderRow that tags itself, and the props every paint shares. */
+function bigGroup(count) {
+  const rows = Array.from({ length: count }, (_, index) => ({ id: 'p' + index }))
+  return {
+    groups: [{ key: 'bundle:big', label: 'big', rows, enabled: 0, switchable: true, allEnabled: false }],
+    expansion: { isOpen: () => false, toggle: () => {} },
+    renderRow: row => ({ type: 'row', props: { id: row.id }, children: [row.id] }),
+  }
+}
+
+check('runtime-paints-one-page-then-more', () => {
+  const mod = needPage()
+  const base = bigGroup(121)
+  const props = { ...base, lang: 'zh', forceOpen: true }
+  mod.__reset()
+  const first = mod.__render(mod.GroupTree, props)
+  assert(paintedRows(first) === 50, 'an expanded parent paints 50 rows, got ' + paintedRows(first))
+  assert(moreButtons(first).length === 1, 'exactly one show-more button per group, got ' + moreButtons(first).length)
+  assert(buttonText(moreButtons(first)[0]) === '显示更多 (71)', 'the button counts the rows still hidden, got ' + buttonText(moreButtons(first)[0]))
+  moreButtons(first)[0].props.onClick()
+  const second = mod.__render(mod.GroupTree, props)
+  assert(paintedRows(second) === 100, 'one press reveals one more page, got ' + paintedRows(second))
+  assert(buttonText(moreButtons(second)[0]) === '显示更多 (21)', 'the count drops by the page, got ' + buttonText(moreButtons(second)[0]))
+  moreButtons(second)[0].props.onClick()
+  const third = mod.__render(mod.GroupTree, props)
+  assert(paintedRows(third) === 121, 'the last press reaches every row, got ' + paintedRows(third))
+  assert(moreButtons(third).length === 0, 'the button disappears once nothing is hidden')
+  return '50 -> 100 -> 121 rows, on demand'
+})
+
+check('runtime-a-new-term-resets-the-page', () => {
+  const mod = needPage()
+  const base = bigGroup(121)
+  mod.__reset()
+  const opened = mod.__render(mod.GroupTree, { ...base, lang: 'en', forceOpen: true, resetKey: 'a' })
+  moreButtons(opened)[0].props.onClick()
+  const deeper = mod.__render(mod.GroupTree, { ...base, lang: 'en', forceOpen: true, resetKey: 'a' })
+  assert(paintedRows(deeper) === 100, 'the revealed page survives a render under the same term, got ' + paintedRows(deeper))
+  const fresh = mod.__render(mod.GroupTree, { ...base, lang: 'en', forceOpen: true, resetKey: 'b' })
+  assert(paintedRows(fresh) === 50, 'a new search term paints the first page again, got ' + paintedRows(fresh))
+  assert(buttonText(moreButtons(fresh)[0]) === 'Show more (71)', 'the button counts from the first page again, got ' + buttonText(moreButtons(fresh)[0]))
+  return 'same term keeps the page, a new term starts over'
+})
+
+check('runtime-a-folded-group-paints-nothing', () => {
+  const mod = needPage()
+  const base = bigGroup(120)
+  mod.__reset()
+  const folded = mod.__render(mod.GroupTree, { ...base, lang: 'zh', forceOpen: false, resetKey: '' })
+  assert(paintedRows(folded) === 0, 'a folded parent paints no rows, got ' + paintedRows(folded))
+  assert(moreButtons(folded).length === 0, 'a folded parent offers no show-more row')
+  const forced = mod.__render(mod.GroupTree, { ...base, lang: 'zh', forceOpen: true, resetKey: '' })
+  assert(paintedRows(forced) === 50, 'a search reopens it at the first page, got ' + paintedRows(forced))
+  return 'default folded, search opens one page'
 })
 
 // ── report ───────────────────────────────────────────────────────────────────

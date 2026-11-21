@@ -16,6 +16,10 @@
  * attributed / describe, and the sorted output makes the signature - and therefore applySurface -
  * idempotent.
  *
+ * The panel also explains a row: toolDenyReasons() reads the same layers under the names the client
+ * renders (install / scope / preset / onDemand / lazy), so a badge never claims a layer the mask
+ * does not implement.
+ *
  * Failure contract (shared with the other workflow domains): op failures throw a coded
  * DomainFailure and the dispatcher turns it into the error envelope; per-item outcomes are
  * returned as structured rows. Nothing here throws past its caller boundary.
@@ -638,6 +642,100 @@ export function surfaceInputFor(
     onDemand,
     known,
   }
+}
+
+// -- why a row is missing ----------------------------------------------------
+
+/**
+ * The layers that can keep a tool out of the model view, in the order a row reports them.
+ *
+ * Four of these are the merge sources under their user-facing names: install is state.toolDeny,
+ * scope is the session/workspace/subagent overlays (host/scope-policy.ts), lazy is an unloaded
+ * lazy server and onDemand is a group that has not been opened. `preset` has no runtime layer of
+ * its own - applying a preset policy rewrites state.toolDeny (presets.ts resolvePresetTools) - so
+ * it is reported as provenance next to an install denial, never as a separate gate.
+ *
+ * The values are a stable contract with the client (types.ts ToolDenyReason) and its probe: a new
+ * layer is appended, an existing value is never renamed.
+ */
+export type ToolDenyReason = 'install' | 'scope' | 'preset' | 'onDemand' | 'lazy'
+
+/** The reporting order; the client renders badges in this order and the probe asserts it. */
+export const TOOL_DENY_REASONS: readonly ToolDenyReason[] = ['install', 'scope', 'preset', 'onDemand', 'lazy']
+
+/** The name list behind each reason; a layer the caller does not know about denies nothing. */
+export type DenyReasonSources = Partial<Record<ToolDenyReason, readonly string[]>>
+
+/** One row's reasons, in TOOL_DENY_REASONS order. A name may be denied by several layers. */
+export function denyReasonsOf(name: string, sources: DenyReasonSources): ToolDenyReason[] {
+  if (typeof name !== 'string' || name === '') return []
+  const out: ToolDenyReason[] = []
+  for (const reason of TOOL_DENY_REASONS) {
+    const names = sources[reason]
+    if (names !== undefined && names.includes(name)) out.push(reason)
+  }
+  return out
+}
+
+/**
+ * Every name a scope overlay disables: per-session denies, per-workspace denies and the subagent
+ * deny list. Allow lists are deliberately not consulted: this answers "which scope rule names the
+ * tool", while the scope formula in host/scope-policy.ts stays the authority on what one agent
+ * actually loses (an allow list in the same scope could lift it there).
+ */
+export function scopeDenyNames(state: StateV2): string[] {
+  const lists: string[][] = []
+  for (const names of Object.values(state.sessions)) lists.push(names)
+  for (const names of Object.values(state.workspaces)) lists.push(names)
+  lists.push(state.subagentDeny)
+  return unionNames(lists)
+}
+
+/** The part of a preset a reason read needs: the names its tool policy disables (G11). */
+export interface PresetDenySource {
+  toolPolicy?: { disabled?: readonly string[] }
+}
+
+export interface DenyReasonInput {
+  state: StateV2
+  /** Groups as the caller normalized them; on-demand ones hide their tools until opened. */
+  groups: readonly GroupRecord[]
+  /** Presets as the caller normalized them; only their policies are read here. */
+  presets: readonly PresetDenySource[]
+  /** Live tool inventory: neither an on-demand group nor a lazy server can hide an unknown name. */
+  known: readonly string[]
+}
+
+/**
+ * Every tool the panel can explain, with its reasons. Names no layer names are absent from the map.
+ *
+ * The on-demand answer is the mask's own: a group that nothing has opened yet hides its tools, so
+ * the badge describes the group ("hidden until opened") rather than one session's current view.
+ * Lazy names come from the same lazyDeny() the installation mask reads, which is why the lazy
+ * reason and the row's lazyHidden flag cannot disagree.
+ */
+export function toolDenyReasons(input: DenyReasonInput): Map<string, ToolDenyReason[]> {
+  const install = input.state.toolDeny
+  const denied = new Set(install)
+  const scope = scopeDenyNames(input.state)
+  const preset: string[] = []
+  for (const entry of input.presets) for (const name of entry.toolPolicy?.disabled ?? []) preset.push(name)
+  const onDemand = onDemandDeny(input.groups, input.known, new Set())
+  const lazy = lazyDeny(readLazy(input.state), input.known)
+  const out = new Map<string, ToolDenyReason[]>()
+  for (const name of input.known) {
+    const reasons = denyReasonsOf(name, {
+      install,
+      scope,
+      // Only the mask a policy installed can carry its provenance: apply rewrites state.toolDeny
+      // and keeps MCP names only, so a policy that never ran never badges a visible row.
+      preset: denied.has(name) && serverOf(name) !== null ? preset : [],
+      onDemand,
+      lazy,
+    })
+    if (reasons.length > 0) out.set(name, reasons)
+  }
+  return out
 }
 
 // -- the one restrict --------------------------------------------------------

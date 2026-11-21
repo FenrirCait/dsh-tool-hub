@@ -30,13 +30,23 @@
  *  21. layout comes from th-* classes and every colour is a theme token;
  *  22. no HTML injection, no TODO marker, no import outside the client modules, and the file
  *      stays inside the view budget;
- *  23. every t() key resolves in both catalogs, and the extensions catalogs agree.
+ *  23. every t() key resolves in both catalogs, and the extensions catalogs agree;
+ *  24. the source filter is one exported pure rule: all / bundled / local, a missing bundled
+ *      flag is local, snapshot order is kept and the input is never mutated;
+ *  25. the toolbar renders that rule as one radio group with per-source counts, defaulting to
+ *      all, and labels the group in the page's language;
+ *  26. the cards render the filtered rows, an empty source has its own state, and the bundled
+ *      badge stays on every bundled card.
  *
- * No dependencies: PASS/FAIL lines, exit 1 when anything fails.
+ * The source rules are transpiled with the esbuild devDependency and imported against stubs, so
+ * checks 24-26 are measured on a fixture instead of matched as text. PASS/FAIL lines, exit 1
+ * when anything fails.
  */
-import { readFileSync, statSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { transformSync } from 'esbuild'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const VIEW = join(ROOT, 'src', 'client', 'views', 'extensions.tsx')
@@ -71,6 +81,86 @@ const source = read(VIEW)
 const body = code(source)
 const shell = read(SHELL)
 const i18nSource = read(I18N)
+
+// ── the pure source filter, transpiled and run ──────────────────────────────
+// esbuild is already a devDependency (the tools probe uses it). React and the view's runtime
+// imports are stubbed, so the filter rules are measured on a fixture, not matched as text.
+
+const STUBS = {
+  'react.stub.mjs': [
+    'export const createElement = () => null',
+    'export const useState = () => [undefined, () => {}]',
+    'export const useEffect = () => {}',
+    'export const useRef = value => ({ current: value })',
+    'export default { createElement, useState, useEffect, useRef }',
+  ].join('\n'),
+  'api.stub.mjs': 'export const runOp = async () => ({ ok: true, data: null })\n',
+  'components.stub.mjs': [
+    'export const Badge = () => null',
+    'export const Button = () => null',
+    'export const Callout = () => null',
+    'export const Card = () => null',
+    'export const Dialog = () => null',
+    'export const Empty = () => null',
+    'export const Field = () => null',
+    'export const Select = () => null',
+    'export const Switch = () => null',
+    'export const Toolbar = () => null',
+    'export const monoStyle = {}',
+  ].join('\n') + '\n',
+  'theme.stub.mjs': [
+    'export const FONT = { xs: 11 }',
+    'export const R = { sm: 6, md: 10 }',
+    'export const SP = { xs: 4, sm: 8, md: 10, lg: 16 }',
+    'export const T = { borderSoft: "", text2: "", text3: "", surface: "" }',
+  ].join('\n') + '\n',
+}
+
+/** The view's runtime imports, pointed at the stub siblings written beside it. */
+const SPECIFIERS = [
+  ['react', './react.stub.mjs'],
+  ['../api.js', './api.stub.mjs'],
+  ['../components.js', './components.stub.mjs'],
+  ['../theme.js', './theme.stub.mjs'],
+]
+
+function rewrite(text) {
+  let out = text
+  for (const [from, to] of SPECIFIERS) {
+    out = out.split('from "' + from + '"').join('from "' + to + '"')
+    out = out.split("from '" + from + "'").join('from "' + to + '"')
+  }
+  return out
+}
+
+let viewModule = null
+let viewModuleError = null
+try {
+  const dir = mkdtempSync(join(tmpdir(), 'tool-hub-ext-'))
+  try {
+    for (const [name, text] of Object.entries(STUBS)) writeFileSync(join(dir, name), text)
+    const js = transformSync(read(VIEW), { loader: 'tsx', format: 'esm', target: 'node20', jsx: 'transform' }).code
+    writeFileSync(join(dir, 'extensions.mjs'), rewrite(js))
+    viewModule = await import(pathToFileURL(join(dir, 'extensions.mjs')).href)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+} catch (error) {
+  viewModuleError = error instanceof Error ? error : new Error(String(error))
+}
+
+function requireView() {
+  assert(viewModuleError === null, 'the view module did not load: ' + (viewModuleError === null ? '' : viewModuleError.message))
+  return viewModule
+}
+
+/** Rows as the snapshot reports them: two bundled, one local without the flag, one local false. */
+const SOURCE_ROWS = [
+  { id: 'bundled-a', bundled: true },
+  { id: 'local-a', bundled: false },
+  { id: 'legacy-no-flag' },
+  { id: 'bundled-b', bundled: true },
+]
 
 const count = needle => body.split(needle).length - 1
 
@@ -253,6 +343,84 @@ check('empty-view', () => {
   assert(body.includes('if (items.length === 0) return <Empty title={t(\'extensions.viewEmpty\')} />'), 'an empty list is an empty state')
   assert(body.includes('if (data === null || data === undefined) return <Empty title={t(\'extensions.viewEmpty\')} />'), 'a null payload needs the empty state')
   return 'empty => viewEmpty, wrong shape => json'
+})
+
+// ── the source filter ─────────────────────────────────────────────────────
+
+check('source-module', () => {
+  const api = requireView()
+  for (const name of ['EXTENSION_SOURCES', 'extensionSourceOf', 'filterExtensions', 'extensionSourceCounts',
+    'sourceLabel', 'sourceHeading', 'sourceEmptyLabel']) {
+    assert(api[name] !== undefined, 'extensions.tsx does not export ' + name)
+  }
+  assert(api.EXTENSION_SOURCES.join(',') === 'all,bundled,local', 'the chips must be all, bundled, local in that order')
+  return 'esbuild transpile + stub import, seven source exports'
+})
+
+check('source-runtime', () => {
+  const api = requireView()
+  const rows = SOURCE_ROWS.map(row => ({ ...row }))
+  const before = JSON.stringify(rows)
+  const all = api.filterExtensions(rows, 'all')
+  assert(all.length === 4, 'all must keep every row')
+  assert(all !== rows, 'all must return a new array')
+  assert(all.map(row => row.id).join(',') === 'bundled-a,local-a,legacy-no-flag,bundled-b', 'all must keep snapshot order')
+  assert(api.filterExtensions(rows, 'bundled').map(row => row.id).join(',') === 'bundled-a,bundled-b', 'bundled must keep only bundled rows')
+  assert(api.filterExtensions(rows, 'local').map(row => row.id).join(',') === 'local-a,legacy-no-flag', 'local must keep rows without the bundled flag')
+  assert(JSON.stringify(rows) === before, 'filtering must not mutate the snapshot')
+  assert(api.extensionSourceOf({ bundled: true }) === 'bundled', 'bundled:true is the bundled source')
+  assert(api.extensionSourceOf({ bundled: false }) === 'local', 'bundled:false is local')
+  assert(api.extensionSourceOf({}) === 'local', 'a missing flag is local')
+  const counts = api.extensionSourceCounts(rows)
+  assert(counts.all === 4 && counts.bundled === 2 && counts.local === 2, 'counts must add up: ' + JSON.stringify(counts))
+  const empty = api.extensionSourceCounts([])
+  assert(empty.all === 0 && empty.bundled === 0 && empty.local === 0, 'an empty snapshot counts zero')
+  return 'all/bundled/local, missing flag local, order kept, no mutation, counts'
+})
+
+check('source-labels', () => {
+  const api = requireView()
+  const t = key => key
+  assert(api.sourceLabel('all', 'zh', t) === '全部', 'zh all label')
+  assert(api.sourceLabel('all', 'en', t) === 'All', 'en all label')
+  assert(api.sourceLabel('local', 'zh', t) === '本地', 'zh local label')
+  assert(api.sourceLabel('local', 'en', t) === 'Local', 'en local label')
+  assert(api.sourceLabel('bundled', 'zh', t) === 'extensions.bundled', 'the bundled chip must reuse the catalog key, not add copy')
+  assert(api.sourceHeading('zh') !== api.sourceHeading('en'), 'the radio group needs a name in both languages')
+  assert(api.sourceEmptyLabel('zh') !== api.sourceEmptyLabel('en'), 'the filtered empty state needs copy in both languages')
+  return 'bilingual local copy, bundled reuses extensions.bundled'
+})
+
+check('source-toolbar', () => {
+  assert(body.includes("const [source, setSource] = React.useState<ExtensionSource>('all')"), 'the filter must default to all')
+  assert(body.includes('role="radiogroup"'), 'the chips must be one radio group')
+  assert(body.includes('aria-label={sourceHeading(lang)}'), 'the radio group needs an accessible name')
+  assert(body.includes('{EXTENSION_SOURCES.map(item => {'), 'the chips must follow the exported order')
+  assert((body.match(/type="radio"/g) ?? []).length === 1, 'one radio declaration inside the map')
+  assert(body.includes("className={'th-btn' + (active ? ' th-btn--primary' : ' th-btn--ghost')}"), 'the active chip must take the primary style')
+  assert(body.includes('checked={active}'), 'a chip must follow the chosen source')
+  assert(body.includes('setSource(item)'), 'a chip must set the source')
+  assert(body.includes("sourceLabel(item, lang, t) + ' (' + counts[item] + ')'"), 'each chip must show its count')
+  assert(body.includes('const counts = extensionSourceCounts(snapshot.extensions)'), 'counts must cover the whole snapshot')
+  return 'radiogroup, one radio per chip, counts, default all'
+})
+
+check('source-filtered-list', () => {
+  assert(body.includes('const shown = filterExtensions(snapshot.extensions, source)'), 'the page must filter the snapshot')
+  assert(body.includes('{shown.map(entry => ('), 'the cards must render the filtered rows')
+  assert(!body.includes('{snapshot.extensions.map(entry => ('), 'the cards must not bypass the filter')
+  assert(body.includes('{shown.length === 0 ? ('), 'an empty source needs its own state')
+  assert(body.includes('<Empty title={sourceEmptyLabel(lang)} />'), 'an empty source must use the local label')
+  assert(body.includes("{entry.bundled === true ? <Badge tone=\"neutral\">{t('extensions.bundled')}</Badge> : null}"), 'the bundled badge must stay on every bundled card')
+  return 'filtered cards, per-source empty state, bundled badge kept'
+})
+
+check('source-hooks-order', () => {
+  const stateAt = body.indexOf("const [source, setSource] = React.useState<ExtensionSource>('all')")
+  const emptyAt = body.indexOf('if (snapshot.extensions.length === 0)')
+  assert(stateAt !== -1 && emptyAt !== -1, 'the filter state and the installation empty return must both exist')
+  assert(stateAt < emptyAt, 'the filter hook must be declared before the conditional return')
+  return 'useState before the empty return (rules of hooks)'
 })
 
 // ── the op console ─────────────────────────────────────────────────────────

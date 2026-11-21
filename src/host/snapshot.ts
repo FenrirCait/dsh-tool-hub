@@ -12,7 +12,8 @@ import { listSkills, skillRoots } from '../domains/skills.js'
 import { patchPathFor } from '../domains/mcp.js'
 import { scanPatchBlocks } from '../core/patch-blocks.js'
 import { readMode } from '../domains/scenes.js'
-import { readLazy, serverOf } from '../domains/tool-surface.js'
+import { readLazy, serverOf, toolDenyReasons, type PresetDenySource, type ToolDenyReason } from '../domains/tool-surface.js'
+import type { GroupRecord } from '../domains/groups.js'
 import type { ExtensionStatus } from './extensions.js'
 
 export interface SnapshotDeps {
@@ -160,8 +161,16 @@ function settingsSchema(registry: Registry): unknown[] {
   return settingsFields(modules).map(({ key, field }) => ({ ...field, key }))
 }
 
-/** The tool rows the panel toggles: known names, live deny list, lazy servers. */
-function toolRows(env: HostEnv): Array<{ name: string; enabled: boolean; server: string | null; lazy: boolean; fixed: boolean }> {
+/**
+ * The tool rows the panel toggles: known names, live deny list, lazy servers, and why each row is
+ * missing. The reasons come from tool-surface's own layer reader (the merge sources plus the preset
+ * policy that lands in the install mask), so the badge cannot describe a gate the mask lacks.
+ */
+function toolRows(
+  env: HostEnv,
+  groups: readonly GroupRecord[],
+  presets: readonly PresetDenySource[],
+): Array<{ name: string; enabled: boolean; server: string | null; lazy: boolean; lazyHidden: boolean; effective: boolean; fixed: boolean; denyReasons: ToolDenyReason[] }> {
   const tools = env.services.get('tools') as Record<string, unknown> | null | undefined
   const view = typeof tools?.view === 'function' ? (tools.view as (arg: unknown) => unknown)(undefined) : null
   const record = asRecord(view)
@@ -190,6 +199,7 @@ function toolRows(env: HostEnv): Array<{ name: string; enabled: boolean; server:
   const lazy = readLazy(env.state)
   const lazyServers = new Set(lazy.servers)
   const loaded = new Set(lazy.loaded)
+  const reasons = toolDenyReasons({ state: env.state, groups, presets, known: names })
   return names.sort().map(name => {
     const server = serverOf(name)
     const lazyServer = server !== null && lazyServers.has(server)
@@ -202,6 +212,7 @@ function toolRows(env: HostEnv): Array<{ name: string; enabled: boolean; server:
       lazyHidden,
       effective: !deny.has(name) && !lazyHidden,
       fixed: !restrictable.has(name),
+      denyReasons: reasons.get(name) ?? [],
     }
   })
 }
@@ -228,22 +239,25 @@ export async function buildSnapshot(deps: SnapshotDeps): Promise<Record<string, 
     ? { path: null, rows: 0, blocks: [], unclosed: [], foreignTotal: 0 }
     : await readFile(patch, 'utf8').then(text => ({ path: patch, ...scanPatchBlocks(text) })).catch(() => ({ path: patch, rows: 0, blocks: [], unclosed: [], error: 'unreadable' }))
   const home = process.env.DSH_HOME?.trim() || dirname(dirname(stateFile())) || homedir()
+  // The tool rows and the groups view read the same normalized lists, so normalize once per read.
+  const groups = normalizeGroups(env.state.groups)
+  const presets = normalizePresets(env.state.presets)
 
   return {
     plugins,
     skills,
     bundles: bundles.rows,
     bundleError: bundles.error,
-    groups: normalizeGroups(env.state.groups),
+    groups,
     // Drawers are part of state but were never in the snapshot; the groups view needs names.
     collections: Array.isArray(env.state.collections) ? env.state.collections : [],
-    presets: Object.fromEntries(normalizePresets(env.state.presets).map(preset => [preset.name, {
+    presets: Object.fromEntries(presets.map(preset => [preset.name, {
       plugin: preset.enabled.plugin,
       skill: preset.enabled.skill,
       tool: preset.enabled.tool,
       ...(preset.toolPolicy === undefined ? {} : { toolPolicy: preset.toolPolicy }),
     }])),
-    tools: toolRows(env),
+    tools: toolRows(env, groups, presets),
     sessions: env.state.sessions,
     sessionList: await sessionOptions(env),
     scene: {

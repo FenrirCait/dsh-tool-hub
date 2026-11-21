@@ -3,8 +3,17 @@
  *
  * Doctor is the one host probe the panel triggers on demand, and it is read-only. That is also
  * why this view calls runOp directly instead of props.run: run() reports success and drops the
- * report the page has to render. History and paths are snapshot data — the host already wrote
- * them, so the page reads them and never asks for them twice.
+ * report the page has to render. History, paths and extension failures are snapshot data — the
+ * host already wrote them, so the page reads them and never asks for them twice.
+ *
+ * Two operational actions live here, both explicit and both reporting their own result:
+ *   - copy the current report (doctor + snapshot essentials) to the clipboard;
+ *   - reload a failed extension through the host's existing extension.reload op, one row at a
+ *     time or once for every failed row. Nothing is repaired automatically.
+ *
+ * Extension failures need no extra host field: buildSnapshot already ships
+ * `extensions[].error/loaded/styles` (src/host/index.ts:272), and a bad CSS style file surfaces
+ * as an error on the extension row because the loader reads the declared styles while mounting.
  *
  * Every parsed row is validated: an older host may return fewer checks, and a row without an id
  * is dropped rather than rendered as a blank badge.
@@ -14,7 +23,10 @@ import { OPS, runOp } from '../api.js'
 import { Badge, Button, Callout, Card, Empty } from '../components.js'
 import { MaintenanceCards } from './maintenance.js'
 import { DiagnosticsHistory } from './diagnostics-history.js'
-import type { SnapshotPaths, ViewProps } from '../types.js'
+import type { ExtensionStatus, SnapshotPaths, ViewProps } from '../types.js'
+
+/** The host op the extensions view also sends; named once here so a rename is one line. */
+const RELOAD_OP = 'extension.reload'
 
 /** One doctor row as the page renders it; the host contract lives in src/host/diagnostics.ts. */
 interface CheckRow {
@@ -54,9 +66,119 @@ interface PathRow {
   values: string[]
 }
 
+/** What the last reload/copy action said; `ok` picks the tone, `text` is already translated. */
+interface ActionNote {
+  ok: boolean
+  text: string
+}
+
 /** One-off labels the catalogs do not carry; everything else comes from t(). */
 function label(lang: ViewProps['lang'], zh: string, en: string): string {
   return lang === 'zh' ? zh : en
+}
+
+/**
+ * An extension row is failed when its load reported an error, or when it is enabled but never
+ * loaded. A broken declared style file lands in the first case: the loader reads the CSS while
+ * mounting, so the extension itself carries the error.
+ */
+function failedExtension(entry: ExtensionStatus): boolean {
+  if (entry.error !== null && entry.error !== '') return true
+  return entry.enabled && !entry.loaded
+}
+
+/** The name in the panel's current language, or the id when the manifest has no usable name. */
+function extensionName(entry: ExtensionStatus, lang: ViewProps['lang']): string {
+  const name = lang === 'zh' ? entry.name.zh : entry.name.en
+  return name === '' ? entry.id : name
+}
+
+/**
+ * The text the copy button puts on the clipboard: the doctor report plus the snapshot facts the
+ * page renders. Field labels stay English so a report pasted into an issue reads the same for
+ * every operator; values are copied as the host wrote them.
+ */
+export function buildDiagnosticsReport(
+  snapshot: ViewProps['snapshot'],
+  report: DoctorReport | null,
+  at: string,
+  lang: ViewProps['lang'],
+): string {
+  const lines: string[] = []
+  lines.push('dsh-tool-hub diagnostics')
+  lines.push('generated: ' + at)
+  lines.push('host: plugin ' + snapshot.meta.pluginVersion + ' · node ' + snapshot.meta.node + ' · ' + snapshot.meta.platform + ' · pid ' + snapshot.meta.pid)
+  if (report === null) {
+    lines.push('doctor: not run')
+  } else {
+    const failing = report.checks.filter(row => !row.ok)
+    lines.push('doctor: ' + (report.ok ? 'ok' : failing.length + ' issue(s)'))
+    for (const row of report.checks) {
+      lines.push('  [' + (row.ok ? 'ok' : 'fail') + '] ' + row.id + ': ' + (row.detail === '' ? 'no detail' : row.detail))
+    }
+    const capabilities = report.capabilities
+    if (capabilities !== null) {
+      lines.push('capabilities: ' + capabilities.present + '/' + capabilities.total + ' present' + (capabilities.degraded ? ', degraded' : ''))
+      for (const row of capabilities.missing) {
+        lines.push('  missing ' + row.service + '.' + row.member + ' (' + (row.required ? 'required' : 'optional') + '): ' + row.fallback)
+      }
+    }
+  }
+  const failed = snapshot.extensions.filter(failedExtension)
+  lines.push('extensions: ' + snapshot.extensions.length + ' installed, ' + failed.length + ' failed')
+  for (const entry of snapshot.extensions) {
+    const state = entry.enabled ? (entry.loaded ? 'loaded' : 'not loaded') : 'disabled'
+    const styles = entry.styles === undefined || entry.styles.length === 0 ? '' : '; styles: ' + entry.styles.join(', ')
+    const error = entry.error === null || entry.error === '' ? '' : '; error: ' + entry.error
+    lines.push('  [' + (failedExtension(entry) ? 'fail' : 'ok') + '] ' + entry.id + ' "' + extensionName(entry, lang) + '" ' + (entry.version === '' ? '?' : entry.version) + ' ' + state + styles + error)
+  }
+  lines.push('patch: ' + (snapshot.paths.patch === null || snapshot.paths.patch === undefined ? 'none' : snapshot.paths.patch))
+  lines.push('patch blocks: ' + snapshot.patchInfo.blocks.length + ' block(s), ' + snapshot.patchInfo.foreignTotal + ' foreign row(s) left untouched')
+  lines.push('mask: mounted=' + snapshot.mask.mounted + ' deny=' + snapshot.mask.deny.length + ' sessions=' + snapshot.mask.sessions.length + ' problems=' + snapshot.mask.problems.length)
+  const skills = snapshot.paths.skillRoots.length > 0
+    ? snapshot.paths.skillRoots
+    : (snapshot.paths.skills ?? []).map(root => (typeof root.dir === 'string' ? root.dir : '')).filter(dir => dir !== '')
+  lines.push('paths: home=' + (snapshot.paths.home ?? '') + '; state=' + (snapshot.paths.state ?? '') + '; skills=' + (skills.length === 0 ? 'none' : skills.join(', ')))
+  if (snapshot.history.length > 0) {
+    lines.push('history: ' + snapshot.history.length + ' op(s), newest first')
+    for (const entry of snapshot.history.slice(0, 10)) {
+      lines.push('  ' + entry.at + ' ' + (entry.ok ? 'ok' : 'fail') + ' ' + entry.op + (entry.detail === '' ? '' : ': ' + entry.detail))
+    }
+  }
+  return lines.join('\n') + '\n'
+}
+
+/**
+ * Clipboard write with a selection fallback: an Electron window on a non-secure origin can expose
+ * `navigator.clipboard` and still reject the write, so a failure there is not the end.
+ */
+export async function copyToClipboard(text: string): Promise<boolean> {
+  const clipboard: Clipboard | undefined = typeof navigator === 'undefined' ? undefined : navigator.clipboard
+  if (clipboard !== undefined && typeof clipboard.writeText === 'function') {
+    try {
+      await clipboard.writeText(text)
+      return true
+    }
+    catch {
+      // Fall through to the selection copy below.
+    }
+  }
+  if (typeof document === 'undefined') return false
+  try {
+    const area = document.createElement('textarea')
+    area.value = text
+    area.setAttribute('readonly', 'readonly')
+    area.setAttribute('aria-hidden', 'true')
+    area.className = 'th-visually-hidden'
+    document.body.appendChild(area)
+    area.select()
+    const copied = typeof document.execCommand === 'function' ? document.execCommand('copy') : false
+    document.body.removeChild(area)
+    return copied === true
+  }
+  catch {
+    return false
+  }
 }
 
 function recordOf(value: unknown): Record<string, unknown> | null {
@@ -154,20 +276,24 @@ function pathRowsOf(paths: SnapshotPaths, t: ViewProps['t'], lang: ViewProps['la
 }
 
 export function DiagnosticsView(props: ViewProps): React.ReactElement {
-  const { snapshot, t, lang, busy, run, reload } = props
+  const { snapshot, t, lang, busy, run, reload, runDetailed } = props
   const [report, setReport] = React.useState<DoctorReport | null>(null)
   const [failure, setFailure] = React.useState<string | null>(null)
   const [running, setRunning] = React.useState(false)
   const [lastRun, setLastRun] = React.useState<string | null>(null)
+  const [copyState, setCopyState] = React.useState<'idle' | 'copying' | 'ok' | 'fail'>('idle')
+  const [actionNote, setActionNote] = React.useState<ActionNote | null>(null)
   // A ref, not the state flag: two clicks in one tick both see the old render's state.
   const inFlight = React.useRef(false)
+  const copyInFlight = React.useRef(false)
 
-  /** The only host call this view makes, and it is read-only by contract. */
+  /** The only read-only host call this view makes; reloads below are explicit writes. */
   const runDoctor = React.useCallback(async (): Promise<void> => {
     if (inFlight.current) return
     inFlight.current = true
     setRunning(true)
     setFailure(null)
+    setCopyState('idle')
     const result = await runOp(OPS.doctor, {})
     inFlight.current = false
     setRunning(false)
@@ -179,6 +305,45 @@ export function DiagnosticsView(props: ViewProps): React.ReactElement {
     setReport(readReport(result.data))
     setLastRun(new Date().toISOString())
   }, [])
+
+  /** Copy the report the page currently shows: the doctor answer plus the snapshot facts. */
+  const copyReport = React.useCallback(async (): Promise<void> => {
+    if (copyInFlight.current) return
+    copyInFlight.current = true
+    setCopyState('copying')
+    const text = buildDiagnosticsReport(snapshot, report, new Date().toISOString(), lang)
+    const copied = await copyToClipboard(text)
+    copyInFlight.current = false
+    setCopyState(copied ? 'ok' : 'fail')
+  }, [snapshot, report, lang])
+
+  /** Reload one extension by id; the shell's write path refreshes the snapshot on success. */
+  const reloadOne = React.useCallback(async (id: string): Promise<boolean> => {
+    const outcome = await runDetailed(RELOAD_OP, { id })
+    setActionNote(outcome.ok
+      ? { ok: true, text: label(lang, '已重新加载 ' + id, 'Reloaded ' + id) }
+      : { ok: false, text: label(lang, '重载失败：' + id + ' — ' + (outcome.error ?? 'unknown error'), 'Reload failed: ' + id + ' — ' + (outcome.error ?? 'unknown error')) })
+    return outcome.ok
+  }, [lang, runDetailed])
+
+  /**
+   * Reload every failed row through the same op, one id at a time. The list is captured before
+   * the first write: each success refreshes the snapshot, and re-deriving would move the target.
+   */
+  const reloadFailed = React.useCallback(async (): Promise<void> => {
+    const failedIds = snapshot.extensions.filter(failedExtension).map(entry => entry.id)
+    if (failedIds.length === 0) return
+    let done = 0
+    const errors: string[] = []
+    for (const id of failedIds) {
+      const outcome = await runDetailed(RELOAD_OP, { id })
+      if (outcome.ok) done += 1
+      else errors.push(id + ': ' + (outcome.error ?? 'unknown error'))
+    }
+    setActionNote(errors.length === 0
+      ? { ok: true, text: label(lang, '已重新加载 ' + done + ' 个失败的扩展', 'Reloaded ' + done + ' failed extension(s)') }
+      : { ok: false, text: label(lang, '已重新加载 ' + done + '/' + failedIds.length + ' 个；失败：' + errors.join('; '), 'Reloaded ' + done + '/' + failedIds.length + '; failed: ' + errors.join('; ')) })
+  }, [snapshot.extensions, lang, runDetailed])
 
   const checks = report === null ? [] : report.checks
   const failing = checks.filter(row => !row.ok)
@@ -193,6 +358,26 @@ export function DiagnosticsView(props: ViewProps): React.ReactElement {
   ]
   const capabilityLabel = label(lang, '宿主能力', 'Host capabilities')
   const runLabel = running ? t('diagnostics.running') : t('diagnostics.run')
+  const extensionsLabel = label(lang, '扩展', 'Extensions')
+  const extensions = snapshot.extensions
+  const failedExtensions = extensions.filter(failedExtension)
+  const bulkBusy = busy !== null && busy.startsWith(RELOAD_OP)
+  const bulkLabel = bulkBusy
+    ? label(lang, '重新加载中…', 'Reloading…')
+    : label(lang, '重新加载失败扩展', 'Reload failed extensions')
+  const copyButtonLabel = copyState === 'copying'
+    ? label(lang, '复制中…', 'Copying…')
+    : copyState === 'ok'
+      ? label(lang, '已复制', 'Copied')
+      : copyState === 'fail'
+        ? label(lang, '复制失败', 'Copy failed')
+        : label(lang, '复制报告', 'Copy report')
+  const copyNote = copyState === 'ok'
+    ? label(lang, '已复制当前报告到剪贴板', 'Copied the current report to the clipboard')
+    : copyState === 'fail'
+      ? label(lang, '复制失败：浏览器不允许访问剪贴板', 'Copy failed: the browser denied clipboard access')
+      : ''
+  const liveText = copyNote !== '' ? copyNote : (actionNote === null ? '' : actionNote.text)
 
   return (
     <div>
@@ -207,6 +392,18 @@ export function DiagnosticsView(props: ViewProps): React.ReactElement {
         >
           {runLabel}
         </Button>
+        <Button
+          variant="ghost"
+          busy={copyState === 'copying'}
+          disabled={running}
+          onClick={() => {
+            void copyReport()
+          }}
+          label={copyButtonLabel}
+        >
+          {copyButtonLabel}
+        </Button>
+        {copyNote === '' ? null : <span className="th-row-meta">{copyNote}</span>}
         <span className="th-row-meta" role="status" aria-label={t('a11y.status')}>
           {report === null ? null : (
             <>
@@ -222,6 +419,7 @@ export function DiagnosticsView(props: ViewProps): React.ReactElement {
             </span>
           )}
         </span>
+        <span className="th-visually-hidden" aria-live="polite">{liveText}</span>
       </div>
 
       {failure === null ? null : (
@@ -234,6 +432,66 @@ export function DiagnosticsView(props: ViewProps): React.ReactElement {
         >
           {label(lang, `诊断请求失败：${failure}`, `The diagnostics request failed: ${failure}`)}
         </Callout>
+      )}
+
+      {extensions.length === 0 ? null : (
+        <div className="th-section" role="region" aria-label={extensionsLabel}>
+          <div className="th-section-title">{extensionsLabel}</div>
+          <Card label={extensionsLabel}>
+            <div className="th-toolbar">
+              {failedExtensions.length === 0 ? null : (
+                <Button variant="primary" busy={bulkBusy} onClick={() => { void reloadFailed() }} label={bulkLabel}>
+                  {bulkLabel}
+                </Button>
+              )}
+              <span className="th-row-meta">
+                {failedExtensions.length === 0
+                  ? label(lang, `${extensions.length} 个扩展全部正常加载`, `${extensions.length} extension(s) loaded cleanly`)
+                  : label(lang, `${failedExtensions.length}/${extensions.length} 个扩展加载失败`, `${failedExtensions.length}/${extensions.length} extension(s) failed`)}
+              </span>
+            </div>
+            <div className="th-list">
+              {extensions.map(entry => {
+                const isFailed = failedExtension(entry)
+                const rowBusy = busy === RELOAD_OP + ':' + entry.id
+                const styles = entry.styles ?? []
+                return (
+                  <div className="th-row" key={entry.id}>
+                    <div className="th-row-body">
+                      <span className="th-row-name">
+                        {extensionName(entry, lang)}
+                        <span className="th-mono">{entry.id + '@' + (entry.version === '' ? '?' : entry.version)}</span>
+                      </span>
+                      <span className="th-row-meta">
+                        {entry.enabled ? label(lang, '已启用', 'enabled') : label(lang, '已停用', 'disabled')}
+                        {' · '}
+                        {entry.loaded ? label(lang, '已加载', 'loaded') : label(lang, '未加载', 'not loaded')}
+                        {styles.length === 0 ? null : <span className="th-mono">{label(lang, '样式：', 'Styles: ') + styles.join(', ')}</span>}
+                      </span>
+                      {entry.error === null || entry.error === '' ? null : <span className="th-row-meta">{entry.error}</span>}
+                    </div>
+                    {isFailed ? (
+                      <Button
+                        variant="ghost"
+                        busy={rowBusy}
+                        disabled={bulkBusy}
+                        onClick={() => { void reloadOne(entry.id) }}
+                        label={label(lang, '重新加载 ' + entry.id, 'Reload ' + entry.id)}
+                      >
+                        {label(lang, '重新加载', 'Reload')}
+                      </Button>
+                    ) : (
+                      <Badge tone="on">{t('diagnostics.ok')}</Badge>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+            {actionNote === null ? null : (actionNote.ok
+              ? <div className="th-row-meta">{actionNote.text}</div>
+              : <Callout tone="error">{actionNote.text}</Callout>)}
+          </Card>
+        </div>
       )}
 
       {snapshot.patchInfo.path === null ? null : (

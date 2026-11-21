@@ -10,7 +10,9 @@
  *
  * Expansion lives in package-tree.tsx and is remembered under PLUGINS_TREE_KEY, so the first visit
  * shows every bundle folded, the next one shows what the user left open, and a non-empty search
- * forces everything open so a match is never hidden behind a collapsed row.
+ * forces everything open so a match is never hidden behind a collapsed row. The same term is the
+ * reset key for the shared tree's paging: an open bundle paints one page of rows, and a new search
+ * folds every bundle back to its first page instead of leaving it deep in a page nobody asked for.
  *
  * The parent switch is handed back to the view: only the view knows the host's bulk cap and its
  * 1.x "confirm past twenty" rule. What this file guarantees is that a group is switchable only when
@@ -157,6 +159,7 @@ export function PluginsTree(props: PluginsTreeProps): React.ReactElement {
       groups={groups}
       lang={lang}
       forceOpen={term !== ''}
+      resetKey={term}
       expansion={expansion}
       renderRow={renderRow}
       onBulk={onBulk}

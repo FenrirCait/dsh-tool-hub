@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.0.0-alpha.62
+
+- Extensions: source filter (all / from package / local) with counts; the bundled badge stays.
+- Tools: every row carries denyReasons (install / scope / preset / onDemand / lazy) computed in
+  the snapshot from the real mask layers and rendered as explanatory badges.
+- Lists: expanded groups render 50 rows at a time with "Show more", resetting on a new search;
+  group headers are sticky inside the scrolling content.
+- Diagnostics: copy a full report (clipboard with fallback), reload one failed extension, or
+  reload every failed extension; no automatic repair and no new host op.
+
 ## 2.0.0-alpha.61
 
 - Extensions from the package's `compat/` are marked **From package / 来自插件包** in the

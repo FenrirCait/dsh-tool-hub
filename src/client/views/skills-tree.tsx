@@ -70,6 +70,8 @@ export interface SkillTreeProps<T> {
   lang: Lang
   /** A search is running: every parent opens so no match hides behind a fold. */
   forceOpen: boolean
+  /** The term behind forceOpen; a changed term folds every parent back to its first page. */
+  resetKey?: string
   /** Group key whose bulk write is still running; the parent switch spins while it does. */
   busyKey: string | null
   onBulk: (group: TreeGroup<T>, next: boolean) => void
@@ -77,7 +79,7 @@ export interface SkillTreeProps<T> {
 }
 
 export function SkillTree<T>(props: SkillTreeProps<T>): React.ReactElement {
-  const { groups, lang, forceOpen, busyKey, onBulk, renderRow } = props
+  const { groups, lang, forceOpen, resetKey, busyKey, onBulk, renderRow } = props
   // Nothing is stored on a first visit, so every parent starts folded.
   const expansion = useTreeExpansion(SKILLS_TREE_STORAGE)
   return (
@@ -85,6 +87,7 @@ export function SkillTree<T>(props: SkillTreeProps<T>): React.ReactElement {
       groups={groups}
       lang={lang}
       forceOpen={forceOpen}
+      resetKey={resetKey}
       expansion={expansion}
       busyKey={busyKey}
       onBulk={onBulk}

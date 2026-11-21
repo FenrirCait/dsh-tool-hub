@@ -9,7 +9,9 @@
  * copy it. The runtime half cuts the marked tree-helpers region out of skills-tree.tsx, bundles it
  * with the project's own esbuild and executes the grouping and search rules, so they are run
  * instead of grepped; a second bundle stubs package-tree's browser imports so the REAL
- * groupByPrefix runs against real skill names, composed exactly as the view composes it.
+ * groupByPrefix runs against real skill names, composed exactly as the view composes it. That
+ * same bundle proves the paging rule: an expanded parent paints GROUP_PAGE_SIZE rows, the
+ * show-more row counts what is left, and a changed search term (the reset key) drops every page.
  *
  * The tree contract is not taste: default folded (nothing stored yet), remembered under
  * 'tool-hub-tree-skills', a search opens every parent, a parent-label hit keeps every child, and
@@ -236,6 +238,15 @@ check('tree-search-forces-open', () => {
   assert(/forceOpen=\{forceOpen\}/.test(treeBody), 'the tree must hand forceOpen to GroupTree')
   assert(/term = query\.trim\(\)\.toLowerCase\(\)/.test(body), 'the term comes from the search box, trimmed and folded')
   return 'forceOpen while searching, remembered folds after'
+})
+
+check('tree-pagination-reset-key', () => {
+  assert(/resetKey\?: string/.test(treeBody), 'the tree takes the search term as an optional reset key')
+  assert(/resetKey=\{resetKey\}/.test(treeBody), 'skills-tree hands the reset key to GroupTree')
+  assert(/resetKey=\{term\}/.test(source), 'the view hands its term down as the reset key')
+  assert(/forceOpen=\{term !== ''\}/.test(source), 'the fold rule is untouched: a search still opens every parent')
+  assert(/useTreeExpansion\(SKILLS_TREE_STORAGE\)/.test(treeBody), 'the remembered folds are untouched')
+  return 'a new term folds every parent back to its first page'
 })
 
 check('tree-grouping', () => {
@@ -667,7 +678,7 @@ let sharedApi = null
 try {
   const bundled = await build({
     stdin: {
-      contents: "export { groupByPrefix, prefixOf } from './src/client/views/package-tree.tsx'\n",
+      contents: "export { groupByPrefix, prefixOf, groupPage, GROUP_PAGE_SIZE, livePages, revealPage, showMoreLabel } from './src/client/views/package-tree.tsx'\n",
       loader: 'ts',
       resolveDir: ROOT,
       sourcefile: 'package-tree-entry.ts',
@@ -696,6 +707,53 @@ check('runtime-prefix-rules', () => {
   assert(sharedApi.prefixOf('no-separator') === 'no', 'a hyphen separates too')
   assert(sharedApi.prefixOf('Agent') === '~', 'a name without a separator falls back to ~')
   return 'the prefix rules come from package-tree, not a copy'
+})
+
+check('runtime-pagination-cap', () => {
+  assert(sharedApi !== null, 'package-tree did not compile')
+  assert(sharedApi.GROUP_PAGE_SIZE === 50, 'one page is 50 rows, got ' + sharedApi.GROUP_PAGE_SIZE)
+  const rows = Array.from({ length: 120 }, (_, index) => 'r' + index)
+  const first = sharedApi.groupPage(rows, 1)
+  assert(first.rows.length === 50 && first.rows[0] === 'r0' && first.rows[49] === 'r49',
+    'the first page is the first fifty rows, in group order')
+  assert(first.hidden === 70, 'seventy rows wait behind the button, got ' + first.hidden)
+  const second = sharedApi.groupPage(rows, 2)
+  assert(second.rows.length === 100 && second.hidden === 20, 'the second page keeps what was shown plus one page')
+  const last = sharedApi.groupPage(rows, 3)
+  assert(last.rows.length === 120 && last.hidden === 0, 'the last page hides nothing')
+  const beyond = sharedApi.groupPage(rows, 9)
+  assert(beyond.rows.length === 120 && beyond.hidden === 0, 'a page past the end is stable, never an empty list')
+  const low = sharedApi.groupPage(rows, 0)
+  assert(low.rows.length === 50 && low.hidden === 70, 'a page below one is the first page')
+  assert(sharedApi.groupPage(['a', 'b'], 1).hidden === 0, 'a short group hides nothing')
+  assert(sharedApi.groupPage([], 1).rows.length === 0, 'an empty group paints nothing')
+  assert(sharedApi.groupPage(rows, 1, 0).rows.length === 120, 'a size of zero or less disables the cap')
+  const before = JSON.stringify(rows)
+  sharedApi.groupPage(rows, 2)
+  assert(JSON.stringify(rows) === before, 'the page slice must not touch its input')
+  return '50 per page, pages accumulate, past the end is stable'
+})
+
+check('runtime-page-reset', () => {
+  assert(sharedApi !== null, 'package-tree did not compile')
+  const kept = { reset: 'mcp', pages: { bundle: 3, ungrouped: 2 } }
+  assert(JSON.stringify(sharedApi.livePages(kept, 'mcp')) === JSON.stringify({ bundle: 3, ungrouped: 2 }),
+    'the same term keeps the pages already revealed')
+  assert(JSON.stringify(sharedApi.livePages(kept, 'skill')) === '{}',
+    'a new search term drops every page back to the first')
+  assert(JSON.stringify(sharedApi.revealPage({}, 'bundle')) === '{"bundle":2}',
+    'the first press moves that group to page 2')
+  assert(JSON.stringify(sharedApi.revealPage({ bundle: 2 }, 'other')) === '{"bundle":2,"other":2}',
+    'a press on another group leaves the first one where it was')
+  return 'reset drops all pages, reveal adds exactly one'
+})
+
+check('runtime-show-more-label', () => {
+  assert(sharedApi !== null, 'package-tree did not compile')
+  assert(sharedApi.showMoreLabel('zh', 70) === '显示更多 (70)', 'the zh label is 显示更多 (N)')
+  assert(sharedApi.showMoreLabel('en', 70) === 'Show more (70)', 'the en label is Show more (N)')
+  assert(sharedApi.showMoreLabel('zh', 0) === '显示更多 (0)', 'the label reads the hidden count, not a page number')
+  return '显示更多 (N) / Show more (N)'
 })
 
 check('runtime-composed-with-shared', () => {

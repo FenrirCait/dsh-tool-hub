@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * probe/next/client-diagnostics.mjs -- the diagnostics view (task-15), checked from outside.
+ * probe/next/client-diagnostics.mjs -- the diagnostics view (task-15, task-44), checked from outside.
  *
  * Source-only gates: the view is read as text, so the probe needs no browser, no host and no
  * build. It pins the properties the page must keep:
  *   1. the view exists and still exports DiagnosticsView(props: ViewProps);
- *   2. doctor is the only host call, sent once through runOp(OPS.doctor) and never through
- *      props.run (run() reports success, not the report the page renders);
+ *   2. doctor is the only read-only host call, sent once through runOp(OPS.doctor) and never
+ *      through props.run (run() reports success, not the report the page renders);
  *   3. the report parser validates every row instead of trusting the payload;
  *   4. checks render with OK/Fail badges, their detail, and a failing-count summary;
  *   5. history renders time, op, detail and result from snapshot.history, or an empty state;
@@ -17,7 +17,11 @@
  *   9. the run button reports its own busy state;
  *  10. every t('...') resolves in both catalogs and stays inside diagnostics/action/state/a11y;
  *  11. no literal colours, no inline styles, no HTML injection, no TODO marker;
- *  12. the file stays inside the view budget and the shell mount stays intact.
+ *  12. the file stays inside the view budget and the shell mount stays intact;
+ *  13. copy puts the current report on the clipboard and shows success or failure;
+ *  14. a failed extension row offers one explicit extension.reload, and one bulk action reloads
+ *      every failed row; both report their result and neither invents a repair op;
+ *  15. extension failures come from the snapshot payload, not from a new host field.
  *
  * No third-party libraries. Every line is PASS or FAIL; exit 1 when any check fails.
  */
@@ -30,6 +34,8 @@ const CLIENT = join(ROOT, 'src', 'client')
 const VIEW = join(CLIENT, 'views', 'diagnostics.tsx')
 const SHELL = join(CLIENT, 'shell.tsx')
 const I18N = join(CLIENT, 'i18n.ts')
+const TYPES = join(CLIENT, 'types.ts')
+const HOST_INDEX = join(ROOT, 'src', 'host', 'index.ts')
 const HISTORY = join(CLIENT, 'views', 'diagnostics-history.tsx')
 const historySource = readFileSync(HISTORY, 'utf8')
 
@@ -82,17 +88,18 @@ function stripComments(text) {
 
 const body = stripComments(source)
 
-/** The keys a source calls t('...') with, in first-seen order. */
+/**
+ * The keys a source calls t('...') with, in first-seen order. The leading boundary keeps
+ * identifiers such as createElement('textarea') from reading as a t('textarea') call; the key
+ * need not be the only argument, so t('key', { ... }) is found too.
+ */
 function keysUsed(text) {
   const keys = new Set()
-  let index = 0
-  while (index < text.length) {
-    const at = text.indexOf("t('", index)
-    if (at === -1) break
-    const end = text.indexOf("'", at + 3)
-    if (end === -1) break
-    keys.add(text.slice(at + 3, end))
-    index = end + 1
+  const pattern = /(^|[^A-Za-z0-9_$])t\('([^']+)'/g
+  let match = pattern.exec(text)
+  while (match !== null) {
+    keys.add(match[2])
+    match = pattern.exec(text)
   }
   return keys
 }
@@ -155,7 +162,7 @@ check('files-present', () => {
 
 check('export-view', () => {
   assert(source.includes('export function DiagnosticsView(props: ViewProps): React.ReactElement'), 'DiagnosticsView must stay the exported entry point, typed against ViewProps')
-  assert(source.includes("import type { SnapshotPaths, ViewProps } from '../types.js'"), 'ViewProps must come from ../types.js')
+  assert(/import type \{ ExtensionStatus, SnapshotPaths, ViewProps \} from '\.\.\/types\.js'/.test(source), 'ViewProps, SnapshotPaths and ExtensionStatus must come from ../types.js')
   return 'DiagnosticsView(props: ViewProps): React.ReactElement'
 })
 
@@ -167,8 +174,9 @@ check('doctor-op-readonly', () => {
   assert(!body.includes('getSnapshot('), 'the view must not fetch a snapshot of its own')
   assert(!body.includes('fetch('), 'the view must not use fetch directly')
   assert(!body.includes('props.run'), 'the view must not call the shell run(): it drops the report')
-  assert(!/\brun\(/.test(body), 'the view must not send any other op through run()')
-  return 'runOp(OPS.doctor, {}), one call, read-only'
+  assert(!body.includes('run(OPS.doctor'), 'doctor must never go through the write path')
+  assert(!body.includes('runOp(RELOAD_OP'), 'extension.reload must go through the shell write path, not runOp')
+  return 'runOp(OPS.doctor, {}), one read; extension.reload goes through runDetailed'
 })
 
 check('report-parser', () => {
@@ -196,7 +204,7 @@ check('failing-summary', () => {
   assert(source.includes('const failing = checks.filter(row => !row.ok)'), 'the view needs the failing count')
   assert(source.includes("t('diagnostics.issue')"), 'the failing summary must name the issue')
   assert(source.includes("failing.length === 0 ? t('diagnostics.ok') :"), 'an all-green report must read as OK')
-  assert(source.includes("role=\"status\" aria-label={t('a11y.status')}"), 'the summary must be announced as a status region')
+  assert(source.includes('role="status" aria-label={t(\'a11y.status\')}'), 'the summary must be announced as a status region')
   return 'fail count vs total, announced'
 })
 
@@ -218,7 +226,7 @@ check('history-empty', () => {
 
 check('paths-card', () => {
   assert(source.includes('const pathRows = pathRowsOf(snapshot.paths, t, lang)'), 'paths must come from the snapshot')
-  assert(source.includes('function pathRowsOf(paths: SnapshotPaths, t: ViewProps[\'t\'], lang: ViewProps[\'lang\']): PathRow[] {'), 'pathRowsOf must own the four path rows')
+  assert(source.includes("function pathRowsOf(paths: SnapshotPaths, t: ViewProps['t'], lang: ViewProps['lang']): PathRow[] {"), 'pathRowsOf must own the four path rows')
   assert(source.includes("label(lang, '宿主目录', 'Home')"), 'the home row needs a label')
   assert(source.includes("{ label: t('diagnostics.state'), values: [paths.state ?? ''] }"), 'the state file row must use diagnostics.state')
   assert(source.includes("{ label: t('diagnostics.patch'), values: [paths.patch ?? ''] }"), 'the patch row must use diagnostics.patch')
@@ -240,7 +248,7 @@ check('host-meta-card', () => {
 })
 
 check('capability-summary', () => {
-  assert(source.includes('capabilities.present + \'/\' + capabilities.total'), 'the summary must show present / total')
+  assert(source.includes("capabilities.present + '/' + capabilities.total"), 'the summary must show present / total')
   assert(source.includes('capabilities.missing.map(row => ('), 'every missing member must be listed')
   assert(source.includes('capabilities.degraded'), 'optional gaps must read as degraded, not broken')
   assert(source.includes("{row.fallback === '' ? null : <span>{row.fallback}</span>}"), 'a missing member must name its fallback')
@@ -252,6 +260,8 @@ check('capability-summary', () => {
 check('no-auto-run', () => {
   assert(!body.includes('useEffect'), 'doctor must not run on mount: the operator asks for it')
   assert(numberOf('void runDoctor()') === 3, 'three explicit entry points expected (toolbar, error retry, empty state), found ' + numberOf('void runDoctor()'))
+  assert(numberOf('void reloadFailed()') === 1, 'exactly one bulk reload entry point expected, found ' + numberOf('void reloadFailed()'))
+  assert(numberOf('void reloadOne(entry.id)') === 1, 'exactly one per-row reload entry point expected, found ' + numberOf('void reloadOne(entry.id)'))
   return 'explicit click only'
 })
 
@@ -264,24 +274,129 @@ check('busy-state', () => {
 })
 
 check('snapshot-only', () => {
-  assert(source.includes('const { snapshot, t, lang, busy, run, reload } = props'), 'the view reads the snapshot it was given')
+  assert(source.includes('const { snapshot, t, lang, busy, run, reload, runDetailed } = props'), 'the view reads the snapshot it was given and the shell write path')
   assert(source.includes('<DiagnosticsHistory history={snapshot.history}'), 'history is snapshot data')
   assert(source.includes('snapshot.paths'), 'paths are snapshot data')
   assert(!source.includes('setInterval'), 'the view must not poll the host')
   assert(!source.includes('setTimeout'), 'the view must not retry on a timer')
-  return 'history + paths from the snapshot; no polling'
+  return 'history + paths + extensions from the snapshot; no polling'
 })
 
 check('a11y-labels', () => {
-  assert(numberOf('role="region"') >= 4, 'labelled sections expected, found ' + numberOf('role="region"'))
+  assert(numberOf('role="region"') >= 5, 'labelled sections expected, found ' + numberOf('role="region"'))
   assert(source.includes('role="region" aria-label={t(\'diagnostics.checks\')}'), 'the checks section needs a name')
   assert(historySource.includes('role="region" aria-label={t(\'diagnostics.history\')}'), 'the history section needs a name')
   assert(source.includes('role="region" aria-label={t(\'diagnostics.paths\')}'), 'the paths section needs a name')
   assert(source.includes('role="region" aria-label={capabilityLabel}'), 'the capability section needs a name')
+  assert(source.includes('role="region" aria-label={extensionsLabel}'), 'the extensions section needs a name')
   assert(numberOf('role="status"') === 1, 'exactly one live status region expected')
+  assert(numberOf('aria-live="polite"') === 1, 'exactly one polite live region expected for action feedback')
   assert(source.includes('label={runLabel}'), 'the run button needs an accessible name')
+  assert(source.includes('label={copyButtonLabel}'), 'the copy button needs an accessible name')
+  assert(source.includes("label={label(lang, '重新加载 ' + entry.id, 'Reload ' + entry.id)}"), 'each reload button needs an accessible name naming its row')
   assert(source.includes("{t('action.retry')}"), 'the failure banner must offer a real retry button')
-  return 'four regions, one status, named button'
+  return 'five regions, one status, one polite live region, named buttons'
+})
+
+// -- task-44: copy the report and recovery actions -------------------------
+
+check('copy-report-action', () => {
+  assert(source.includes("const [copyState, setCopyState] = React.useState<'idle' | 'copying' | 'ok' | 'fail'>('idle')"), 'copy state must track idle/copying/ok/fail')
+  assert(source.includes('const copyReport = React.useCallback'), 'copyReport must be an explicit handler')
+  assert(source.includes('const copied = await copyToClipboard(text)'), 'the handler must await the clipboard write')
+  assert(source.includes("label(lang, '复制报告', 'Copy report')"), 'the button needs a bilingual idle label')
+  assert(source.includes("label(lang, '已复制', 'Copied')"), 'success must be visible on the button')
+  assert(source.includes("label(lang, '复制失败', 'Copy failed')"), 'failure must be visible on the button')
+  assert(source.includes("label(lang, '已复制当前报告到剪贴板', 'Copied the current report to the clipboard')"), 'success must be stated in words')
+  assert(source.includes("label(lang, '复制失败：浏览器不允许访问剪贴板', 'Copy failed: the browser denied clipboard access')"), 'failure must say why')
+  return 'copy state, visible success and failure labels'
+})
+
+check('report-builder', () => {
+  assert(source.includes('function buildDiagnosticsReport('), 'one builder must own the copied text')
+  assert(source.includes('buildDiagnosticsReport(snapshot, report, new Date().toISOString(), lang)'), 'the builder must receive the snapshot and the doctor report')
+  for (const section of ['doctor: ', 'capabilities: ', 'extensions: ', 'patch blocks: ', 'history: ']) {
+    assert(source.includes("'" + section + "'"), 'the copied report has no ' + section + 'section')
+  }
+  assert(source.includes("'mask: mounted='"), 'the copied report has no mask section')
+  assert(source.includes("'paths: home='"), 'the copied report has no paths section')
+  assert(source.includes("'; styles: ' + entry.styles.join(', ')"), 'the copied report must list declared styles')
+  assert(source.includes("'; error: ' + entry.error"), 'the copied report must carry the extension error')
+  assert(source.includes('snapshot.history.slice(0, 10)'), 'the copied report must bound the history tail')
+  assert(!source.includes('snapshot.settings'), 'the copied report must not include settings values')
+  return 'doctor + capabilities + extensions + paths + bounded history'
+})
+
+check('clipboard-fallback', () => {
+  assert(source.includes("const clipboard: Clipboard | undefined = typeof navigator === 'undefined' ? undefined : navigator.clipboard"), 'the primary path is navigator.clipboard')
+  assert(source.includes('await clipboard.writeText(text)'), 'the primary path writes the text')
+  assert(source.includes("document.createElement('textarea')"), 'a refused clipboard write falls back to a selection copy')
+  assert(source.includes("area.className = 'th-visually-hidden'"), 'the fallback textarea must stay out of sight')
+  assert(source.includes('document.body.appendChild(area)') && source.includes('document.body.removeChild(area)'), 'the fallback textarea must be cleaned up')
+  assert(source.includes("document.execCommand('copy')"), 'the fallback must use the copy command')
+  return 'navigator.clipboard first, selection copy second'
+})
+
+check('extension-failures', () => {
+  assert(source.includes('function failedExtension(entry: ExtensionStatus): boolean'), 'one predicate must decide a failed extension row')
+  assert(source.includes("if (entry.error !== null && entry.error !== '') return true"), 'a reported error makes the row failed')
+  assert(source.includes('return entry.enabled && !entry.loaded'), 'an enabled row that never loaded is failed too')
+  assert(source.includes('const extensions = snapshot.extensions'), 'the rows come from the snapshot payload')
+  assert(source.includes('const failedExtensions = extensions.filter(failedExtension)'), 'the page derives the failed set once')
+  assert(source.includes(`{entry.error === null || entry.error === '' ? null : <span className="th-row-meta">{entry.error}</span>}`), 'the row must show the host error, a style failure included')
+  assert(source.includes("label(lang, '样式：', 'Styles: ') + styles.join(', ')"), 'the row must list its declared style files')
+  return 'error + loaded + styles from snapshot.extensions'
+})
+
+check('per-row-reload', () => {
+  assert(source.includes("const RELOAD_OP = 'extension.reload'"), 'the view must call the existing extension.reload op')
+  assert(source.includes('const reloadOne = React.useCallback(async (id: string): Promise<boolean> => {'), 'one handler reloads one row')
+  assert(source.includes('await runDetailed(RELOAD_OP, { id })'), 'the per-row write must carry the row id')
+  assert(source.includes('busy={rowBusy}'), 'the row button must show its own busy state')
+  assert(source.includes('disabled={bulkBusy}'), 'no row reload may start while another reload is running')
+  assert(source.includes("label(lang, '重新加载', 'Reload')"), 'the row action must read Reload')
+  assert(source.includes('{isFailed ? ('), 'only a failed row gets the reload button')
+  assert(source.includes(`tone="on">{t('diagnostics.ok')}</Badge>`), 'a healthy row shows OK instead')
+  const hostIndex = readFileSync(HOST_INDEX, 'utf8')
+  assert(hostIndex.includes("{ id: 'extension.reload', write: true, audit: true"), 'src/host/index.ts no longer declares extension.reload')
+  for (const invented of ['extension.repair', 'extension.reset', 'extension.fix', 'doctor.repair']) {
+    assert(!source.includes(invented), 'the view invents the repair op ' + invented)
+  }
+  return 'extension.reload { id } per failed row, no new op'
+})
+
+check('bulk-reload', () => {
+  assert(source.includes('const reloadFailed = React.useCallback'), 'one handler owns the bulk action')
+  assert(source.includes('const failedIds = snapshot.extensions.filter(failedExtension).map(entry => entry.id)'), 'the bulk target is captured before the first write')
+  assert(source.includes('for (const id of failedIds)'), 'the bulk action reloads each failed row through the same op')
+  assert(source.includes("label(lang, '重新加载失败扩展', 'Reload failed extensions')"), 'the bulk button needs a bilingual label')
+  assert(source.includes('{failedExtensions.length === 0 ? null : ('), 'the bulk button appears only when a row has an error')
+  assert(source.includes("label(lang, '已重新加载 ' + done + ' 个失败的扩展', 'Reloaded ' + done + ' failed extension(s)')"), 'the bulk action must report its count')
+  assert(source.includes("label(lang, '已重新加载 ' + done + '/' + failedIds.length + ' 个；失败：'"), 'a partial bulk failure must report both counts and the errors')
+  return 'one button, failed rows only, counts reported'
+})
+
+check('action-feedback', () => {
+  assert(source.includes('const [actionNote, setActionNote] = React.useState<ActionNote | null>(null)'), 'the last action result must be kept')
+  assert(source.includes('{actionNote === null ? null : (actionNote.ok'), 'the result must render')
+  assert(source.includes('<Callout tone="error">{actionNote.text}</Callout>'), 'a failed action must raise an alert')
+  assert(source.includes('<span className="th-visually-hidden" aria-live="polite">{liveText}</span>'), 'both actions must announce their result')
+  assert(source.includes("label(lang, '已重新加载 ' + id, 'Reloaded ' + id)"), 'a successful row reload must be named')
+  assert(source.includes("label(lang, '重载失败：' + id"), 'a failed row reload must name the row and the reason')
+  assert(!body.includes('autoReload'), 'nothing reloads extensions automatically')
+  return 'visible note, alert on failure, one polite announcement'
+})
+
+check('extension-payload-exposed', () => {
+  const types = readFileSync(TYPES, 'utf8')
+  assert(types.includes('export interface ExtensionStatus'), 'ExtensionStatus must stay the extension contract')
+  assert(types.includes('error: string | null'), 'ExtensionStatus must still expose the load error')
+  assert(types.includes('styles?: string[]'), 'ExtensionStatus must still expose the declared styles')
+  assert(types.includes('extensions: ExtensionStatus[]'), 'HubSnapshot must still carry the extension rows')
+  const hostIndex = readFileSync(HOST_INDEX, 'utf8')
+  assert(hostIndex.includes('extensions: holder.statuses'), 'buildSnapshot must still fill extensions from the manager statuses')
+  assert(!source.includes("'extension.list'"), 'diagnostics must not spend an extra op on extension.list')
+  return 'snapshot.extensions already exposes failures; no host field added'
 })
 
 // -- contracts with the rest of the panel ----------------------------------
@@ -303,6 +418,16 @@ check('i18n-keys-exist', () => {
   ]
   for (const key of required) assert(zh.has(key), "no catalog defines t('" + key + "')")
   return zh.size + ' keys aligned, ' + used.size + ' used by the view'
+})
+
+check('no-new-i18n-keys', () => {
+  const i18n = readFileSync(I18N, 'utf8')
+  const zh = catalogKeys(i18n, 'zh')
+  for (const key of keysUsed(body)) assert(zh.has(key), 'new label "' + key + '" was not added to i18n.ts either')
+  for (const prefix of ['diagnostics.copy', 'diagnostics.reload', 'diagnostics.extension', 'diagnostics.action']) {
+    assert(![...keysUsed(body)].some(key => key.startsWith(prefix)), 'task-44 labels must stay local, not added as ' + prefix + '* keys')
+  }
+  return 'task-44 labels use the local bilingual helper only'
 })
 
 check('host-meta-keys', () => {
@@ -362,13 +487,15 @@ check('bilingual-oneoff', () => {
   assert(source.includes("return lang === 'zh' ? zh : en"), 'the helper must switch on the ViewProps language')
   assert(source.includes("label(lang, '宿主目录', 'Home')"), 'the home label must be bilingual')
   assert(source.includes("label(lang, '宿主能力', 'Host capabilities')"), 'the capability label must be bilingual')
+  assert(source.includes("label(lang, '扩展', 'Extensions')"), 'the extensions label must be bilingual')
+  assert(source.includes("label(lang, '已启用', 'enabled')") && source.includes("label(lang, '已加载', 'loaded')"), 'the extension state labels must be bilingual')
   return "lang === 'zh' ? zh : en"
 })
 
 check('file-length', () => {
   const bytes = statSync(VIEW).size
-  assert(lines.length < 450, 'the view has ' + lines.length + ' lines (limit 450)')
-  assert(bytes < 60 * 1024, 'the view is ' + bytes + ' bytes (limit 60 KB)')
+  assert(lines.length < 760, 'the view has ' + lines.length + ' lines (limit 760)')
+  assert(bytes < 70 * 1024, 'the view is ' + bytes + ' bytes (limit 70 KB)')
   return lines.length + ' lines, ' + bytes + ' bytes'
 })
 
@@ -380,7 +507,7 @@ check('view-mounted', () => {
   const end = shell.indexOf('/>', at)
   assert(at !== -1 && end !== -1, 'the shell mount is not self-closing or is missing')
   const mount = shell.slice(at, end)
-  for (const prop of ['snapshot={snapshot}', 't={t}', 'busy={busy}', 'run={run}', 'reload={reload}']) {
+  for (const prop of ['snapshot={snapshot}', 't={t}', 'busy={busy}', 'run={run}', 'runDetailed={runDetailed}', 'reload={reload}']) {
     assert(mount.includes(prop), 'the shell must pass ' + prop)
   }
   assert(/lang=\{(?:effectiveLang|lang)\}/.test(mount), 'the shell must pass a language')
@@ -398,11 +525,11 @@ else if (!readFileSync(bundle, 'utf8').includes('Host capabilities')) {
 else {
   check('bundle-diagnostics', () => {
     const text = readFileSync(bundle, 'utf8')
-    // 'Host capabilities' is a one-off only this view carries; the shared catalogs do not.
-    for (const marker of ['Host capabilities', 'diagnostics.issue', 'doctor']) {
+    // These markers are one-offs only this view carries; the shared catalogs do not.
+    for (const marker of ['Host capabilities', 'diagnostics.issue', 'doctor', 'Copy report', 'Reload failed extensions', 'extension.reload']) {
       assert(text.includes(marker), 'dist/client.js carries no ' + marker)
     }
-    return 'the bundle carries the view and the doctor op'
+    return 'the bundle carries the view, the actions and the doctor op'
   })
 }
 
