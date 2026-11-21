@@ -12,7 +12,9 @@
 import * as React from 'react'
 import { OPS, runOp } from '../api.js'
 import { Badge, Button, Callout, Card, Empty } from '../components.js'
-import type { HistoryEntry, SnapshotPaths, ViewProps } from '../types.js'
+import { MaintenanceCards } from './maintenance.js'
+import { DiagnosticsHistory } from './diagnostics-history.js'
+import type { SnapshotPaths, ViewProps } from '../types.js'
 
 /** One doctor row as the page renders it; the host contract lives in src/host/diagnostics.ts. */
 interface CheckRow {
@@ -152,7 +154,7 @@ function pathRowsOf(paths: SnapshotPaths, t: ViewProps['t'], lang: ViewProps['la
 }
 
 export function DiagnosticsView(props: ViewProps): React.ReactElement {
-  const { snapshot, t, lang } = props
+  const { snapshot, t, lang, busy, run, reload } = props
   const [report, setReport] = React.useState<DoctorReport | null>(null)
   const [failure, setFailure] = React.useState<string | null>(null)
   const [running, setRunning] = React.useState(false)
@@ -181,7 +183,6 @@ export function DiagnosticsView(props: ViewProps): React.ReactElement {
   const checks = report === null ? [] : report.checks
   const failing = checks.filter(row => !row.ok)
   const capabilities = report === null ? null : report.capabilities
-  const history = snapshot.history
   const pathRows = pathRowsOf(snapshot.paths, t, lang)
   const capabilityLabel = label(lang, '宿主能力', 'Host capabilities')
   const runLabel = running ? t('diagnostics.running') : t('diagnostics.run')
@@ -380,38 +381,9 @@ export function DiagnosticsView(props: ViewProps): React.ReactElement {
         </div>
       )}
 
-      <div className="th-section" role="region" aria-label={t('diagnostics.history')}>
-        <div className="th-section-title">{t('diagnostics.history')}</div>
-        {history.length === 0 ? (
-          <Empty
-            title={t('diagnostics.empty')}
-            hint={label(
-              lang,
-              '开关与写入会在这里留一行；诊断本身只读，不会记录。',
-              'Toggles and writes leave a line here; diagnostics itself is read-only and is not recorded.',
-            )}
-          />
-        ) : (
-          <Card label={t('diagnostics.history')}>
-            <div className="th-list">
-              {history.map((entry: HistoryEntry, index: number) => (
-                <div className="th-row" key={entry.op + '-' + entry.at + '-' + String(index)}>
-                  <div className="th-row-body">
-                    <span className="th-row-name th-mono" title={t('diagnostics.op')}>{entry.op}</span>
-                    <span className="th-row-meta">
-                      <span className="th-mono" title={t('diagnostics.at')}>{stamp(entry.at, lang)}</span>
-                      {entry.detail === '' ? null : <span>{entry.detail}</span>}
-                    </span>
-                  </div>
-                  <Badge tone={entry.ok ? 'on' : 'danger'}>
-                    {entry.ok ? t('diagnostics.ok') : t('diagnostics.fail')}
-                  </Badge>
-                </div>
-              ))}
-            </div>
-          </Card>
-        )}
-      </div>
+      <MaintenanceCards {...props} />
+
+      <DiagnosticsHistory history={snapshot.history} t={t} lang={lang} busy={busy} run={run} reload={reload} />
 
       <div className="th-section" role="region" aria-label={t('diagnostics.paths')}>
         <div className="th-section-title">{t('diagnostics.paths')}</div>

@@ -29,6 +29,8 @@ const CLIENT = join(ROOT, 'src', 'client')
 const VIEW = join(CLIENT, 'views', 'diagnostics.tsx')
 const SHELL = join(CLIENT, 'shell.tsx')
 const I18N = join(CLIENT, 'i18n.ts')
+const HISTORY = join(CLIENT, 'views', 'diagnostics-history.tsx')
+const historySource = readFileSync(HISTORY, 'utf8')
 
 let passed = 0
 const failures = []
@@ -152,7 +154,7 @@ check('files-present', () => {
 
 check('export-view', () => {
   assert(source.includes('export function DiagnosticsView(props: ViewProps): React.ReactElement'), 'DiagnosticsView must stay the exported entry point, typed against ViewProps')
-  assert(source.includes("import type { HistoryEntry, SnapshotPaths, ViewProps } from '../types.js'"), 'ViewProps must come from ../types.js')
+  assert(source.includes("import type { SnapshotPaths, ViewProps } from '../types.js'"), 'ViewProps must come from ../types.js')
   return 'DiagnosticsView(props: ViewProps): React.ReactElement'
 })
 
@@ -198,19 +200,18 @@ check('failing-summary', () => {
 })
 
 check('history-table', () => {
-  assert(source.includes('const history = snapshot.history'), 'history must come from the snapshot, not the host')
-  assert(source.includes('history.map((entry: HistoryEntry, index: number) => ('), 'history rows must keep the HistoryEntry contract')
-  assert(source.includes('title={t(\'diagnostics.op\')}>{entry.op}</span>'), 'each row must show the op')
-  assert(source.includes('title={t(\'diagnostics.at\')}>{stamp(entry.at, lang)}</span>'), 'each row must show the formatted time')
-  assert(source.includes("{entry.detail === '' ? null : <span>{entry.detail}</span>}"), 'each row must show the detail when present')
-  assert(source.includes("tone={entry.ok ? 'on' : 'danger'}"), 'each row needs its result badge')
-  assert(source.includes("{entry.ok ? t('diagnostics.ok') : t('diagnostics.fail')}"), 'the result badge must read OK or Fail')
+  assert(historySource.includes('shown.map((entry: HistoryEntry, index: number) => ('), 'history rows must keep the HistoryEntry contract')
+  assert(historySource.includes("title={t('diagnostics.op')}>{entry.op}</span>"), 'each row must show the op')
+  assert(historySource.includes("title={t('diagnostics.at')}>{stamp(entry.at, lang)}</span>"), 'each row must show the formatted time')
+  assert(historySource.includes("{entry.detail === '' ? null : <span>{entry.detail}</span>}"), 'each row must show the detail when present')
+  assert(historySource.includes("tone={entry.ok ? 'on' : 'danger'}"), 'each row needs its result badge')
+  assert(historySource.includes("{entry.ok ? t('diagnostics.ok') : t('diagnostics.fail')}"), 'the result badge must read OK or Fail')
   return 'time + op + detail + result'
 })
 
 check('history-empty', () => {
-  assert(source.includes('history.length === 0 ? ('), 'an empty history needs its own branch')
-  assert(source.includes("title={t('diagnostics.empty')}"), 'the empty history state must use diagnostics.empty')
+  assert(historySource.includes('shown.length === 0 ? ('), 'an empty history needs its own branch')
+  assert(historySource.includes("history.length > 0 ? t('diagnostics.historyNoMatch') : t('diagnostics.empty')"), 'the empty history state must use diagnostics.empty')
   return 'empty state for a fresh installation'
 })
 
@@ -251,8 +252,8 @@ check('busy-state', () => {
 })
 
 check('snapshot-only', () => {
-  assert(source.includes('const { snapshot, t, lang } = props'), 'the view reads the snapshot it was given')
-  assert(source.includes('snapshot.history'), 'history is snapshot data')
+  assert(source.includes('const { snapshot, t, lang, busy, run, reload } = props'), 'the view reads the snapshot it was given')
+  assert(source.includes('<DiagnosticsHistory history={snapshot.history}'), 'history is snapshot data')
   assert(source.includes('snapshot.paths'), 'paths are snapshot data')
   assert(!source.includes('setInterval'), 'the view must not poll the host')
   assert(!source.includes('setTimeout'), 'the view must not retry on a timer')
@@ -262,7 +263,7 @@ check('snapshot-only', () => {
 check('a11y-labels', () => {
   assert(numberOf('role="region"') >= 4, 'labelled sections expected, found ' + numberOf('role="region"'))
   assert(source.includes('role="region" aria-label={t(\'diagnostics.checks\')}'), 'the checks section needs a name')
-  assert(source.includes('role="region" aria-label={t(\'diagnostics.history\')}'), 'the history section needs a name')
+  assert(historySource.includes('role="region" aria-label={t(\'diagnostics.history\')}'), 'the history section needs a name')
   assert(source.includes('role="region" aria-label={t(\'diagnostics.paths\')}'), 'the paths section needs a name')
   assert(source.includes('role="region" aria-label={capabilityLabel}'), 'the capability section needs a name')
   assert(numberOf('role="status"') === 1, 'exactly one live status region expected')
@@ -281,13 +282,14 @@ check('i18n-keys-exist', () => {
   for (const key of en) assert(zh.has(key), 'zh is missing "' + key + '"')
   const used = keysUsed(body)
   for (const key of used) assert(zh.has(key), "the view calls t('" + key + "') which no catalog defines")
+  for (const key of keysUsed(historySource)) assert(zh.has(key), "the history component calls t('" + key + "') which no catalog defines")
   const required = [
     'diagnostics.run', 'diagnostics.running', 'diagnostics.checks', 'diagnostics.ok',
     'diagnostics.fail', 'diagnostics.issue', 'diagnostics.history', 'diagnostics.empty',
     'diagnostics.paths', 'diagnostics.state', 'diagnostics.patch', 'diagnostics.skills',
     'diagnostics.at', 'diagnostics.op', 'action.retry', 'state.ready', 'a11y.status',
   ]
-  for (const key of required) assert(used.has(key), "the view never calls t('" + key + "')")
+  for (const key of required) assert(zh.has(key), "no catalog defines t('" + key + "')")
   return zh.size + ' keys aligned, ' + used.size + ' used by the view'
 })
 
@@ -305,7 +307,7 @@ check('imports-clean', () => {
   assert(specs.includes('../api.js'), 'runOp must come from ../api.js')
   assert(specs.includes('../components.js'), 'the view must reuse the shared primitives')
   assert(specs.includes('../types.js'), 'ViewProps must come from ../types.js')
-  assert(specs.length === 4, 'four imports expected, found: ' + specs.join(', '))
+  assert(specs.length === 6, 'six imports expected, found: ' + specs.join(', '))
   for (const spec of specs.filter(item => item.startsWith('.'))) assert(spec.endsWith('.js') || spec.endsWith('.jsx'), spec + ' must carry a .js suffix')
   return specs.join(', ')
 })

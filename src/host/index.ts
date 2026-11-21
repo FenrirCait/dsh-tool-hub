@@ -6,7 +6,8 @@ import { createCatalogTool } from './catalog-tool.js'
 import type { DomainRegistration, OpHandler } from '../shared/contract.js'
 import type { HubContext } from '../shared/types.js'
 import type { StateV2 } from '../core/state.js'
-import { Dispatcher, Failure, failureOf } from './dispatch.js'
+import { Dispatcher, Failure, failureOf, historyFile } from './dispatch.js'
+import { writeFileAtomic } from '../core/atomic.js'
 import { HEARTBEAT_INJECTS, runDoctor, writeMountHeartbeat } from './diagnostics.js'
 import { installApi } from './routes.js'
 import { PORTABILITY_OPS, portabilityHandlers } from './portability.js'
@@ -260,13 +261,18 @@ export function createCoreDomain(handlers: { snapshot: OpHandler; doctor: OpHand
       title: { zh: '核心', en: 'Core' },
       ops: [
         { id: 'snapshot', write: false, audit: false, note: 'Builds the panel snapshot from the registered domains.' },
-        { id: 'doctor', write: false, audit: false, note: 'Runs the ten diagnostics against the live host.' },
+        { id: 'doctor', write: false, audit: false, note: 'Runs the diagnostics against the live host.' },
+        { id: 'history.clear', write: true, audit: true, note: 'Truncates this profile audit log; the clear itself is recorded afterwards.' },
         ...PORTABILITY_OPS,
       ],
     },
     handlers: {
       snapshot: handlers.snapshot,
       doctor: handlers.doctor,
+      'history.clear': async () => {
+        await writeFileAtomic(historyFile(), '')
+        return { cleared: true }
+      },
       ...portabilityHandlers(),
     },
   }

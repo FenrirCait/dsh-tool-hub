@@ -290,6 +290,7 @@ const core = createCoreDomain({ snapshot: async () => ({}), doctor: async () => 
 check('registration-op-order', equal(core.module.ops.map(op => op.id), [
   'snapshot',
   'doctor',
+  'history.clear',
   'market.status',
   'market.import',
   'third.status',

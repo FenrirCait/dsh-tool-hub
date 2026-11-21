@@ -1,6 +1,7 @@
 import type { Registry } from '../core/registry.js'
 import type { DomainRegistration } from '../shared/contract.js'
 import { configDomain } from './config.js'
+import { backupsDomain } from './backups.js'
 import { createMcpDomain } from './mcp.js'
 import { createPluginsDomain } from './plugins.js'
 import { createSkillsDomain } from './skills.js'
@@ -27,6 +28,7 @@ export function registerAll(registry: Registry): DomainRegistration[] {
     sessionsDomain(),
     settingsDomain(),
     configDomain(),
+    backupsDomain(),
   ]
   for (const registration of registrations) registry.register(registration.module)
   return registrations
