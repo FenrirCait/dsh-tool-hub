@@ -93,6 +93,14 @@ export interface PatchBlockInfo {
   known: boolean
 }
 
+export interface MaskInfo {
+  available: boolean
+  mounted: number
+  deny: string[]
+  sessions: Array<{ sessionId: string; deny: string[] }>
+  problems: string[]
+}
+
 export interface PatchInfo {
   path: string | null
   rows: number
@@ -182,6 +190,8 @@ export interface HubSnapshot {
   extensions: ExtensionStatus[]
   /** Managed blocks in the profile patch file, and the rows their owners do not own. */
   patchInfo: PatchInfo
+  /** The per-agent tool mask: mounted agents, deny list and problems. */
+  mask: MaskInfo
   /** When this copy was read, used by the topbar to show staleness. */
   fetchedAt: number
 }

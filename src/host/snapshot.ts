@@ -32,6 +32,18 @@ function stringList(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : []
 }
 
+function maskInfo(env: HostEnv): unknown {
+  try {
+    const mask = env.services.get('toolHub.mask') as { info?: () => unknown } | undefined
+    if (typeof mask?.info !== 'function') return { available: false, mounted: 0, deny: [], sessions: [], problems: [] }
+    const info = mask.info()
+    return info !== null && typeof info === 'object' ? { available: true, ...info } : { available: true, mounted: 0, deny: [], sessions: [], problems: [] }
+  }
+  catch {
+    return { available: false, mounted: 0, deny: [], sessions: [], problems: [] }
+  }
+}
+
 function settingsSchema(registry: Registry): unknown[] {
   const modules = registry.list()
   return settingsFields(modules).map(({ key, field }) => ({ ...field, key }))
@@ -109,6 +121,7 @@ export async function buildSnapshot(deps: SnapshotDeps): Promise<Record<string, 
     history: deps.history === undefined ? [] : await deps.history(),
     extensions: deps.extensions ?? [],
     patchInfo,
+    mask: maskInfo(env),
     fetchedAt: Date.now(),
   }
 }

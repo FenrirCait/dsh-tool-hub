@@ -12,6 +12,8 @@ import { installApi } from './routes.js'
 import { PORTABILITY_OPS, portabilityHandlers } from './portability.js'
 import { buildSnapshot } from './snapshot.js'
 import { ExtensionManager, extensionRoots, type ExtensionStatus } from './extensions.js'
+import { attachToolMask, maskControl, surfacePort, type ToolMask } from './tool-mask.js'
+import { applySurface } from '../domains/tool-surface.js'
 
 export const name = 'dsh-tool-hub'
 export const inject = ['webServer'] as const
@@ -40,6 +42,7 @@ const EXTENSION_ID = /^[a-z0-9][a-z0-9_-]{0,31}$/
  */
 export class Runtime {
   private build!: Build
+  private mask: ToolMask | null = null
   private chain: Promise<void> = Promise.resolve()
   private readonly manager: ExtensionManager
 
@@ -56,6 +59,10 @@ export class Runtime {
     if (loaded.recovered !== null) logTo(ctx)('warn', `state was unreadable; recovered from ${loaded.recovered}`)
     const runtime = new Runtime(ctx, loaded.state)
     runtime.build = await runtime.buildOnce()
+    // Never block the host on the mask: mounting a plugin inside a live agent can wait for that
+    // agent's fiber during startup. Services are published synchronously; the first recompute and
+    // the existing-agent mounts run on the next turns instead.
+    void runtime.installMask().catch(error => logTo(ctx)('warn', '[tool-hub] tool mask install failed: ' + String((error as Error)?.message ?? error)))
     writeMountHeartbeat({ stateDir: stateDir(), injects: [...HEARTBEAT_INJECTS] })
     logTo(ctx)('info', `dsh-tool-hub 2.0: ${runtime.build.modules} module(s), ${runtime.build.ops} op(s)`)
     return runtime
@@ -87,6 +94,46 @@ export class Runtime {
     })
     this.chain = attempt.catch(() => undefined)
     await attempt
+  }
+
+  /**
+   * Mount the per-agent tool mask and publish it as toolHub.surface. This is what makes the deny
+   * list real after a restart: agents that already exist get a scope plugin, later ones are
+   * caught by agent/created, and every tools/change re-syncs the mounted plugins.
+   */
+  private async installMask(): Promise<void> {
+    if (this.mask !== null) return
+    const mask = attachToolMask(this.ctx as unknown as { get(name: string): unknown }, this.state.sessions)
+    this.mask = mask
+    const provide = (this.ctx as unknown as { provide?: (name: string, value: unknown) => void }).provide
+    if (typeof provide !== 'function') {
+      logTo(this.ctx)('warn', '[tool-hub] this host has no ctx.provide(); the tool mask cannot be published')
+      return
+    }
+    provide.call(this.ctx, 'toolHub.surface', surfacePort(mask))
+    provide.call(this.ctx, 'toolHub.mask', maskControl(mask))
+    const recompute = async (): Promise<void> => {
+      const result = await applySurface({ state: this.state, services: { get: service => this.ctx.get(service) } })
+      if (!result.ok) logTo(this.ctx)('warn', '[tool-hub] tool mask refused: ' + (result.message ?? result.status))
+    }
+    // Deferred: a startup-time recompute can wait on agent fibers that are still being built.
+    setTimeout(() => { void recompute() }, 250)
+    // MCP tools arrive asynchronously and the deny list is filtered against the live view, so a
+    // tools/change must re-run applySurface — otherwise a stale deny stays uninstalled until the
+    // next user op. Debounced: a server registers dozens of tools in one burst.
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const refresh = (): void => {
+      if (timer !== null) clearTimeout(timer)
+      timer = setTimeout(() => {
+        timer = null
+        void recompute()
+      }, 120)
+    }
+    const off = (this.ctx as unknown as { on?: (event: string, callback: () => void) => (() => void) | void }).on?.('tools/change', refresh)
+    if (typeof off === 'function') (this.ctx as unknown as { effect?: (fn: () => () => void) => void }).effect?.(() => () => {
+      if (timer !== null) clearTimeout(timer)
+      off()
+    })
   }
 
   private async buildOnce(): Promise<Build> {

@@ -5,7 +5,7 @@
  * value ({ ok: false, code, message }), never as a rejection, so a view can render an error
  * banner instead of relying on a catch somewhere up the tree.
  */
-import type { CollectionRow, ExtensionStatus, ExtensionViewRow, GroupRow, HistoryEntry, HubSnapshot, PatchInfo, PluginRow, PresetRow, SceneState, SecretKeys, SkillRootInfo, SkillRow, ToolRow } from './types.js'
+import type { CollectionRow, ExtensionStatus, ExtensionViewRow, GroupRow, HistoryEntry, HubSnapshot, MaskInfo, PatchInfo, PluginRow, PresetRow, SceneState, SecretKeys, SkillRootInfo, SkillRow, ToolRow } from './types.js'
 import type { SettingsField } from '../shared/types.js'
 
 /** Op ids the panel sends. Kept in one table: a host rename is a one-line change here. */
@@ -223,6 +223,21 @@ function groupOf(row: Record<string, unknown>): GroupRow | null {
   }
 }
 
+function maskInfoOf(row: Record<string, unknown>): MaskInfo {
+  return {
+    available: row.available === true,
+    mounted: typeof row.mounted === 'number' ? row.mounted : 0,
+    deny: Array.isArray(row.deny) ? row.deny.filter((name): name is string => typeof name === 'string') : [],
+    sessions: Array.isArray(row.sessions)
+      ? row.sessions.map(item => asRecord(item)).filter(item => asString(item.sessionId) !== '').map(item => ({
+          sessionId: asString(item.sessionId),
+          deny: Array.isArray(item.deny) ? item.deny.filter((name): name is string => typeof name === 'string') : [],
+        }))
+      : [],
+    problems: Array.isArray(row.problems) ? row.problems.filter((line): line is string => typeof line === 'string') : [],
+  }
+}
+
 function patchInfoOf(row: Record<string, unknown>): PatchInfo {
   const blocks = Array.isArray(row.blocks) ? row.blocks.map(item => asRecord(item)).filter(item => asString(item.name) !== '').map(item => ({
     name: asString(item.name),
@@ -385,6 +400,7 @@ export function normalizeSnapshot(raw: unknown): HubSnapshot {
     history: asRows(record.history, historyOf),
     extensions: asRows(record.extensions, extensionOf),
     patchInfo: patchInfoOf(asRecord(record.patchInfo)),
+    mask: maskInfoOf(asRecord(record.mask)),
     settingsSchema: settingsFieldsOf(record.settingsSchema),
     mcpError: asStringOrNull(record.mcpError),
     limits: typeof limits.bulk === 'number' ? { bulk: limits.bulk } : null,

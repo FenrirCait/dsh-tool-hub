@@ -89,7 +89,11 @@ function requireSessionId(payload: unknown, optional = false): string {
 }
 
 async function maskAfter(state: StateV2, env: HostEnv, sessionId: string): Promise<SurfaceApplyResult> {
-  const result = await applySurface({ state, services: env.services, sessionId })
+  // The installation mask goes through the port; the session's own switches are an overlay the
+  // per-agent mask owns, so they must not be folded into the global deny list.
+  const mask = env.services.get('toolHub.mask') as { setSessionDeny?: (id: string, names: string[]) => void } | undefined
+  const result = await applySurface({ state, services: env.services })
+  mask?.setSessionDeny?.(sessionId, state.sessions[sessionId] ?? [])
   if (!result.ok) env.log('warn', '[tool-hub] session mask refused: ' + (result.message ?? result.status))
   return result
 }

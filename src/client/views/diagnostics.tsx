@@ -263,6 +263,45 @@ export function DiagnosticsView(props: ViewProps): React.ReactElement {
         </div>
       )}
 
+      <div className="th-section" role="region" aria-label={t('diagnostics.mask')}>
+        <div className="th-section-title">{t('diagnostics.mask')}</div>
+        <Card>
+          {snapshot.mask.available ? null : (
+            <Callout tone="error">{t('diagnostics.maskMissing')}</Callout>
+          )}
+          {snapshot.mask.mounted === 0 && snapshot.mask.deny.length === 0 ? (
+            <Empty title={t('diagnostics.maskNone')} />
+          ) : (
+            <div className="th-list">
+              <div className="th-row">
+                <div className="th-row-body">
+                  <span className="th-row-name">{t('diagnostics.maskMounted')}</span>
+                  <span className="th-row-meta">{snapshot.mask.mounted}</span>
+                </div>
+                <Badge tone={snapshot.mask.mounted > 0 ? 'on' : 'off'}>{snapshot.mask.mounted}</Badge>
+              </div>
+              <div className="th-row">
+                <div className="th-row-body">
+                  <span className="th-row-name">{t('diagnostics.maskDeny')}</span>
+                  <span className="th-row-meta th-mono">{snapshot.mask.deny.length === 0 ? '—' : snapshot.mask.deny.join(', ')}</span>
+                </div>
+                <Badge tone={snapshot.mask.deny.length > 0 ? 'on' : 'off'}>{snapshot.mask.deny.length}</Badge>
+              </div>
+              <div className="th-row">
+                <div className="th-row-body">
+                  <span className="th-row-name">{t('diagnostics.maskSessions')}</span>
+                  <span className="th-row-meta">{snapshot.mask.sessions.length}</span>
+                </div>
+                <Badge tone={snapshot.mask.sessions.length > 0 ? 'on' : 'off'}>{snapshot.mask.sessions.length}</Badge>
+              </div>
+            </div>
+          )}
+          {snapshot.mask.problems.map(problem => (
+            <Callout key={problem} tone="error">{problem}</Callout>
+          ))}
+        </Card>
+      </div>
+
       <div className="th-section" role="region" aria-label={t('diagnostics.checks')}>
         <div className="th-section-title">{t('diagnostics.checks')}</div>
         {report === null ? (
