@@ -87,7 +87,7 @@ check('entry-contract', () => {
   const source = byName('entry.tsx')
   assert(/export const NS = 'tool-hub'/.test(source), "entry.tsx must export NS = 'tool-hub'")
   // The host reads inject as an array; exporting a function silently skips apply().
-  assert(/export const inject = \['slots', 'locale'\]/.test(source), "entry.tsx must export inject as ['slots', 'locale']")
+  assert(/export const inject = \['slots', 'locale', 'layout'\]/.test(source), "entry.tsx must export inject as ['slots', 'locale', 'layout']")
   assert(/export function apply\(ctx/.test(source), 'entry.tsx must export apply(ctx)')
   assert(/id: NS\b/.test(source), 'the slot registration must use the shared NS as its id')
   // Registering Shell in the sidebar squeezes the nav into the list row.
@@ -287,7 +287,7 @@ check('bundle-single-loader', () => {
     assert(text.indexOf(pattern) === -1, `dist/client.js contains ${pattern}`)
   }
   // The host reads `inject` as a dependency array; a function here silently skips apply().
-  assert(/var inject = \["slots", "locale"\]/.test(text), 'bundle must export inject as an array')
+  assert(/var inject = \["slots", "locale", "layout"\]/.test(text), 'bundle must export inject as an array')
   return `dist/client.js ${text.length} bytes, one loader entry`
 })
 

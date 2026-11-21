@@ -5,7 +5,7 @@
  * value ({ ok: false, code, message }), never as a rejection, so a view can render an error
  * banner instead of relying on a catch somewhere up the tree.
  */
-import type { CollectionRow, ExtensionStatus, ExtensionViewRow, GroupRow, HistoryEntry, HubSnapshot, PluginRow, PresetRow, SceneState, SecretKeys, SkillRootInfo, SkillRow, ToolRow } from './types.js'
+import type { CollectionRow, ExtensionStatus, ExtensionViewRow, GroupRow, HistoryEntry, HubSnapshot, PatchInfo, PluginRow, PresetRow, SceneState, SecretKeys, SkillRootInfo, SkillRow, ToolRow } from './types.js'
 import type { SettingsField } from '../shared/types.js'
 
 /** Op ids the panel sends. Kept in one table: a host rename is a one-line change here. */
@@ -223,6 +223,24 @@ function groupOf(row: Record<string, unknown>): GroupRow | null {
   }
 }
 
+function patchInfoOf(row: Record<string, unknown>): PatchInfo {
+  const blocks = Array.isArray(row.blocks) ? row.blocks.map(item => asRecord(item)).filter(item => asString(item.name) !== '').map(item => ({
+    name: asString(item.name),
+    beginLine: typeof item.beginLine === 'number' ? item.beginLine : 0,
+    endLine: typeof item.endLine === 'number' ? item.endLine : 0,
+    rows: Array.isArray(item.rows) ? item.rows.filter((id): id is string => typeof id === 'string') : [],
+    foreign: Array.isArray(item.foreign) ? item.foreign.filter((id): id is string => typeof id === 'string') : [],
+    known: item.known === true,
+  })) : []
+  return {
+    path: asStringOrNull(row.path),
+    rows: typeof row.rows === 'number' ? row.rows : 0,
+    blocks,
+    unclosed: Array.isArray(row.unclosed) ? row.unclosed.filter((id): id is string => typeof id === 'string') : [],
+    foreignTotal: typeof row.foreignTotal === 'number' ? row.foreignTotal : 0,
+  }
+}
+
 function extensionOf(row: Record<string, unknown>): ExtensionStatus | null {
   const id = asString(row.id)
   if (id === '') return null
@@ -366,6 +384,7 @@ export function normalizeSnapshot(raw: unknown): HubSnapshot {
     settings: asRecord(record.settings) as Record<string, unknown>,
     history: asRows(record.history, historyOf),
     extensions: asRows(record.extensions, extensionOf),
+    patchInfo: patchInfoOf(asRecord(record.patchInfo)),
     settingsSchema: settingsFieldsOf(record.settingsSchema),
     mcpError: asStringOrNull(record.mcpError),
     limits: typeof limits.bulk === 'number' ? { bulk: limits.bulk } : null,

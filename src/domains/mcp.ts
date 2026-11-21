@@ -16,9 +16,9 @@
  * State bookkeeping (which backup the last write produced) goes through env.save(reason); this
  * module never opens state.json itself.
  */
-import { copyFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
-import { withFileLock } from '../core/atomic.js'
+import { withFileLock, writeFileAtomic } from '../core/atomic.js'
 import { stateDir } from '../core/io.js'
 import type { DomainRegistration, HostEnv, OpHandler } from '../shared/contract.js'
 import type { OpDefinition } from '../shared/types.js'
@@ -199,8 +199,9 @@ export function splitDocument(text: string): PatchDoc {
 
 /** Join edited lines back with the document's own ending and final-newline habit. */
 export function finishDocument(doc: PatchDoc, lines: string[]): string {
-  // Removing the last row empties the file; a lone newline is not a document.
-  if (lines.length === 0) return ''
+  // Removing the last row leaves an empty sequence; `[]` is still a valid patch document, while
+  // an empty file reads as YAML null and looks like a corrupt profile to other panels.
+  if (lines.length === 0) return '[]' + doc.eol
   const body = lines.join(doc.eol)
   return doc.trailing ? body + (doc.tail === '' ? doc.eol : doc.tail) : body
 }
@@ -425,7 +426,11 @@ export function replaceMcpConfig(text: string, id: string, config: Record<string
   return finishDocument(doc, [...lines.slice(0, start), ...body, ...lines.slice(row.configEnd)])
 }
 
-/** Append a new MCP entry at the end of the patch list; every existing byte stays put. */
+/**
+ * Add a new MCP entry outside every managed block: before the first begin marker when the file
+ * has one, at the end otherwise. Appending at EOF once landed a row inside another panel's block,
+ * where the owner's next rewrite would silently drop it.
+ */
 export function appendMcpRow(text: string, id: string, config: Record<string, unknown>, disabled: boolean): string {
   const doc = splitDocument(text)
   const body = [
@@ -435,8 +440,10 @@ export function appendMcpRow(text: string, id: string, config: Record<string, un
     ...(Object.keys(config).length === 0 ? ['    {}'] : configLines(config, 4)),
   ]
   if (disabled) body.push('  disabled: true')
+  const firstBegin = doc.lines.findIndex(line => /^[ \t]*#[ \t]*>>>.*:begin[ \t]*$/.test(line))
+  const at = firstBegin >= 0 ? firstBegin : doc.lines.length
   // No trimming: leading comments, blank separators and the file's own ending all survive.
-  return finishDocument(doc, [...doc.lines, ...body])
+  return finishDocument(doc, [...doc.lines.slice(0, at), ...body, ...doc.lines.slice(at)])
 }
 
 /** Remove one MCP entry by id, keeping every other byte of the file. */
@@ -466,10 +473,9 @@ function tempPathFor(path: string): string {
 }
 
 export async function writePatchText(path: string, text: string): Promise<void> {
-  const temp = tempPathFor(path)
   const mode = await stat(path).then(info => info.mode & 0o777).catch(() => 0o600)
-  await writeFile(temp, text, { encoding: 'utf8', mode })
-  await rename(temp, path)
+  // The shared writer adds fsync, Windows rename retries and temp cleanup; one commit path for both files.
+  await writeFileAtomic(path, text, mode)
 }
 
 /** The file as it was, kept under <dshHome>/backups/ before any byte-level edit. */

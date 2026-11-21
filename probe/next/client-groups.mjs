@@ -296,7 +296,7 @@ check('action-edit', () => {
 })
 
 check('action-toggle', () => {
-  assert(/const on = isOn\(group\)/.test(body) && /const isOn = \(group: GroupRow\): boolean/.test(body), 'the switch must derive state from the live member rows')
+  assert(/const on = isOn\(group\)/.test(body) && /groupOnReader\(snapshot\)/.test(body), 'the switch must derive state from the live member rows')
   assert(/checked=\{on\}/.test(body), 'the switch must be bound to that state')
   assert(/<Switch/.test(body), 'the bulk switch must use the Switch component')
   return 'Switch -> group.batch, busy group.batch:id'

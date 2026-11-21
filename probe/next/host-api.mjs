@@ -624,14 +624,14 @@ try {
   const hostStartedAt = Date.now() - Math.round(process.uptime() * 1000)
   diagnostics.writeMountHeartbeat({ stateDir: root, hostStartedAt, injects: ['tools', 'systemPrompt', 'webServer'] })
 
-  await test('doctor runs exactly ten checks in order', async () => {
+  await test('doctor runs every declared check in order', async () => {
     const report = await diagnostics.runDoctor({ ctx, stateDir: root, patchPath, hostStartedAt })
     sameList(report.checks.map(row => row.id), [...diagnostics.DOCTOR_CHECK_IDS], 'ids')
-    assertEqual(report.checks.length, 10, 'check count')
+    assertEqual(report.checks.length, diagnostics.DOCTOR_CHECK_IDS.length, 'check count')
     return diagnostics.DOCTOR_CHECK_IDS.join(', ')
   })
 
-  await test('doctor passes all ten on a healthy fake host', async () => {
+  await test('doctor passes all checks on a healthy fake host', async () => {
     const report = await diagnostics.runDoctor({ ctx, stateDir: root, patchPath, hostStartedAt })
     const failing = report.checks.filter(row => !row.ok)
     assertEqual(failing.length, 0, 'failing checks: ' + JSON.stringify(failing))
@@ -642,7 +642,8 @@ try {
     assert(byId['hub-tools'].ok, 'hub_tools found')
     assert(byId['snapshot-profile'].detail.indexOf('plugins 3ms') !== -1, 'profile log: ' + byId['snapshot-profile'].detail)
     assertEqual(diagnostics.patchPathFor(ctx), patchPath, 'patchPathFor')
-    return '10/10'
+    assert(byId['patch-managed'].ok, 'patch-managed: ' + byId['patch-managed'].detail)
+    return report.checks.length + '/' + report.checks.length
   })
 
   await test('doctor answers a missing capability from the table', async () => {
@@ -651,7 +652,7 @@ try {
     try {
       const report = await diagnostics.runDoctor({ ctx, stateDir: root, patchPath, hostStartedAt })
       const rows = Object.fromEntries(report.checks.map(row => [row.id, row]))
-      assertEqual(report.checks.length, 10, 'still ten rows')
+      assertEqual(report.checks.length, diagnostics.DOCTOR_CHECK_IDS.length, 'still every row')
       assertEqual(rows['failed-rows'].ok, false, 'failed-rows can not run')
       assert(rows['failed-rows'].detail.indexOf('missing pluginManager.listPlugins:') === 0, 'table prefix: ' + rows['failed-rows'].detail)
       assert(rows['failed-rows'].detail.indexOf('plugins cannot be listed or toggled') !== -1, 'table fallback text')

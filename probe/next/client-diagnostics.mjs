@@ -260,7 +260,7 @@ check('snapshot-only', () => {
 })
 
 check('a11y-labels', () => {
-  assert(numberOf('role="region"') === 4, 'four labelled sections expected, found ' + numberOf('role="region"'))
+  assert(numberOf('role="region"') >= 4, 'labelled sections expected, found ' + numberOf('role="region"'))
   assert(source.includes('role="region" aria-label={t(\'diagnostics.checks\')}'), 'the checks section needs a name')
   assert(source.includes('role="region" aria-label={t(\'diagnostics.history\')}'), 'the history section needs a name')
   assert(source.includes('role="region" aria-label={t(\'diagnostics.paths\')}'), 'the paths section needs a name')

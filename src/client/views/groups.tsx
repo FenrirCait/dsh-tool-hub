@@ -1,13 +1,8 @@
 /**
  * Groups: the rail's groups, their members, their drawer and the one bulk switch.
  *
- * The payloads mirror src/domains/groups.ts exactly, because the host normalises only what it
- * is given and nothing the client is allowed to guess at:
- *   group.save      { id?, name, members, collection }   (members resent on edit, or they drop)
- *   group.delete    { id }
- *   group.toggle    { id, enabled, skipShared }
- *   group.clean     { id }
- *   collection.save { id, name }
+ * Payloads mirror src/domains/groups.ts exactly: save sends the whole member list (or members
+ * drop), delete/clean send an id, and the bulk switch sends { id, enabled, skipShared }.
  *
  * The dshmarket import is the one read this view makes: `market.status` previews the groups the
  * host matched by package name, and only the dialog's confirm sends `market.import`.
@@ -18,6 +13,7 @@
 import * as React from 'react'
 import { Badge, Button, Card, Dialog, Empty, Field, SearchBox, Select, Switch, Toolbar } from '../components.js'
 import { runOp } from '../api.js'
+import { groupOnReader } from '../group-state.js'
 import type { GroupMember, GroupRow, ViewProps } from '../types.js'
 
 /** Op ids this view owns; api.ts keeps the shell's shared table, not the groups domain. */
@@ -115,19 +111,7 @@ export function GroupsView(props: ViewProps): React.ReactElement {
   }, [groups, created, snapshot.collections])
 
   // A group has no stored on/off flag: read the live state of its members instead.
-  const pluginOn = new Map(snapshot.plugins.map(row => [row.id, row.enabled]))
-  const skillOn = new Map(snapshot.skills.map(row => [row.id, row.enabled]))
-  const isOn = (group: GroupRow): boolean => {
-    let seen = false
-    for (const member of group.members) {
-      const state = member.kind === 'skill' ? skillOn.get(member.id) : pluginOn.get(member.id)
-      if (state === undefined) continue
-      seen = true
-      if (!state) return false
-    }
-    return seen
-  }
-
+  const isOn = React.useMemo(() => groupOnReader(snapshot), [snapshot])
   const term = query.trim().toLowerCase()
   const rows = groups.filter(group => {
     const drawer = typeof group.collection === 'string' ? group.collection : ''

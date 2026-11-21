@@ -63,6 +63,22 @@ function errorCode(error: unknown): string | undefined {
  * rename, and removed if anything fails: the rename is the only commit point, so a crash leaves
  * either the previous file or the complete new one.
  */
+/** Antivirus and search indexers briefly lock files on Windows; retry the commit point a few times. */
+async function renameWithRetry(from: string, to: string): Promise<void> {
+  const delays = [20, 50, 100, 200, 400, 800]
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await rename(from, to)
+      return
+    }
+    catch (error) {
+      const code = (error as NodeJS.ErrnoException).code ?? ''
+      if (attempt >= delays.length || !['EPERM', 'EBUSY', 'EACCES', 'EEXIST'].includes(code)) throw error
+      await new Promise(done => setTimeout(done, delays[attempt]))
+    }
+  }
+}
+
 export async function writeFileAtomic(file: string, text: string, mode = 0o600): Promise<void> {
   await mkdir(dirname(file), { recursive: true })
   const temp = siblingTemp(file)
@@ -76,7 +92,7 @@ export async function writeFileAtomic(file: string, text: string, mode = 0o600):
     finally {
       await handle.close().catch(() => {})
     }
-    await rename(temp, file)
+    await renameWithRetry(temp, file)
   }
   catch (error) {
     await rm(temp, { force: true }).catch(() => {})

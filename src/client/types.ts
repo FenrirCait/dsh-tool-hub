@@ -84,6 +84,23 @@ export interface PresetRow {
   tool?: string[]
 }
 
+export interface PatchBlockInfo {
+  name: string
+  beginLine: number
+  endLine: number
+  rows: string[]
+  foreign: string[]
+  known: boolean
+}
+
+export interface PatchInfo {
+  path: string | null
+  rows: number
+  blocks: PatchBlockInfo[]
+  unclosed: string[]
+  foreignTotal: number
+}
+
 export interface ExtensionViewRow {
   id: string
   title: { zh: string; en: string }
@@ -163,6 +180,8 @@ export interface HubSnapshot {
   history: HistoryEntry[]
   /** Local extensions the host discovered, with load state and declared views. */
   extensions: ExtensionStatus[]
+  /** Managed blocks in the profile patch file, and the rows their owners do not own. */
+  patchInfo: PatchInfo
   /** When this copy was read, used by the topbar to show staleness. */
   fetchedAt: number
 }

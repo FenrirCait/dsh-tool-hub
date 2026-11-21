@@ -13,7 +13,7 @@ import { catalogs, createT, detectLang, type TFunction } from './i18n.js'
 export const NS = 'tool-hub'
 
 /** Host services this panel uses: slot registration and locale catalogues. */
-export const inject = ['slots', 'locale'] as const
+export const inject = ['slots', 'locale', 'layout'] as const
 
 interface SlotContext {
   slots: {
@@ -62,6 +62,18 @@ const SURFACES: SurfaceSpec[] = [
 ]
 
 export function apply(ctx: SlotContext): void {
+  // The shell publishes its layout service; reading it lazily keeps the panel loadable when an
+  // older host omits it (the button then does nothing rather than breaking the page).
+  const backToSession = (): void => {
+    try {
+      const get = (ctx as unknown as { get?: (name: string) => unknown }).get
+      const layout = typeof get === 'function' ? get.call(ctx, 'layout') as { selectPanel?: (key: string | null) => void } | undefined : undefined
+      if (typeof layout?.selectPanel === 'function') layout.selectPanel(null)
+    }
+    catch {
+      /* no layout service: the panel stays put */
+    }
+  }
   // Register the dictionaries first: the tab and sidebar labels are translated by the shell.
   try {
     ctx.locale?.register?.(NS, catalogs)
@@ -74,7 +86,7 @@ export function apply(ctx: SlotContext): void {
     // The sidebar slot is one list row; only the tab and main area host the full panel.
     const component = (): unknown => spec.surface === 'panel'
       ? React.createElement(PanelEntry)
-      : React.createElement(Shell, { surface: spec.surface })
+      : React.createElement(Shell, { surface: spec.surface, onBack: backToSession })
     ctx.slots.inject(spec.slot, () =>
       ctx.slots.register(
         { name: spec.slot, id: NS, order: spec.order, ...(spec.key === undefined ? {} : { key: spec.key }), label: () => t('app.title'), locale: NS },

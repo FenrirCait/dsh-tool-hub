@@ -1,5 +1,5 @@
 /**
- * Doctor: the ten things that make the panel look broken, each answered by trying it.
+ * Doctor: the eleven things that make the panel look broken, each answered by trying it.
  *
  * Every check is independent — one failing probe never hides the others — and the ids are the
  * contract the client renders. The capability table `CAPABILITIES` is the same one the settings
@@ -20,6 +20,7 @@ import { homedir } from 'node:os'
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { reportCapabilities, type CapabilityReport } from '../core/capabilities.js'
 import { stateDir as defaultStateDir } from '../core/io.js'
+import { scanPatchBlocks } from '../core/patch-blocks.js'
 import type { CapabilitySpec, HubContext } from '../shared/types.js'
 import { isRecord } from './dispatch.js'
 
@@ -449,6 +450,7 @@ export function diagnoseMount(options: {
 /** The ten ids, in render order: the client's contract and the probe's expectation. */
 export const DOCTOR_CHECK_IDS = [
   'patch-parse',
+  'patch-managed',
   'state-writable',
   'failed-rows',
   'stale-lock',
@@ -660,7 +662,7 @@ function insideDir(parent: string, candidate: string): boolean {
 }
 
 /**
- * The table. Ten rows, each independent; `needs` names the capability that has to be there for the
+ * The table. Eleven rows, each independent; `needs` names the capability that has to be there for the
  * check to mean anything, so an upgrade that dropped a member answers with the table's fallback.
  */
 export const DOCTOR_CHECKS: readonly DoctorCheck[] = [
@@ -672,6 +674,21 @@ export const DOCTOR_CHECKS: readonly DoctorCheck[] = [
       if (patch === null) throw new Error('this profile has no cordis.patch.yml')
       const rows = countMcpRows(await readFile(patch, 'utf8'))
       return { ok: true, detail: `${rows} MCP row(s) in ${patch}` }
+    },
+  },
+  {
+    id: 'patch-managed',
+    needs: [],
+    async run(context) {
+      const patch = context.patchPath
+      if (patch === null) throw new Error('this profile has no cordis.patch.yml')
+      const scan = scanPatchBlocks(await readFile(patch, 'utf8'))
+      if (scan.unclosed.length > 0) {
+        return { ok: false, detail: 'unclosed managed block(s): ' + scan.unclosed.join(', ') }
+      }
+      if (scan.blocks.length === 0) return { ok: true, detail: 'no managed blocks; every row is top-level' }
+      const names = scan.blocks.map(block => block.name + (block.foreign.length > 0 ? `:${block.foreign.length} foreign` : '')).join(', ')
+      return { ok: true, detail: `${scan.blocks.length} managed block(s), ${scan.foreignTotal} foreign row(s) left untouched (${names})` }
     },
   },
   {

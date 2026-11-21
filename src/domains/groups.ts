@@ -24,6 +24,7 @@ import { writeFileAtomic } from '../core/atomic.js'
 import { listBundles, listPluginRows, toggleOne, invalidatePluginCache } from './plugins.js'
 import { listSkills, setSkillEnabled } from './skills.js'
 import { patchPathFor } from './mcp.js'
+import { insertOutsideBlocks } from '../core/patch-blocks.js'
 import { removeRow, setRowDisabled } from '../../lib/patch-rows.js'
 
 export type MemberKind = 'plugin' | 'skill'
@@ -868,9 +869,11 @@ function disableRow(text: string, id: string): string {
   try {
     return setRowDisabled(text, id, true)
   }
-  catch {
-    const head = text === '' || text.endsWith('\n') ? text : text + '\n'
-    return head + '- id: ' + JSON.stringify(id) + '\n  disabled: true\n'
+  catch (error) {
+    // Only a missing row is appendable; an expression or a duplicate id must reach the caller.
+    if ((error as { code?: string }).code !== 'row-not-found') throw error
+    // Never land inside another panel's managed block: its next rewrite would drop this row.
+    return insertOutsideBlocks(text, '- id: ' + JSON.stringify(id) + '\n  disabled: true')
   }
 }
 
@@ -928,7 +931,13 @@ const groupBatch: OpHandler = async (payload, env) => serialized(async () => {
       continue
     }
     const patchId = row.patchId ?? member.id
-    text = enabled ? removeRow(text, patchId) : disableRow(text, patchId)
+    try {
+      text = enabled ? removeRow(text, patchId) : disableRow(text, patchId)
+    }
+    catch (error) {
+      results.push({ kind: 'plugin', id: member.id, ok: false, ...failureOf(error) })
+      continue
+    }
     touched.push(patchId)
     results.push({ kind: 'plugin', id: member.id, ok: true })
   }

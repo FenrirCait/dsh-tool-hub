@@ -228,6 +228,41 @@ export function DiagnosticsView(props: ViewProps): React.ReactElement {
         </Callout>
       )}
 
+      {snapshot.patchInfo.path === null ? null : (
+        <div className="th-section" role="region" aria-label={t('diagnostics.patchBlocks')}>
+          <div className="th-section-title">{t('diagnostics.patchBlocks')}</div>
+          <Card>
+          {snapshot.patchInfo.blocks.length === 0 ? (
+            <Empty title={t('diagnostics.patchNone')} hint={t('diagnostics.patchSafe')} />
+          ) : (
+            <div className="th-list">
+              {snapshot.patchInfo.blocks.map(block => (
+                <div className="th-row" key={block.name}>
+                  <div className="th-row-body">
+                    <span className="th-row-name th-mono">{block.name}</span>
+                    {block.foreign.length === 0 ? (
+                      <span className="th-row-meta">{label(lang, `${block.rows.length} 行`, `${block.rows.length} row(s)`)}</span>
+                    ) : (
+                      <span className="th-row-meta">
+                        {t('diagnostics.patchForeign', { block: block.name, count: String(block.foreign.length), list: block.foreign.join(', ') })}
+                      </span>
+                    )}
+                  </div>
+                  <Badge tone={block.foreign.length === 0 ? 'on' : 'off'}>{label(lang, `${block.rows.length} 行`, `${block.rows.length} rows`)}</Badge>
+                </div>
+              ))}
+            </div>
+          )}
+          {snapshot.patchInfo.unclosed.map(name => (
+            <Callout key={name} tone="error">{t('diagnostics.patchUnclosed', { block: name })}</Callout>
+          ))}
+          {snapshot.patchInfo.blocks.length === 0 ? null : (
+            <div className="th-row-meta">{t('diagnostics.patchSafe')}</div>
+          )}
+          </Card>
+        </div>
+      )}
+
       <div className="th-section" role="region" aria-label={t('diagnostics.checks')}>
         <div className="th-section-title">{t('diagnostics.checks')}</div>
         {report === null ? (
@@ -235,7 +270,7 @@ export function DiagnosticsView(props: ViewProps): React.ReactElement {
             title={t('diagnostics.checks')}
             hint={label(
               lang,
-              '运行诊断以读取宿主的十项检查；只读，不会改动任何状态。',
+              '运行诊断读取宿主的检查项；只读，不会改动任何状态。',
               'Run diagnostics to read the host checks; it is read-only and changes nothing.',
             )}
             action={

@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname } from 'node:path'
 import type { HostEnv } from '../shared/contract.js'
@@ -9,6 +10,7 @@ import { normalizePresets } from '../domains/presets.js'
 import { listBundles, listPluginRows } from '../domains/plugins.js'
 import { listSkills, skillRoots } from '../domains/skills.js'
 import { patchPathFor } from '../domains/mcp.js'
+import { scanPatchBlocks } from '../core/patch-blocks.js'
 import { readMode } from '../domains/scenes.js'
 import { readLazy, serverOf } from '../domains/tool-surface.js'
 import type { ExtensionStatus } from './extensions.js'
@@ -66,6 +68,10 @@ export async function buildSnapshot(deps: SnapshotDeps): Promise<Record<string, 
   const mode = readMode(env.state)
   const roots = skillRoots(env)
   const patch = patchPathFor(env)
+  // Managed blocks belong to other panels; the client shows their foreign rows without touching them.
+  const patchInfo = patch === null
+    ? { path: null, rows: 0, blocks: [], unclosed: [], foreignTotal: 0 }
+    : await readFile(patch, 'utf8').then(text => ({ path: patch, ...scanPatchBlocks(text) })).catch(() => ({ path: patch, rows: 0, blocks: [], unclosed: [], error: 'unreadable' }))
   const home = process.env.DSH_HOME?.trim() || dirname(dirname(stateFile())) || homedir()
 
   return {
@@ -102,6 +108,7 @@ export async function buildSnapshot(deps: SnapshotDeps): Promise<Record<string, 
     mcpError: null,
     history: deps.history === undefined ? [] : await deps.history(),
     extensions: deps.extensions ?? [],
+    patchInfo,
     fetchedAt: Date.now(),
   }
 }

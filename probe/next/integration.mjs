@@ -11,7 +11,7 @@
  *   2. the first save migrates state.json to v2 and keeps every 1.x key;
  *   3. settings.set changes state.settings and returns the backup path;
  *   4. toggle reaches pluginManager.setPluginEnabled and a fresh snapshot reflects it;
- *   5. doctor answers the ten checks, host-contract among them;
+ *   5. doctor answers every declared check, host-contract among them;
  *   6. the 401 / 403 gate still refuses through apply();
  *   7. the ctx.effect cleanup leaves zero routes mounted.
  *
@@ -270,6 +270,7 @@ const { server, port } = await serve(web.handlers)
 
 const DOCTOR_IDS = [
   'patch-parse',
+  'patch-managed',
   'state-writable',
   'failed-rows',
   'stale-lock',
@@ -408,12 +409,12 @@ try {
 
   // ── (5) doctor ──────────────────────────────────────────────────────────
 
-  await test('(5) doctor answers the ten checks, host-contract among them', async () => {
+  await test('(5) doctor answers every declared check, host-contract among them', async () => {
     const res = await op(port, 'doctor')
     assertEqual(res.status, 200, 'status')
     assertEqual(res.body.ok, true, 'ok')
     const checks = res.body.data.checks
-    assertEqual(checks.length, 10, 'check count')
+    assertEqual(checks.length, 11, 'check count')
     sameList(checks.map(row => row.id), DOCTOR_IDS, 'check ids')
     const failing = checks.filter(row => !row.ok)
     assertEqual(failing.length, 0, 'failing checks: ' + JSON.stringify(failing))
@@ -422,7 +423,7 @@ try {
     assertEqual(contract.detail, '15/15 host member(s)', 'host-contract detail')
     assertEqual(checks.find(row => row.id === 'mount-heartbeat').ok, true, 'mount heartbeat')
     assert(checks.find(row => row.id === 'patch-parse').detail.indexOf('2 MCP row(s)') !== -1, 'patch rows')
-    return '10/10, host-contract 15/15'
+    return '11/11, host-contract 15/15'
   })
 
   // ── unknown op through apply's wrapper ──────────────────────────────────

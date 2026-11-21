@@ -33,6 +33,8 @@ export type ShellSurface = 'tab' | 'main' | 'panel'
 
 export interface ShellProps {
   surface?: ShellSurface
+  /** Host shell navigation: leave the panel and show the conversation again. */
+  onBack?: () => void
 }
 
 type Phase = 'loading' | 'ready' | 'error'
@@ -83,8 +85,31 @@ function clock(at: number, lang: Lang): string {
   }
 }
 
+/** A view crash must not take the shell down with it: the nav and the back button still work. */
+class ViewBoundary extends React.Component<{ notice: string; retry: string; children: React.ReactNode }, { failed: boolean }> {
+  state = { failed: false }
+
+  static getDerivedStateFromError(): { failed: boolean } {
+    return { failed: true }
+  }
+
+  componentDidCatch(error: unknown): void {
+    console.error('[tool-hub] view render failed', error)
+  }
+
+  render(): React.ReactNode {
+    if (!this.state.failed) return this.props.children
+    return (
+      <Callout action={<Button onClick={() => this.setState({ failed: false })}>{this.props.retry}</Button>}>
+        {this.props.notice}
+      </Callout>
+    )
+  }
+}
+
 export function Shell(props: ShellProps): React.ReactElement {
   const surface: ShellSurface = props.surface ?? 'main'
+  const onBack = props.onBack
   const [lang, setLang] = React.useState<Lang>(() => readStoredLang() ?? detectLang())
   const [view, setView] = React.useState<ViewId>('plugins')
   const [phase, setPhase] = React.useState<Phase>('loading')
@@ -304,6 +329,11 @@ export function Shell(props: ShellProps): React.ReactElement {
             {snapshot?.paths.home !== undefined && snapshot.paths.home !== '' ? snapshot.paths.home : t('app.subtitle')}
           </span>
           <div className="th-top-actions">
+            {onBack === undefined ? null : (
+              <Button variant="ghost" onClick={onBack} label={t('action.backToSession')}>
+                ← {t('action.backToSession')}
+              </Button>
+            )}
             {forcedLang === 'zh' || forcedLang === 'en' ? null : (
               <Button variant="ghost" onClick={toggleLang} label={t('top.lang')}>
                 {lang === 'zh' ? 'EN' : '中文'}
@@ -328,7 +358,11 @@ export function Shell(props: ShellProps): React.ReactElement {
             </Callout>
           ) : null}
           {phase === 'loading' && snapshot === null ? <Loading label={t('state.loading')} /> : null}
-          {phase === 'ready' && failure === null ? views[view] : null}
+          {phase === 'ready' && failure === null ? (
+            <ViewBoundary key={view} notice={t('view.crashed')} retry={t('action.retry')}>
+              {views[view]}
+            </ViewBoundary>
+          ) : null}
         </div>
       </div>
     </div>
