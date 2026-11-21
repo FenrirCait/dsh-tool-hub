@@ -55,7 +55,7 @@ export function DockButton(props: DockButtonProps): React.ReactElement | null {
   const custom = summary !== null && summary.mode === 'custom' && summary.disabled > 0
   const label = custom ? t('dock.off', { n: summary.disabled }) : t('dock.tools')
   return (
-    <Button variant="ghost" onClick={onOpen} label={label}>
+    <Button variant="ghost" className="th-dock-btn" onClick={onOpen} label={label}>
       {label}
     </Button>
   )

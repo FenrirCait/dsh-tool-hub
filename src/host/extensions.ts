@@ -23,6 +23,8 @@ const RESERVED = new Set([
 ])
 const VIEW_KINDS = new Set(['table', 'list', 'json'])
 const MAX_MANIFEST = 64 * 1024
+const MAX_STYLES = 8
+const MAX_STYLE_BYTES = 256 * 1024
 
 export interface ExtensionView {
   id: string
@@ -41,6 +43,8 @@ export interface ExtensionManifest {
   description?: LocalizedText
   host: string
   views: ExtensionView[]
+  /** Relative CSS files the panel injects while this extension is loaded. */
+  styles: string[]
 }
 
 export interface ExtensionStatus {
@@ -54,6 +58,10 @@ export interface ExtensionStatus {
   error: string | null
   ops: string[]
   views: ExtensionView[]
+  /** Declared style paths, kept even while disabled. */
+  styles: string[]
+  /** CSS text of the declared styles, loaded only while enabled. */
+  css: string[]
 }
 
 export interface ExtensionDiscovered {
@@ -136,8 +144,20 @@ export function normalizeManifest(raw: unknown): ManifestResult {
       views.push(view)
     })
   }
+  const styles: string[] = []
+  if (raw.styles !== undefined) {
+    if (!Array.isArray(raw.styles)) return { ok: false, error: 'styles must be an array of relative .css paths' }
+    if (raw.styles.length > MAX_STYLES) return { ok: false, error: 'styles may declare at most ' + MAX_STYLES + ' files' }
+    for (const value of raw.styles) {
+      const file = typeof value === 'string' ? value.trim() : ''
+      if (file === '' || isAbsolute(file) || file.split(/[\\/]/).includes('..') || !file.toLowerCase().endsWith('.css')) {
+        return { ok: false, error: 'every styles entry must be a relative .css path inside the extension folder' }
+      }
+      if (!styles.includes(file)) styles.push(file)
+    }
+  }
   const description = localized(raw.description) ?? undefined
-  return { ok: true, manifest: { id, name, version, apiVersion: EXTENSION_API_VERSION, ...(description === undefined ? {} : { description }), host, views } }
+  return { ok: true, manifest: { id, name, version, apiVersion: EXTENSION_API_VERSION, ...(description === undefined ? {} : { description }), host, views, styles } }
 }
 
 function errorText(error: unknown): string {
@@ -176,7 +196,7 @@ export class ExtensionManager {
         catch (error) {
           problems.push({
             id: name, name: fallbackName(name), version: '', apiVersion: EXTENSION_API_VERSION,
-            dir: extDir, enabled: false, loaded: false, error: 'manifest.json: ' + errorText(error), ops: [], views: [],
+            dir: extDir, enabled: false, loaded: false, error: 'manifest.json: ' + errorText(error), ops: [], views: [], styles: [], css: [],
           })
           continue
         }
@@ -187,7 +207,7 @@ export class ExtensionManager {
         catch (error) {
           problems.push({
             id: name, name: fallbackName(name), version: '', apiVersion: EXTENSION_API_VERSION,
-            dir: extDir, enabled: false, loaded: false, error: 'manifest.json is not JSON: ' + errorText(error), ops: [], views: [],
+            dir: extDir, enabled: false, loaded: false, error: 'manifest.json is not JSON: ' + errorText(error), ops: [], views: [], styles: [], css: [],
           })
           continue
         }
@@ -195,7 +215,7 @@ export class ExtensionManager {
         if (!normalized.ok) {
           problems.push({
             id: name, name: fallbackName(name), version: '', apiVersion: EXTENSION_API_VERSION,
-            dir: extDir, enabled: false, loaded: false, error: normalized.error, ops: [], views: [],
+            dir: extDir, enabled: false, loaded: false, error: normalized.error, ops: [], views: [], styles: [], css: [],
           })
           continue
         }
@@ -223,6 +243,7 @@ export class ExtensionManager {
         statuses.push({
           id: manifest.id, name: manifest.name, version: manifest.version, apiVersion: manifest.apiVersion,
           dir, enabled: false, loaded: false, error: null, ops: [], views: manifest.views,
+          styles: manifest.styles, css: [],
         })
         continue
       }
@@ -235,6 +256,7 @@ export class ExtensionManager {
       statuses.push({
         id, name: fallbackName(id), version: '', apiVersion: EXTENSION_API_VERSION,
         dir: '', enabled: true, loaded: false, error: 'extension folder not found', ops: [], views: [],
+        styles: [], css: [],
       })
     }
     statuses.sort((left, right) => left.id.localeCompare(right.id))
@@ -245,21 +267,30 @@ export class ExtensionManager {
     const { manifest, dir, hostFile } = entry
     const base = {
       id: manifest.id, name: manifest.name, version: manifest.version, apiVersion: manifest.apiVersion,
-      dir, enabled: true, views: manifest.views,
+      dir, enabled: true, views: manifest.views, styles: manifest.styles,
     }
     let key = ''
+    let css: string[] = []
     try {
       const info = await stat(hostFile)
       if (!info.isFile()) throw new Error('host entry is not a file')
       key = `${Math.trunc(info.mtimeMs)}:${info.size}`
+      for (const file of manifest.styles) {
+        const styleFile = resolve(dir, file)
+        const styleInfo = await stat(styleFile)
+        if (!styleInfo.isFile()) throw new Error('style is not a file: ' + file)
+        if (styleInfo.size > MAX_STYLE_BYTES) throw new Error('style is larger than 256 KB: ' + file)
+        key += ':' + Math.trunc(styleInfo.mtimeMs) + ':' + styleInfo.size
+        css.push(await readFile(styleFile, 'utf8'))
+      }
     }
     catch (error) {
-      return { status: { ...base, loaded: false, error: 'host entry: ' + errorText(error), ops: [] } }
+      return { status: { ...base, loaded: false, error: 'host entry: ' + errorText(error), ops: [], css: [] } }
     }
     const cached = this.cache.get(manifest.id)
     if (cached !== undefined && cached.key === key) {
       return {
-        status: { ...base, loaded: true, error: null, ops: cached.registration.module.ops.map(op => op.id) },
+        status: { ...base, loaded: true, error: null, ops: cached.registration.module.ops.map(op => op.id), css },
         registration: cached.registration,
       }
     }
@@ -279,13 +310,13 @@ export class ExtensionManager {
       const checked = validateRegistration(manifest, registration)
       this.cache.set(manifest.id, { key, registration: checked })
       return {
-        status: { ...base, loaded: true, error: null, ops: checked.module.ops.map(op => op.id) },
+        status: { ...base, loaded: true, error: null, ops: checked.module.ops.map(op => op.id), css },
         registration: checked,
       }
     }
     catch (error) {
       this.cache.delete(manifest.id)
-      return { status: { ...base, loaded: false, error: errorText(error), ops: [] } }
+      return { status: { ...base, loaded: false, error: errorText(error), ops: [], css: [] } }
     }
   }
 

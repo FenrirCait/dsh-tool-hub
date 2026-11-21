@@ -6,6 +6,7 @@
  * empty copy on top of a good snapshot.
  */
 import * as React from 'react'
+import { applyExtensionStyles } from './extension-style.js'
 import { getSnapshot, runOp, WRITE_TIMEOUT_MS } from './api.js'
 import type { ApiFail } from './api.js'
 import { Button, Callout, Loading } from './components.js'
@@ -132,6 +133,12 @@ export function Shell(props: ShellProps): React.ReactElement {
   React.useEffect(() => {
     installStyles()
   }, [])
+
+  // Extension styles arrive with the snapshot; inject them whenever a new one lands so the panel,
+  // dock chip and sidebar entry all share the same material without a reload.
+  React.useEffect(() => {
+    if (snapshot !== null) applyExtensionStyles(snapshot.extensions)
+  }, [snapshot])
 
   const load = React.useCallback(async (silent: boolean) => {
     if (!silent) setPhase(current => (current === 'ready' ? 'ready' : 'loading'))

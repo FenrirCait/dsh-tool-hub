@@ -295,6 +295,8 @@ function extensionOf(row: Record<string, unknown>): ExtensionStatus | null {
     error: asStringOrNull(row.error),
     ops: Array.isArray(row.ops) ? row.ops.filter((op): op is string => typeof op === 'string') : [],
     views,
+    styles: asStringList(row.styles),
+    css: asStringList(row.css),
   }
 }
 

@@ -30,6 +30,8 @@ export interface ButtonProps {
   title?: string
   label?: string
   type?: 'button' | 'submit'
+  /** Extra class on the button element, for plugins that need a stable hook. */
+  className?: string
 }
 
 export function Button(props: ButtonProps): React.ReactElement {
@@ -38,7 +40,7 @@ export function Button(props: ButtonProps): React.ReactElement {
   return (
     <button
       type={props.type ?? 'button'}
-      className={variant === 'default' ? 'th-btn' : `th-btn th-btn--${variant}`}
+      className={(variant === 'default' ? 'th-btn' : `th-btn th-btn--${variant}`) + (props.className === undefined ? '' : ' ' + props.className)}
       onClick={props.onClick}
       disabled={disabled}
       aria-busy={props.busy === true}

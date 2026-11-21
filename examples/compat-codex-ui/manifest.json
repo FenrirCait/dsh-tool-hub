@@ -1,0 +1,12 @@
+{
+  "id": "codex-ui-glass",
+  "name": { "zh": "Codex UI 玻璃兼容", "en": "Codex UI glass compat" },
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "description": {
+    "zh": "当 codex-ui 开启玻璃质感时，让工具总控台的面板、Dock 按钮和侧边栏入口一起套用同样的云母/平铺玻璃效果。",
+    "en": "Applies codex-ui's glass look to the tool hub panel, dock button and sidebar entry whenever its glass effect is on."
+  },
+  "host": "host.mjs",
+  "styles": ["style.css"]
+}

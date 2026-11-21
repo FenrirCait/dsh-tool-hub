@@ -165,7 +165,26 @@ export default function activate(api) {
 - 还有第二道闸：注册通过后仍要进 Registry。重复 module id / op id 在那里抛错，同样落到
   `status.error`，并把该模块从注册表移除——不会留下「声明了但没 handler」的半绑定状态。
 
-## 5. 视图（views）
+## 5. 样式（styles）
+
+`styles` 可选，是相对扩展目录的 CSS 文件数组（最多 8 个，单个 ≤256 KB，必须是 `.css`，
+不允许绝对路径或 `..`）：
+
+```json
+{
+  "host": "host.mjs",
+  "styles": ["style.css"]
+}
+```
+
+- 扩展**启用并加载成功**后，宿主读取 CSS 文本，随 `extension.list` / 快照下发；面板为每个扩展注入一个
+  `<style data-extension-style="<id>">`，禁用或卸载时移除。
+- CSS 是**文档级**的（扩展是受信任的本地代码），作者必须自己把选择器限定在本插件表面，例如
+  `.th-root`、`.th-dock-btn`、`.th-sidebar-entry`；不要写裸 `body` / `*`。
+- 修改 CSS 后调用 `extension.reload` 即可生效，不需要重启宿主；加载键包含 CSS 的 mtime/size，缓存会自动失效。
+- 读取失败、文件不存在或超过体积上限时，该扩展作为一条带 `error` 的状态行，不会影响其它扩展。
+
+## 6. 视图（views）
 
 视图在 manifest 里声明，把一个**本扩展的读 op**接到面板上。
 

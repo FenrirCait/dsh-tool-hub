@@ -7,6 +7,7 @@
  */
 import * as React from 'react'
 import { Shell } from './shell.js'
+import { installExtensionStyleRefresh } from './extension-style.js'
 import { DockButton, DOCK_ORDER, DOCK_SLOT } from './dock.js'
 import type { ShellSurface } from './shell.js'
 import { catalogs, createT, detectLang, type TFunction } from './i18n.js'
@@ -37,7 +38,8 @@ interface SurfaceSpec {
 
 /** The sidebar list is a row, not a panel: an 18px glyph the shell labels. */
 function PanelEntry(): React.ReactElement {
-  return React.createElement('svg', {
+  return React.createElement('span', { className: 'th-sidebar-entry', 'aria-hidden': true },
+  React.createElement('svg', {
     width: 18,
     height: 18,
     viewBox: '0 0 24 24',
@@ -52,7 +54,7 @@ function PanelEntry(): React.ReactElement {
   React.createElement('circle', { cx: 4.6, cy: 6.4, r: 1.9, fill: 'currentColor', stroke: 'none' }),
   React.createElement('circle', { cx: 19.4, cy: 6.4, r: 1.9, fill: 'currentColor', stroke: 'none' }),
   React.createElement('circle', { cx: 12, cy: 20, r: 1.9, fill: 'currentColor', stroke: 'none' }),
-  React.createElement('path', { d: 'M12 11 5.6 7.4M12 11l6.4-3.6M12 11v6.2' }))
+  React.createElement('path', { d: 'M12 11 5.6 7.4M12 11l6.4-3.6M12 11v6.2' })))
 }
 
 /** One panel, three surfaces: the plugins tab, the sidebar list, and the main area. */
@@ -63,6 +65,7 @@ const SURFACES: SurfaceSpec[] = [
 ]
 
 export function apply(ctx: SlotContext): void {
+  installExtensionStyleRefresh()
   // The shell publishes its layout service; reading it lazily keeps the panel loadable when an
   // older host omits it (the button then does nothing rather than breaking the page).
   const selectPanel = (key: string | null): void => {

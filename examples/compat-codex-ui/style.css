@@ -1,0 +1,156 @@
+/* codex-ui glass compat — only touches this plugin's own roots.
+ *
+ * Contract follows codex-ui's DOM instead of its internals:
+ *   html[data-dsh-glass]                  glass enabled
+ *   html[data-dsh-glass-float]            mica layout (floating cards)
+ *   html[data-dsh-glass-compat]           flat glass layout
+ *   --dsh-glass-blur / -frost / -glow     material knobs set on <html> and <body>
+ */
+
+:root[data-dsh-glass] .th-root,
+:root[data-dsh-glass] .th-dock-btn,
+:root[data-dsh-glass] .th-sidebar-entry {
+  --thx-blur: var(--dsh-glass-blur, 14px);
+  --thx-frost: var(--dsh-glass-frost, 0.5);
+  --thx-surface: var(--dsh-glass-card, color-mix(in srgb, var(--dsw-alias-bg-layer-1, #1e1e2e) calc(52% * var(--thx-frost)), transparent));
+  --thx-surface-strong: var(--dsh-glass-card-raised, var(--thx-surface));
+  --thx-rim: var(--dsh-glass-rim, color-mix(in srgb, var(--dsw-alias-label-primary, #ffffff) 18%, transparent));
+  --thx-rim-soft: var(--dsh-glass-rim-soft, color-mix(in srgb, var(--dsw-alias-label-primary, #ffffff) 12%, transparent));
+  --thx-shadow: var(--dsh-glass-edge, inset 0 1px 0 rgba(255,255,255,0.2)), var(--dsh-glass-drop, 0 10px 32px rgba(0,0,0,0.18));
+}
+
+/* The panel keeps the host background visible; only its own cards get material. */
+:root[data-dsh-glass] .th-root {
+  position: relative;
+  isolation: isolate;
+  /* Mirror codex-ui's body ground so the panel's glass cards have something to refract. */
+  background:
+    radial-gradient(520px 260px at 16% 6%, color-mix(in srgb, var(--dsw-alias-brand-primary, #6ea8ff) calc(12% * var(--dsh-glass-glow, 0)), transparent), transparent 70%),
+    radial-gradient(420px 230px at 88% 92%, color-mix(in srgb, var(--dsw-alias-brand-secondary, #ff9ecb) calc(9% * var(--dsh-glass-glow, 0)), transparent), transparent 72%),
+    linear-gradient(165deg,
+      color-mix(in srgb, var(--dsh-glass-ground, #f4f4f5), #d9e4f3 14%) 0%,
+      color-mix(in srgb, var(--dsh-glass-ground, #f4f4f5), #eef2f8 6%) 55%,
+      color-mix(in srgb, var(--dsh-glass-ground, #f4f4f5), #dfe7f2 12%) 100%) !important;
+}
+
+:root[data-dsh-glass] body[data-ds-dark-theme] .th-root {
+  background: linear-gradient(165deg, #171a21 0%, #101318 55%, #0b0e13 100%) !important;
+}
+
+:root[data-dsh-glass] .th-root::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: var(--dsh-glass-glow, 0);
+  background:
+    radial-gradient(520px 260px at 16% 6%, color-mix(in srgb, var(--dsw-alias-brand-primary, #6ea8ff) 24%, transparent), transparent 70%),
+    radial-gradient(420px 230px at 88% 92%, color-mix(in srgb, var(--dsw-alias-brand-secondary, #ff9ecb) 18%, transparent), transparent 72%);
+  transition: opacity 180ms ease;
+}
+
+:root[data-dsh-glass] .th-root > * { position: relative; z-index: 1; }
+
+/* Surfaces: cards, group headers, side rail, topbar and dialogs share one material. */
+:root[data-dsh-glass] .th-root .th-card,
+:root[data-dsh-glass] .th-root .th-group-head,
+:root[data-dsh-glass] .th-root .th-side,
+:root[data-dsh-glass] .th-root .th-top,
+:root[data-dsh-glass] .th-root .th-dialog {
+  background: var(--thx-surface) !important;
+  border: 1px solid var(--thx-rim-soft) !important;
+  backdrop-filter: blur(var(--thx-blur)) saturate(145%);
+  -webkit-backdrop-filter: blur(var(--thx-blur)) saturate(145%);
+  box-shadow: var(--thx-shadow);
+}
+
+:root[data-dsh-glass] .th-root .th-dialog {
+  background: var(--thx-surface-strong) !important;
+  border-color: var(--thx-rim) !important;
+}
+
+:root[data-dsh-glass] .th-root .th-backdrop {
+  background: color-mix(in srgb, #000000 38%, transparent) !important;
+  backdrop-filter: blur(10px) saturate(120%);
+  -webkit-backdrop-filter: blur(10px) saturate(120%);
+}
+
+/* Rows sit on the card material: no second blur, just a hover wash. */
+:root[data-dsh-glass] .th-root .th-row {
+  background: transparent;
+  border-color: var(--thx-rim-soft);
+}
+:root[data-dsh-glass] .th-root .th-row:hover {
+  background: color-mix(in srgb, var(--dsw-alias-label-primary, #ffffff) 6%, transparent);
+}
+
+:root[data-dsh-glass] .th-root .th-input,
+:root[data-dsh-glass] .th-root .th-select {
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-2, #1e1e2e) 68%, transparent) !important;
+  border-color: var(--thx-rim-soft) !important;
+  backdrop-filter: blur(calc(var(--thx-blur) * 0.7));
+  -webkit-backdrop-filter: blur(calc(var(--thx-blur) * 0.7));
+}
+:root[data-dsh-glass] .th-root .th-input:focus-visible,
+:root[data-dsh-glass] .th-root .th-select:focus-visible {
+  border-color: color-mix(in srgb, var(--dsw-alias-brand-primary, #6ea8ff) 55%, transparent) !important;
+  outline-color: color-mix(in srgb, var(--dsw-alias-brand-primary, #6ea8ff) 55%, transparent) !important;
+}
+
+/* Floating (mica) layout: cards float; flat glass keeps tighter corners. */
+:root[data-dsh-glass-float] .th-root .th-card,
+:root[data-dsh-glass-float] .th-root .th-group-head,
+:root[data-dsh-glass-float] .th-root .th-side,
+:root[data-dsh-glass-float] .th-root .th-dialog {
+  border-radius: 16px !important;
+}
+:root[data-dsh-glass-float] .th-root .th-main { padding: 14px 16px 18px; }
+:root[data-dsh-glass-compat] .th-root .th-card,
+:root[data-dsh-glass-compat] .th-root .th-group-head,
+:root[data-dsh-glass-compat] .th-root .th-dialog {
+  border-radius: 8px !important;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+}
+
+/* Composer dock button: a glass chip that follows the same material. */
+:root[data-dsh-glass] .th-dock-btn {
+  background: var(--thx-surface) !important;
+  border-color: var(--thx-rim-soft) !important;
+  backdrop-filter: blur(var(--thx-blur)) saturate(140%);
+  -webkit-backdrop-filter: blur(var(--thx-blur)) saturate(140%);
+  box-shadow: inset 0 1px 0 var(--thx-rim-soft);
+}
+:root[data-dsh-glass] .th-dock-btn:hover {
+  background: var(--thx-surface-strong) !important;
+  border-color: var(--thx-rim) !important;
+}
+
+/* Sidebar entry is an icon row rendered by the shell; the span is our only hook. */
+:root[data-dsh-glass] .th-sidebar-entry {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: var(--thx-surface);
+  border: 1px solid var(--thx-rim-soft);
+  backdrop-filter: blur(calc(var(--thx-blur) * 0.8));
+  -webkit-backdrop-filter: blur(calc(var(--thx-blur) * 0.8));
+  box-shadow: inset 0 1px 0 var(--thx-rim-soft);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-dsh-glass] .th-root .th-card,
+  :root[data-dsh-glass] .th-root .th-group-head,
+  :root[data-dsh-glass] .th-root .th-dialog,
+  :root[data-dsh-glass] .th-root .th-input,
+  :root[data-dsh-glass] .th-root .th-select,
+  :root[data-dsh-glass] .th-dock-btn,
+  :root[data-dsh-glass] .th-sidebar-entry {
+    background: var(--dsw-alias-bg-layer-2, #1e1e2e) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+}

@@ -150,6 +150,10 @@ export interface ExtensionStatus {
   error: string | null
   ops: string[]
   views: ExtensionViewRow[]
+  /** Relative CSS files the extension declared. */
+  styles?: string[]
+  /** CSS text injected while the extension is loaded. */
+  css?: string[]
 }
 
 export interface HistoryEntry {
