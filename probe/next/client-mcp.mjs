@@ -238,8 +238,23 @@ check('bilingual-one-offs', () => {
   return 'copy(lang, zh, en)'
 })
 
+check('oauth-surface', () => {
+  const sibling = readFileSync(join(ROOT, 'src/client/views/mcp-oauth.tsx'), 'utf8')
+  assert(/export function McpOauthDialog/.test(sibling), 'the OAuth dialog must stay a named component')
+  for (const line of sibling.split('\n')) {
+    if (!line.startsWith('import ')) continue
+    const at = line.indexOf("'")
+    if (at === -1) continue
+    const spec = line.slice(at + 1, line.indexOf("'", at + 1))
+    if (spec.startsWith('.') && !['../api.js', '../components.js', '../types.js'].includes(spec)) {
+      throw new Error('the OAuth dialog imports ' + spec + '; keep it on api/components/types')
+    }
+  }
+  return 'mcp-oauth.tsx is self-contained'
+})
+
 check('imports', () => {
-  const allowed = new Set(['../api.js', '../components.js', '../types.js'])
+  const allowed = new Set(['../api.js', '../components.js', '../types.js', './mcp-oauth.js'])
   for (const line of source.split('\n')) {
     if (!line.startsWith('import ')) continue
     const at = line.indexOf("'")

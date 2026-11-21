@@ -8,6 +8,7 @@
 import * as React from 'react'
 import { OPS, runOp } from '../api.js'
 import { Badge, Button, Callout, Card, Dialog, Empty, Field, SearchBox, Select, Switch, monoStyle } from '../components.js'
+import { McpOauthDialog } from './mcp-oauth.js'
 import type { PluginRow, ViewProps } from '../types.js'
 
 /**
@@ -141,6 +142,7 @@ export function McpView(props: ViewProps): React.ReactElement {
   const [draft, setDraft] = React.useState<Draft | null>(null)
   const [pending, setPending] = React.useState<PluginRow | null>(null)
   const [raw, setRaw] = React.useState<RawState | null>(null)
+  const [oauthRow, setOauthRow] = React.useState<PluginRow | null>(null)
 
   const servers = snapshot.plugins.filter(row => row.mcp === true)
   const term = query.trim().toLowerCase()
@@ -309,6 +311,11 @@ export function McpView(props: ViewProps): React.ReactElement {
                     <Button variant="ghost" disabled={!editable} busy={rawBusy} onClick={() => { openRaw(row) }}>
                       {copy(lang, '原文', 'Raw')}
                     </Button>
+                    {editable && (row.transport === 'streamable-http' || (row.url ?? '') !== '') ? (
+                      <Button variant="ghost" onClick={() => { setOauthRow(row) }}>
+                        {t('mcp.oauth')}
+                      </Button>
+                    ) : null}
                     <Button variant="danger" disabled={!editable} onClick={() => { setPending(row) }}>
                       {t('action.delete')}
                     </Button>
@@ -426,6 +433,16 @@ export function McpView(props: ViewProps): React.ReactElement {
       >
         {pending === null ? null : `${t('action.delete')}: ${pending.name}`}
       </Dialog>
+
+      <McpOauthDialog
+        open={oauthRow !== null}
+        row={oauthRow}
+        id={oauthRow === null ? '' : patchIdOf(oauthRow)}
+        t={t}
+        busy={busy}
+        run={run}
+        onClose={() => { setOauthRow(null) }}
+      />
     </div>
   )
 }

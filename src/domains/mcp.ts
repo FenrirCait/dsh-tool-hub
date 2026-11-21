@@ -17,6 +17,7 @@
  * module never opens state.json itself.
  */
 import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { randomBytes } from 'node:crypto'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { withFileLock, writeFileAtomic } from '../core/atomic.js'
 import { stateDir } from '../core/io.js'
@@ -791,6 +792,60 @@ async function commitPatch(
   return { backup, verify }
 }
 
+// ── OAuth ─────────────────────────────────────────────────────────────────────
+
+/** Where the authorization server sends the browser back; the panel asks for that URL. */
+export const OAUTH_REDIRECT_URI = 'http://localhost/oauth/callback'
+const OAUTH_PENDING_TTL_MS = 10 * 60 * 1000
+const OAUTH_PENDING_LIMIT = 20
+
+interface OauthPending {
+  at: number
+  id: string
+  verifier: string
+  meta: Record<string, unknown>
+  clientId: string
+  clientSecret: string | null
+  redirectUri: string
+}
+
+const OAUTH_PENDING = new Map<string, OauthPending>()
+
+function pruneOauthPending(): void {
+  const now = Date.now()
+  for (const [state, item] of [...OAUTH_PENDING.entries()]) {
+    if (now - item.at > OAUTH_PENDING_TTL_MS) OAUTH_PENDING.delete(state)
+  }
+  while (OAUTH_PENDING.size >= OAUTH_PENDING_LIMIT) {
+    const oldest = OAUTH_PENDING.keys().next()
+    if (oldest.done === true) break
+    OAUTH_PENDING.delete(oldest.value)
+  }
+}
+
+function oauthPending(state: string): OauthPending | null {
+  const item = OAUTH_PENDING.get(state)
+  if (item === undefined) return null
+  if (Date.now() - item.at > OAUTH_PENDING_TTL_MS) {
+    OAUTH_PENDING.delete(state)
+    return null
+  }
+  return item
+}
+
+/** Pull the code out of a pasted callback URL, or accept a bare code. */
+export function oauthCodeOf(input: string): string {
+  const text = input.trim()
+  if (text === '') return ''
+  try {
+    const parsed = new URL(text)
+    return (parsed.searchParams.get('code') ?? '').trim()
+  }
+  catch {
+    return text
+  }
+}
+
 // ── ops ──────────────────────────────────────────────────────────────────────
 
 const OPS: OpDefinition[] = [
@@ -800,6 +855,9 @@ const OPS: OpDefinition[] = [
   { id: 'mcp.delete', write: true, audit: true, note: 'Removes one MCP row from the profile patch, backed up first.' },
   { id: 'mcp.raw', write: false, audit: false, note: 'Returns one MCP row raw text exactly as the patch holds it.' },
   { id: 'mcp.rawSave', write: true, audit: true, note: 'Writes an edited MCP row back verbatim, backed up and verified against the host.' },
+  { id: 'mcp.oauthStart', write: false, audit: false, note: 'Discovers the server OAuth metadata, registers a client and returns the authorize URL.' },
+  { id: 'mcp.oauthFinish', write: true, audit: true, note: 'Exchanges the pasted code and stores the bearer token in that row Authorization header.' },
+  { id: 'mcp.oauthCancel', write: false, audit: false, note: 'Drops one pending OAuth login.' },
 ]
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -1000,6 +1058,110 @@ export function createMcpDomain(): DomainRegistration {
           const note = await noteWrite(env, { op: 'rawSave', id: existing.id, backup: written.backup, patch })
           return { ok: true, id: existing.id, saved: true, backup: written.backup, verify: written.verify, stateSaved: note.saved, warn: note.warn }
         })
+      }),
+      'mcp.oauthStart': guarded(async (payload, env) => {
+        const patch = patchPathFor(env)
+        if (patch === null) fail('no-patch', 'this profile has no cordis.patch.yml to edit')
+        const id = field(payload, 'id')
+        if (!MCP_ID_PATTERN.test(id)) fail('bad-id', 'mcp row id cannot be used')
+        const text = await readPatchText(patch)
+        const row = parseMcpRows(text).find(item => item.id === id)
+        if (row === undefined) fail('unknown-mcp', 'no MCP server "' + id + '" in the profile patch')
+        const raw = typeof row.config.url === 'string' ? row.config.url.trim() : ''
+        let endpoint: URL
+        try {
+          endpoint = new URL(raw)
+        }
+        catch {
+          fail('not-http', 'this server has no http(s) url to authorize against')
+        }
+        if (endpoint.protocol !== 'http:' && endpoint.protocol !== 'https:') fail('not-http', 'this server has no http(s) url to authorize against')
+        const oauth = await import('../../lib/oauth.js') as {
+          discover: (url: string) => Promise<Record<string, unknown>>
+          register: (meta: Record<string, unknown>, options: Record<string, unknown>) => Promise<Record<string, unknown>>
+          authorizeUrl: (input: Record<string, unknown>) => string
+          createPkce: () => { verifier: string; challenge: string }
+        }
+        let meta: Record<string, unknown>
+        let client: Record<string, unknown>
+        try {
+          meta = await oauth.discover(raw)
+          client = await oauth.register(meta, { clientName: 'dsh-tool-hub', redirectUri: OAUTH_REDIRECT_URI })
+        }
+        catch (error) {
+          fail('oauth-failed', String((error as Error)?.message ?? error))
+        }
+        const clientId = typeof client.clientId === 'string' ? client.clientId : ''
+        if (clientId === '') fail('oauth-failed', 'the authorization server issued no client id')
+        const pkce = oauth.createPkce()
+        const state = randomBytes(16).toString('hex')
+        const authorizeUrl = oauth.authorizeUrl({
+          meta,
+          clientId,
+          redirectUri: OAUTH_REDIRECT_URI,
+          state,
+          codeChallenge: pkce.challenge,
+          scopes: meta.scopes,
+        })
+        pruneOauthPending()
+        OAUTH_PENDING.set(state, {
+          at: Date.now(),
+          id,
+          verifier: pkce.verifier,
+          meta,
+          clientId,
+          clientSecret: typeof client.clientSecret === 'string' ? client.clientSecret : null,
+          redirectUri: OAUTH_REDIRECT_URI,
+        })
+        return { ok: true, id, name: typeof row.config.serverName === 'string' ? row.config.serverName : id, authorizeUrl, state, redirectUri: OAUTH_REDIRECT_URI }
+      }),
+      'mcp.oauthFinish': guarded(async (payload, env) => {
+        const state = field(payload, 'state')
+        const code = oauthCodeOf(typeof payload.code === 'string' ? payload.code : '')
+        const pending = state === '' ? null : oauthPending(state)
+        if (pending === null) fail('bad-state', 'that login is unknown or has expired')
+        if (code === '') fail('oauth-failed', 'the authorization code is empty')
+        const oauth = await import('../../lib/oauth.js') as {
+          exchangeCode: (input: Record<string, unknown>) => Promise<Record<string, unknown>>
+        }
+        let token: Record<string, unknown>
+        try {
+          token = await oauth.exchangeCode({
+            meta: pending.meta,
+            clientId: pending.clientId,
+            clientSecret: pending.clientSecret ?? undefined,
+            code,
+            codeVerifier: pending.verifier,
+            redirectUri: pending.redirectUri,
+          })
+        }
+        catch (error) {
+          // A code is single-use: after a failed exchange this pending login cannot be retried.
+          OAUTH_PENDING.delete(state)
+          fail('oauth-failed', String((error as Error)?.message ?? error))
+        }
+        OAUTH_PENDING.delete(state)
+        const accessToken = typeof token.accessToken === 'string' ? token.accessToken : ''
+        if (accessToken === '') fail('oauth-failed', 'the authorization server issued no access token')
+        const patch = patchPathFor(env)
+        if (patch === null) fail('no-patch', 'this profile has no cordis.patch.yml to edit')
+        return await withPatchLock(patch, async () => {
+          const text = await readPatchText(patch)
+          const row = parseMcpRows(text).find(item => item.id === pending.id)
+          if (row === undefined) fail('unknown-mcp', 'no MCP server "' + pending.id + '" in the profile patch')
+          const headers = isRecord(row.config.headers) ? row.config.headers : {}
+          const config: Record<string, unknown> = { ...row.config, headers: { ...headers, Authorization: 'Bearer ' + accessToken } }
+          const next = replaceMcpConfig(text, pending.id, config)
+          const expectedName = typeof config.serverName === 'string' ? config.serverName : pending.id
+          const written = await commitPatch(env, patch, pending.id, next, text, expectedName)
+          const note = await noteWrite(env, { op: 'oauth', id: pending.id, backup: written.backup, patch })
+          return { ok: true, id: pending.id, saved: true, backup: written.backup, verify: written.verify, stateSaved: note.saved, warn: note.warn }
+        })
+      }),
+      'mcp.oauthCancel': guarded(async (payload) => {
+        const state = field(payload, 'state')
+        if (state !== '') OAUTH_PENDING.delete(state)
+        return { ok: true, cancelled: true }
       }),
     },
   }
