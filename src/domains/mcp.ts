@@ -792,6 +792,53 @@ async function commitPatch(
   return { backup, verify }
 }
 
+/**
+ * Replace one MCP row's lines in place, keeping every other byte of the document.
+ *
+ * `rowLines` is the replacement exactly as it should land (a backup row read back verbatim). The
+ * row's own indentation is part of the document's shape, so a replacement that would move the row
+ * is refused instead of being re-indented: a caller that wants a different indent is editing, not
+ * restoring.
+ */
+export function replaceMcpRowSpan(text: string, id: string, rowLines: string[]): string {
+  const row = parseMcpRows(text).find(candidate => candidate.id === id)
+  if (row === undefined) fail('unknown-mcp', 'mcp row "' + id + '" is not in this profile patch')
+  const first = rowLines[0]
+  if (first === undefined) fail('bad-payload', 'a restored row needs at least one line')
+  const indent = leadOf(first)
+  if (indent !== row.indent) {
+    fail('indent', 'the restored row is indented by ' + String(indent) + ' spaces, the current row by ' + String(row.indent))
+  }
+  const doc = splitDocument(text)
+  const parsed = parseMcpRows(rowLines.join(doc.eol))
+  if (parsed.length !== 1 || parsed[0]?.id !== id) {
+    fail('raw-invalid', 'the replacement is not exactly the MCP row "' + id + '"')
+  }
+  return finishDocument(doc, [...doc.lines.slice(0, row.startLine), ...rowLines, ...doc.lines.slice(row.endLine)])
+}
+
+/**
+ * Commit a row-span replacement through the one write path: take the patch lock, re-read the file
+ * that is actually on disk, let the caller build the new text from it, then back up, write, verify
+ * against the host and record the write. The builder runs inside the lock, so a concurrent edit
+ * cannot be overwritten with text computed before it landed.
+ */
+export async function commitMcpRowSpan(
+  env: HostEnv,
+  patch: string,
+  id: string,
+  build: (current: string) => { next: string; expectedName: string },
+  note: Record<string, unknown> = {},
+): Promise<{ backup: string; verify: { mode: 'host' | 'parse'; ok: boolean; detail: string }; stateSaved: boolean; warn: string | null }> {
+  return await withPatchLock(patch, async () => {
+    const current = await readPatchText(patch)
+    const built = build(current)
+    const written = await commitPatch(env, patch, id, built.next, current, built.expectedName)
+    const noted = await noteWrite(env, { id, backup: written.backup, patch, ...note })
+    return { backup: written.backup, verify: written.verify, stateSaved: noted.saved, warn: noted.warn }
+  })
+}
+
 // ── OAuth ─────────────────────────────────────────────────────────────────────
 
 /** Where the authorization server sends the browser back; the panel asks for that URL. */

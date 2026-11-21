@@ -8,6 +8,7 @@ import * as React from 'react'
 import { runOp } from '../api.js'
 import { Badge, Button, Callout, Card, Dialog, Empty, Field } from '../components.js'
 import type { ViewProps } from '../types.js'
+import { BackupRestoreDialog } from './backup-restore.js'
 
 interface BackupRow {
   name: string
@@ -46,10 +47,11 @@ function sizeText(bytes: number): string {
 }
 
 export function MaintenanceCards(props: ViewProps): React.ReactElement {
-  const { snapshot, t, busy, run, reload } = props
+  const { snapshot, t, lang, busy, run, reload } = props
   const [scan, setScan] = React.useState<BackupScan | null>(null)
   const [loading, setLoading] = React.useState(false)
   const [cleaning, setCleaning] = React.useState(false)
+  const [restoring, setRestoring] = React.useState(false)
   const [keep, setKeep] = React.useState('50')
   const [olderDays, setOlderDays] = React.useState('0')
   const [status, setStatus] = React.useState('')
@@ -79,6 +81,13 @@ export function MaintenanceCards(props: ViewProps): React.ReactElement {
       reload()
     })
   }
+
+  /** The dialog owns the restore; the card only opens it, reports the result and refreshes its list. */
+  const closeRestore = React.useCallback(() => { setRestoring(false) }, [])
+  const restored = React.useCallback(() => {
+    setStatus(t('backup.restoreDone'))
+    load()
+  }, [t, load])
 
   const copySummary = (): void => {
     const lines = [
@@ -133,6 +142,7 @@ export function MaintenanceCards(props: ViewProps): React.ReactElement {
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
           <Button variant="ghost" busy={loading} onClick={load}>{t('backup.refresh')}</Button>
           <Button variant="ghost" disabled={rows.length === 0} onClick={() => { setCleaning(true) }}>{t('backup.clean')}</Button>
+          <Button variant="ghost" disabled={rows.length === 0} onClick={() => { setRestoring(true) }}>{t('backup.restore')}</Button>
           <Button variant="ghost" busy={copied} onClick={copySummary}>{t('backup.copy')}</Button>
         </div>
         {status === '' ? null : <Callout>{status}</Callout>}
@@ -158,6 +168,17 @@ export function MaintenanceCards(props: ViewProps): React.ReactElement {
           </Field>
         </div>
       </Dialog>
+
+      <BackupRestoreDialog
+        open={restoring}
+        lang={lang}
+        t={t}
+        busy={busy}
+        run={run}
+        reload={reload}
+        onClose={closeRestore}
+        onRestored={restored}
+      />
     </div>
   )
 }
