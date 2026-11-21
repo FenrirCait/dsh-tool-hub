@@ -165,6 +165,8 @@ export default function activate(api) {
 - 还有第二道闸：注册通过后仍要进 Registry。重复 module id / op id 在那里抛错，同样落到
   `status.error`，并把该模块从注册表移除——不会留下「声明了但没 handler」的半绑定状态。
 
+官方兼容包放在仓库的 `compat/` 下（随发布包一起分发），不是 `examples/`；当前有 `compat/codex-ui-glass`。
+
 ## 5. 样式（styles）
 
 `styles` 可选，是相对扩展目录的 CSS 文件数组（最多 8 个，单个 ≤256 KB，必须是 `.css`，

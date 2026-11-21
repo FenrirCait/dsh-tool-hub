@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.0-alpha.59
+
+- Promote the codex-ui glass pack from `examples/` to the first-party `compat/codex-ui-glass/`
+  directory; it ships in the npm tarball and is documented as an official compat pack.
+- Add `compat/README.md` (official packs, opt-in install) and a pack-level changelog.
+
 ## 1.1.0
 
 A maintenance pass: two bugs of our own, three mechanisms borrowed (with their traps written
