@@ -70,16 +70,17 @@ function settingsSchema(registry: Registry): unknown[] {
 }
 
 /** The tool rows the panel toggles: known names, live deny list, lazy servers. */
-function toolRows(env: HostEnv): Array<{ name: string; enabled: boolean; server: string | null; lazy: boolean }> {
+function toolRows(env: HostEnv): Array<{ name: string; enabled: boolean; server: string | null; lazy: boolean; fixed: boolean }> {
   const tools = env.services.get('tools') as Record<string, unknown> | null | undefined
   const view = typeof tools?.view === 'function' ? (tools.view as (arg: unknown) => unknown)(undefined) : null
   const record = asRecord(view)
   const names = [...new Set([...stringList(record.knownNames), ...stringList(record.restrictableNames)])]
+  const restrictable = new Set(stringList(record.restrictableNames))
   const deny = new Set(env.state.toolDeny)
   const lazy = readLazy(env.state)
   return names.sort().map(name => {
     const server = serverOf(name)
-    return { name, enabled: !deny.has(name), server, lazy: server !== null && lazy.servers.includes(server) }
+    return { name, enabled: !deny.has(name), server, lazy: server !== null && lazy.servers.includes(server), fixed: !restrictable.has(name) }
   })
 }
 
@@ -118,6 +119,7 @@ export async function buildSnapshot(deps: SnapshotDeps): Promise<Record<string, 
       plugin: preset.enabled.plugin,
       skill: preset.enabled.skill,
       tool: preset.enabled.tool,
+      ...(preset.toolPolicy === undefined ? {} : { toolPolicy: preset.toolPolicy }),
     }])),
     tools: toolRows(env),
     sessions: env.state.sessions,

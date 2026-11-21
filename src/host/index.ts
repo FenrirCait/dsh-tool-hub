@@ -11,11 +11,14 @@ import { Dispatcher, Failure, failureOf, historyFile } from './dispatch.js'
 import { writeFileAtomic } from '../core/atomic.js'
 import { HEARTBEAT_INJECTS, runDoctor, writeMountHeartbeat } from './diagnostics.js'
 import { installApi } from './routes.js'
+import { installEntryPoints, type EntryPointCtx } from './entrypoints.js'
 import { PORTABILITY_OPS, portabilityHandlers } from './portability.js'
 import { buildSnapshot } from './snapshot.js'
 import { ExtensionManager, extensionRoots, type ExtensionStatus } from './extensions.js'
-import { attachToolMask, maskControl, surfacePort, type ToolMask } from './tool-mask.js'
-import { applySurface } from '../domains/tool-surface.js'
+import { attachToolMask, knownToolNames, maskControl, surfacePort, type ToolMask } from './tool-mask.js'
+import { applySurface, readOpen } from '../domains/tool-surface.js'
+import { normalizeGroups } from '../domains/groups.js'
+import { createGroupTool } from './group-tool.js'
 
 export const name = 'dsh-tool-hub'
 export const inject = ['webServer'] as const
@@ -110,8 +113,20 @@ export class Runtime {
    */
   private async installMask(): Promise<void> {
     if (this.mask !== null) return
-    const mask = attachToolMask(this.ctx as unknown as { get(name: string): unknown }, this.state.sessions)
+    const mask = attachToolMask(this.ctx as unknown as { get(name: string): unknown }, this.state.sessions, {
+      sessionAllow: this.state.sessionAllow,
+      workspaces: this.state.workspaces,
+      subagentAllow: this.state.subagentAllow,
+      subagentDeny: this.state.subagentDeny,
+    })
     this.mask = mask
+    // The on-demand layer is per agent, so the mask asks for groups/inventory/cache instead of
+    // holding state: a reload (extension toggle, external edit) is seen without a remount.
+    mask.setOnDemandSource({
+      groups: () => normalizeGroups(this.state.groups),
+      known: () => knownToolNames(this.ctx as unknown as { get(name: string): unknown }),
+      cached: sessionId => (sessionId === undefined || sessionId === '' ? [] : readOpen(this.state)[sessionId] ?? []),
+    })
     const provide = (this.ctx as unknown as { provide?: (name: string, value: unknown) => void }).provide
     if (typeof provide !== 'function') {
       logTo(this.ctx)('warn', '[tool-hub] this host has no ctx.provide(); the tool mask cannot be published')
@@ -310,6 +325,15 @@ export function apply(ctx: HubContext): void {
     },
   })
 
+  // G5: /tools and tool_switch, both over session.switch; one adapter unwraps the op result.
+  void ready.then(runtime => {
+    installEntryPoints(ctx as unknown as EntryPointCtx, async (op, payload) => {
+      const outcome = await runtime.run(op, payload) as { ok: boolean; data?: unknown; error?: { message: string } }
+      if (!outcome.ok) throw new Error(outcome.error?.message ?? 'operation failed')
+      return outcome.data
+    })
+  })
+
   // The catalog tool is the model's only door into a lazily hidden server; it follows rebuilds.
   void ready.then(runtime => {
     try {
@@ -323,9 +347,12 @@ export function apply(ctx: HubContext): void {
         try {
           const adapter = { execute: (op: unknown, payload: unknown) => runtime.execute(op, payload) }
           tools.register(createCatalogTool(adapter as never))
+          // Registered next to hub_tools and for the same reason: a reserved name is the model's
+          // only way back into a masked group, so it is registered globally and never masked.
+          tools.register(createGroupTool(adapter as never))
         }
         catch (error) {
-          ctx.logger?.warn('[tool-hub] hub_tools unavailable: ' + String((error as Error)?.message ?? error))
+          ctx.logger?.warn('[tool-hub] catalog tools unavailable: ' + String((error as Error)?.message ?? error))
         }
       }, 'tool-hub: hub_tools')
     }

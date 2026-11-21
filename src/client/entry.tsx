@@ -7,6 +7,7 @@
  */
 import * as React from 'react'
 import { Shell } from './shell.js'
+import { DockButton, DOCK_ORDER, DOCK_SLOT } from './dock.js'
 import type { ShellSurface } from './shell.js'
 import { catalogs, createT, detectLang, type TFunction } from './i18n.js'
 
@@ -64,16 +65,18 @@ const SURFACES: SurfaceSpec[] = [
 export function apply(ctx: SlotContext): void {
   // The shell publishes its layout service; reading it lazily keeps the panel loadable when an
   // older host omits it (the button then does nothing rather than breaking the page).
-  const backToSession = (): void => {
+  const selectPanel = (key: string | null): void => {
     try {
       const get = (ctx as unknown as { get?: (name: string) => unknown }).get
       const layout = typeof get === 'function' ? get.call(ctx, 'layout') as { selectPanel?: (key: string | null) => void } | undefined : undefined
-      if (typeof layout?.selectPanel === 'function') layout.selectPanel(null)
+      if (typeof layout?.selectPanel === 'function') layout.selectPanel(key)
     }
     catch {
       /* no layout service: the panel stays put */
     }
   }
+  const backToSession = (): void => { selectPanel(null) }
+  const openPanel = (): void => { selectPanel(NS) }
   // Register the dictionaries first: the tab and sidebar labels are translated by the shell.
   try {
     ctx.locale?.register?.(NS, catalogs)
@@ -82,6 +85,12 @@ export function apply(ctx: SlotContext): void {
     /* an older shell without locale still gets the fallback labels below */
   }
   const t = typeof ctx.locale?.bind === 'function' ? ctx.locale.bind(NS) : createT(detectLang())
+  // The composer dock opens this panel's sessions view; without a layout service it is inert.
+  ctx.slots.inject(DOCK_SLOT, () => ctx.slots.register(
+    { name: DOCK_SLOT, id: NS, order: DOCK_ORDER, locale: NS, inject: (sessionId: string) => ({ sessionId }) },
+    (props?: { sessionId?: string }) => React.createElement(DockButton, { sessionId: props?.sessionId, onOpen: openPanel }),
+  ))
+
   for (const spec of SURFACES) {
     // The sidebar slot is one list row; only the tab and main area host the full panel.
     const component = (): unknown => spec.surface === 'panel'

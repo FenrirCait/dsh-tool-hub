@@ -13,7 +13,12 @@
  *   4. session lineage: 8 levels including the session itself, cycle-safe, overlay union;
  *   5. groups and presets: 1.x member/package/drawer/snapshot semantics.
  */
-import {
+import { pathToFileURL } from 'node:url'
+import { join } from 'node:path'
+
+// The built host, or a copy when TOOL_HUB_DIST points at one (same override as tool-mask.mjs).
+const distRoot = process.env.TOOL_HUB_DIST ?? join(process.cwd(), 'dist')
+const {
   DomainFailure,
   SURFACE_SOURCES,
   applySurface,
@@ -27,10 +32,10 @@ import {
   serverOf,
   writeLazy,
   toolSurfaceDomain,
-} from '../../dist/domains/tool-surface.js'
-import { readMode, scenesDomain } from '../../dist/domains/scenes.js'
-import { lineageOf, overlayFor, sessionsDomain } from '../../dist/domains/sessions.js'
-import {
+} = await import(pathToFileURL(join(distRoot, 'domains', 'tool-surface.js')).href)
+const { readMode, scenesDomain } = await import(pathToFileURL(join(distRoot, 'domains', 'scenes.js')).href)
+const { lineageOf, overlayFor, sessionsDomain } = await import(pathToFileURL(join(distRoot, 'domains', 'sessions.js')).href)
+const {
   applyCollectionDelete,
   applyGroupSave,
   expandBundles,
@@ -39,8 +44,8 @@ import {
   normalizeCollections,
   normalizeGroups,
   planGroupToggle,
-} from '../../dist/domains/groups.js'
-import { normalizePresets, planPresetApply, presetsDomain, resolvePresetTools } from '../../dist/domains/presets.js'
+} = await import(pathToFileURL(join(distRoot, 'domains', 'groups.js')).href)
+const { normalizePresets, planPresetApply, presetsDomain, resolvePresetTools } = await import(pathToFileURL(join(distRoot, 'domains', 'presets.js')).href)
 import * as engine from '../../lib/scene-engine.js'
 
 let passed = 0
@@ -135,7 +140,6 @@ function surfacePort(known, options) {
         port.lifted += 1
       }
     },
-    onDemandTools: () => (config.onDemand || []).slice(),
   }
   return port
 }
@@ -182,14 +186,14 @@ check('engine: describePlan says the domain is untouched',
 const scenes = scenesDomain()
 const stateA = makeState({ toolDeny: ['mcp__old__z'] })
 const saveEnv = makeEnv({ state: stateA })
-const saved = await scenes.handlers['scene.save']({ name: 'work', tools: { deny: ['mcp__a__x', 'not-mcp'] }, mcp: { off: ['srv'] } }, saveEnv)
-check('scene.save: stores a normalized scene and filters the deny list',
-  saved.scene.name === 'work' && equal(stateA.scenes.work.tools.deny, ['mcp__a__x']) && saved.scenes.includes('work'))
+const saved = await scenes.handlers['scene.save']({ name: 'work', tools: { deny: ['mcp__a__x', 'pwsh', 'run_code'] }, mcp: { off: ['srv'] } }, saveEnv)
+check('scene.save: stores a normalized scene and drops reserved names',
+  saved.scene.name === 'work' && equal(stateA.scenes.work.tools.deny, ['mcp__a__x', 'pwsh']) && saved.scenes.includes('work'))
 
 // ---- 2. apply / exit: intent first, rollback, incomplete --------------------
 
 const rowsA = [{ id: 'row-srv', serverName: 'srv', disabled: false }]
-const knownA = ['mcp__a__x', 'mcp__b__y']
+const knownA = ['mcp__a__x', 'mcp__b__y', 'pwsh']
 const applyEnvState = makeState({ toolDeny: ['mcp__old__z'], scenes: { work: stateA.scenes.work } })
 const applyMcp = mcpPort(rowsA)
 const applySurfacePort = surfacePort(knownA)
@@ -198,7 +202,7 @@ const applied = await scenes.handlers['scene.apply']({ name: 'work' }, applyEnv)
 check('scene.apply: records the intent before changing anything',
   readMode(applyEnvState) !== null && readMode(applyEnvState).name === 'work')
 check('scene.apply: masks tools and switches the server off',
-  equal(applyEnvState.toolDeny, ['mcp__a__x']) && applyMcp.calls.some(call => call.id === 'row-srv' && call.enabled === false))
+  equal(applyEnvState.toolDeny, ['mcp__a__x', 'pwsh']) && applyMcp.calls.some(call => call.id === 'row-srv' && call.enabled === false))
 check('scene.apply: exactly one restrict for the tool domain', applySurfacePort.calls.length === 1)
 check('scene.apply: reports applied targets and no warning',
   applied.applied.includes('tools') && applied.applied.includes('mcp:srv') && applied.warn === null)
@@ -249,7 +253,7 @@ const noMcpState = makeState({ toolDeny: ['mcp__old__z'], scenes: { work: stateA
 const noMcpEnv = makeEnv({ state: noMcpState, services: { 'toolHub.surface': surfacePort(knownA) } })
 const noMcpApplied = await scenes.handlers['scene.apply']({ name: 'work' }, noMcpEnv)
 check('scene.apply: a host without an MCP patch reports the missing servers and still masks tools',
-  noMcpApplied.warn !== null && noMcpApplied.missing.includes('srv') && equal(noMcpState.toolDeny, ['mcp__a__x']))
+  noMcpApplied.warn !== null && noMcpApplied.missing.includes('srv') && equal(noMcpState.toolDeny, ['mcp__a__x', 'pwsh']))
 const exitEnvState = makeState({ toolDeny: ['mcp__old__z'], scenes: { work: stateA.scenes.work } })
 const exitMcp = mcpPort(rowsA)
 const exitEnv = makeEnv({ state: exitEnvState, services: { 'toolHub.mcp': exitMcp, 'toolHub.surface': surfacePort(knownA) } })
@@ -283,28 +287,235 @@ check('scene.exit: the engine clears the intent record after an incomplete resto
 check('scene.exit: incomplete names the server that stayed wrong',
   exitFailure.detail.rollback.incomplete.some(row => row.target === 'mcp:srv'))
 
+// ---- 2b. scene v2: members, preset, delete, lock --------------------------
+
+const v2Scene = engine.normalizeScene({ name: ' env ', plugins: [' a ', 'a', 'b', 7], skills: ['s1'], preset: '  daily ', locked: true })
+check('engine v2: member sections are trimmed, deduplicated and string-only',
+  equal(v2Scene.plugins, ['a', 'b']) && equal(v2Scene.skills, ['s1']) && v2Scene.preset === 'daily' && v2Scene.locked === true && v2Scene.version === 2,
+  JSON.stringify(v2Scene))
+check('engine v2: a non-array member section makes the whole record unusable',
+  engine.normalizeScene({ name: 'x', plugins: 'a' }) === null && engine.normalizeScene({ name: 'x', skills: {} }) === null)
+check('engine v2: a non-string preset is refused, an empty one means no binding',
+  engine.normalizeScene({ name: 'x', preset: 5 }) === null && engine.normalizeScene({ name: 'x', preset: '   ' }).preset === undefined)
+check('engine v2: locked is strict',
+  engine.normalizeScene({ name: 'x', locked: 'true' }).locked === undefined && engine.normalizeScene({ name: 'x', locked: true }).locked === true)
+check('engine v2: an over-long member id is dropped rather than truncated',
+  equal(engine.normalizeScene({ name: 'x', plugins: ['p'.repeat(121), 'ok'] }).plugins, ['ok']))
+check('engine v2: a version 1 record still reads',
+  engine.normalizeScene({ version: 1, name: 'old', tools: { deny: [] } }).tools.deny.length === 0)
+
+const v2Rows = [
+  { kind: 'plugin', id: 'p-on', enabled: true },
+  { kind: 'plugin', id: 'p-off', enabled: false },
+  { kind: 'skill', id: 's-on', enabled: true },
+  { kind: 'bogus', id: 'nope', enabled: true },
+]
+const v2Snapshot = engine.captureSnapshot({ toolDeny: [], sessions: { sub: ['mcp__a__1'] }, mcpRows: [], memberRows: v2Rows, at: 7 })
+check('engine v2: the snapshot captures every member row, not only the ones a scene names',
+  v2Snapshot.plugins['p-on'] === true && v2Snapshot.plugins['p-off'] === false && Object.keys(v2Snapshot.plugins).length === 2
+  && equal(v2Snapshot.skills, { 's-on': true }), JSON.stringify(v2Snapshot))
+check('engine v2: the snapshot keeps session overlays for the report only',
+  equal(v2Snapshot.sessions, { sub: ['mcp__a__1'] }) && !('sessions' in engine.planFromSnapshot(v2Snapshot)))
+const bareSnapshot = engine.captureSnapshot({ toolDeny: [], sessions: {}, mcpRows: [] })
+check('engine v2: a snapshot taken without member rows omits the maps instead of claiming none',
+  !('plugins' in bareSnapshot) && !('skills' in bareSnapshot) && engine.planFromSnapshot(bareSnapshot).plugins.length === 0)
+check('engine v2: no member map means no missing claim for a listed member',
+  !engine.planFromScene(engine.normalizeScene({ name: 'x', plugins: ['ghost'] }), bareSnapshot).missing.includes('plugin:ghost'))
+
+const v2MemberScene = engine.normalizeScene({ name: 'members', plugins: ['p-on', 'ghost'], skills: ['s-on'] })
+const v2MemberPlan = engine.planFromScene(v2MemberScene, v2Snapshot, { memberPlan: { plugin: [{ id: 'p-off', enabled: false }], skill: [] } })
+check('engine v2: an absent member section plans no change',
+  engine.planFromScene(engine.normalizeScene({ name: 'bare' }), v2Snapshot).plugins === null)
+check('engine v2: an empty member section plans a change with no items',
+  equal(engine.planFromScene(engine.normalizeScene({ name: 'clear', plugins: [] }), v2Snapshot).plugins, []))
+check('engine v2: the caller-planned items are the plugin plan', equal(v2MemberPlan.plugins, [{ id: 'p-off', enabled: false }]))
+check('engine v2: a listed member the snapshot does not know is reported missing, the rest still plans',
+  v2MemberPlan.missing.join(',') === 'plugin:ghost', JSON.stringify(v2MemberPlan.missing))
+const v2PresetScene = engine.normalizeScene({ name: 'p', preset: 'daily', plugins: [], tools: { deny: [] } })
+const v2PresetPlan = engine.planFromScene(v2PresetScene, v2Snapshot)
+check('engine v2: the bound preset is reported with the sections that override it',
+  v2PresetPlan.preset === 'daily' && equal(v2PresetPlan.presetOverridden, ['plugins', 'tools']))
+check('engine v2: a scene without a preset reports null and no override',
+  engine.planFromScene(engine.normalizeScene({ name: 'x' }), v2Snapshot).preset === null)
+check('engine v2: describePlan names members, the preset and the overrides',
+  /plugins: 1 off/.test(engine.describePlan(v2MemberPlan)) && /preset: daily/.test(engine.describePlan(v2PresetPlan))
+  && /overridden: plugins, tools/.test(engine.describePlan(v2PresetPlan)), engine.describePlan(v2PresetPlan))
+
+const v2OrderCalls = []
+const v2OrderIo = {
+  writeMode() {},
+  clearMode() {},
+  setTools() { v2OrderCalls.push('tools') },
+  setServer(entry) { v2OrderCalls.push('mcp:' + entry.serverName) },
+  setMember(kind, id) { v2OrderCalls.push(kind + ':' + id) },
+}
+const v2OrderScene = engine.normalizeScene({ name: 'all', plugins: ['p-on'], skills: ['s-on'], tools: { deny: [] }, mcp: { off: ['srv'] } })
+const v2OrderSnapshot = engine.captureSnapshot({ toolDeny: ['mcp__x__1'], sessions: {}, mcpRows: [{ id: 'row-srv', serverName: 'srv', disabled: false }], memberRows: v2Rows })
+const v2OrderRun = await engine.runScene({ scene: v2OrderScene, snapshot: v2OrderSnapshot, io: v2OrderIo, memberPlan: { plugin: [{ id: 'p-off', enabled: false }], skill: [{ id: 's-on', enabled: true }] } })
+check('engine v2: the apply order is plugins, skills, tools, then MCP',
+  equal(v2OrderCalls, ['plugin:p-off', 'skill:s-on', 'tools', 'mcp:srv']), JSON.stringify(v2OrderCalls))
+check('engine v2: the applied report uses the same order', equal(v2OrderRun.applied, v2OrderCalls))
+
+const v2RestoreCalls = []
+const v2RestoreIo = {
+  setTools() { v2RestoreCalls.push('tools') },
+  setServer(entry) { v2RestoreCalls.push('mcp:' + entry.serverName) },
+  setMember(kind, id, enabled) {
+    v2RestoreCalls.push(kind + ':' + id + ':' + String(enabled))
+    return id === 'gone' ? { skipped: true } : undefined
+  },
+}
+const v2RestoreSnapshot = engine.captureSnapshot({ toolDeny: [], sessions: { s1: ['mcp__a__1'] }, mcpRows: [{ id: 'row-srv', serverName: 'srv', disabled: true }], memberRows: [{ kind: 'skill', id: 's-on', enabled: true }, { kind: 'plugin', id: 'gone', enabled: true }, { kind: 'plugin', id: 'p-off', enabled: false }] })
+const v2RestoreReport = await engine.restoreSnapshot(v2RestoreSnapshot, v2RestoreIo)
+check('engine v2: the restore order is plugins, skills, tools, then MCP',
+  equal(v2RestoreCalls, ['plugin:gone:true', 'plugin:p-off:false', 'skill:s-on:true', 'tools', 'mcp:srv']), JSON.stringify(v2RestoreCalls))
+check('engine v2: a vanished row is reported as skipped, not as a failure',
+  v2RestoreReport.ok === true && v2RestoreReport.restored.includes('plugin:gone (skipped)'), JSON.stringify(v2RestoreReport))
+check('engine v2: a restore never asks for a session write', !v2RestoreCalls.some(target => target.startsWith('session')))
+
+const dailyPreset = { name: 'daily', enabled: { plugin: ['p1'], skill: [], tool: [] }, toolDeny: [], note: '', createdAt: 0 }
+const v2RowsLive = [
+  { kind: 'plugin', id: 'p1', enabled: true, manageable: true, moduleName: 'p1' },
+  { kind: 'plugin', id: 'p2', enabled: true, manageable: true, moduleName: 'p2' },
+  { kind: 'skill', id: 's1', enabled: true },
+]
+
+const saveLockState = makeState({ scenes: { work: { name: 'work', plugins: ['p1'], locked: true } } })
+const saveLockEnv = makeEnv({ state: saveLockState })
+const savedIgnoring = await scenes.handlers['scene.save']({ name: 'work', plugins: ['p2'], locked: false }, saveLockEnv)
+check('scene.save: a lock survives a save and the field is reported ignored',
+  equal(savedIgnoring.ignored, ['locked']) && saveLockState.scenes.work.locked === true && equal(savedIgnoring.scene.plugins, ['p2']))
+const freshState = makeState()
+const freshSaved = await scenes.handlers['scene.save']({ name: 'fresh', plugins: [], preset: 'daily' }, makeEnv({ state: freshState }))
+check('scene.save: member sections and a preset round-trip',
+  equal(freshSaved.scene.plugins, []) && freshSaved.scene.preset === 'daily' && freshState.scenes.fresh.preset === 'daily')
+
+const v2PlanState = makeState({ scenes: { work: { name: 'work', preset: 'daily', plugins: ['p1'], tools: { deny: [] } } }, presets: [dailyPreset] })
+const v2PlanEnv = makeEnv({ state: v2PlanState, services: { 'toolHub.members': memberPort(v2RowsLive) } })
+const v2PlanReply = await scenes.handlers['scene.plan']({ name: 'work' }, v2PlanEnv)
+check('scene.plan: reports the bound preset and the sections that override it',
+  v2PlanReply.preset === 'daily' && equal(v2PlanReply.presetOverridden, ['plugins', 'tools']))
+check('scene.plan: the description carries the preset', /preset: daily/.test(v2PlanReply.description), v2PlanReply.description)
+check('scene.plan: the member plan turns the unlisted plugin off',
+  v2PlanReply.plan.plugins.some(item => item.id === 'p2' && item.enabled === false), JSON.stringify(v2PlanReply.plan.plugins))
+
+const v2ApplyState = makeState({ scenes: { work: { name: 'work', plugins: ['p1'], preset: 'daily' } }, presets: [dailyPreset] })
+const v2ApplyMembers = memberPort(v2RowsLive)
+const v2ApplyEnv = makeEnv({ state: v2ApplyState, services: { 'toolHub.members': v2ApplyMembers, 'toolHub.surface': surfacePort(['mcp__a__1']) } })
+const v2Applied = await scenes.handlers['scene.apply']({ name: 'work' }, v2ApplyEnv)
+check('scene.apply: the bound preset runs first and reports what it did',
+  v2Applied.preset !== null && v2Applied.preset.name === 'daily' && v2Applied.preset.ok === true, JSON.stringify(v2Applied.preset))
+check('scene.apply: member rows are switched after the preset',
+  v2ApplyMembers.enabledCalls.some(call => call.id === 'p2' && call.enabled === false)
+  && v2Applied.applied.includes('plugin:p2'), JSON.stringify(v2Applied.applied))
+check('scene.apply: the intent record carries the member rows for the exit',
+  Object.keys(readMode(v2ApplyState).snapshot.plugins).length === 2)
+
+const v2ExitMembers = memberPort(v2RowsLive)
+const v2ExitEnv = makeEnv({ state: v2ApplyState, services: { 'toolHub.members': v2ExitMembers, 'toolHub.surface': surfacePort(['mcp__a__1']) } })
+const v2Exited = await scenes.handlers['scene.exit']({}, v2ExitEnv)
+check('scene.exit: restores every member row and says sessions are not part of a scene',
+  v2Exited.note === 'session overlays are not part of a scene'
+  && v2ExitMembers.enabledCalls.some(call => call.id === 'p2' && call.enabled === true)
+  && readMode(v2ApplyState) === null, JSON.stringify(v2ExitMembers.enabledCalls))
+
+const vanishState = makeState({ scenes: { work: { name: 'work', skills: [] } } })
+const vanishApplyPort = memberPort([
+  { kind: 'plugin', id: 'p1', enabled: true, manageable: true, moduleName: 'p1' },
+  { kind: 'skill', id: 's1', enabled: true },
+])
+const vanishApplyEnv = makeEnv({ state: vanishState, services: { 'toolHub.members': vanishApplyPort, 'toolHub.surface': surfacePort([]) } })
+await scenes.handlers['scene.apply']({ name: 'work' }, vanishApplyEnv)
+const vanishExitEnv = makeEnv({
+  state: vanishState,
+  services: {
+    'toolHub.members': {
+      rows: () => [{ kind: 'plugin', id: 'p1', enabled: true, manageable: true, moduleName: 'p1' }],
+      setEnabled(kind, id) {
+        if (kind === 'skill' && id === 's1') return { ok: false, code: 'unknown-skill', message: 'no skill folder answers to s1' }
+        return { ok: true }
+      },
+    },
+    'toolHub.surface': surfacePort([]),
+  },
+})
+const vanishExited = await scenes.handlers['scene.exit']({}, vanishExitEnv)
+check('scene.exit: a member row that vanished while the scene was active is skipped, not a failure',
+  vanishExited.ok === true && vanishExited.targets.includes('skill:s1 (skipped)'), JSON.stringify(vanishExited.targets))
+
+const missingPresetState = makeState({ scenes: { work: { name: 'work', preset: 'gone' } } })
+const missingPresetEnv = makeEnv({ state: missingPresetState, services: { 'toolHub.members': memberPort([]), 'toolHub.surface': surfacePort([]) } })
+const missingPresetApplied = await scenes.handlers['scene.apply']({ name: 'work' }, missingPresetEnv)
+check('scene.apply: a preset that no longer exists is reported and the scene still applies',
+  missingPresetApplied.ok === true && missingPresetApplied.missing.includes('preset:gone') && missingPresetApplied.preset.missing === true,
+  JSON.stringify(missingPresetApplied.missing))
+
+const deleteState = makeState({ scenes: { work: { name: 'work' }, other: { name: 'other' } }, mode: { name: 'work', snapshot: { at: 1, toolDeny: [], sessions: {}, mcp: {} } } })
+const deleteEnv = makeEnv({ state: deleteState })
+await expectFailure('scene.delete: the applied scene cannot be deleted',
+  () => Promise.resolve().then(() => scenes.handlers['scene.delete']({ name: 'work' }, deleteEnv)), 'scene-active')
+const deletedScene = await scenes.handlers['scene.delete']({ name: 'other' }, deleteEnv)
+check('scene.delete: removes the archive, keeps the mode record and saves',
+  deletedScene.deleted === 'other' && deleteState.scenes.other === undefined && deleteState.mode.name === 'work' && deleteEnv.saves.includes('scene-delete'))
+await expectFailure('scene.delete: an unknown name is refused',
+  () => Promise.resolve().then(() => scenes.handlers['scene.delete']({ name: 'ghost' }, deleteEnv)), 'unknown-scene')
+
+const lockState = makeState({ scenes: { work: { name: 'work', version: 2, plugins: [] }, other: { name: 'other' } } })
+const lockEnv = makeEnv({ state: lockState })
+const lockedReply = await scenes.handlers['scene.lock']({ name: 'work', locked: true }, lockEnv)
+check('scene.lock: sets the flag, reports the locked set and saves',
+  lockedReply.locked === true && equal(lockedReply.lockedScenes, ['work']) && lockState.scenes.work.locked === true && lockEnv.saves.includes('scene-lock'))
+check('scene.lock: leaves the rest of the archive alone', equal(lockState.scenes.work.plugins, []) && lockState.scenes.work.version === 2)
+const unlockedReply = await scenes.handlers['scene.lock']({ name: 'work', locked: false }, lockEnv)
+check('scene.lock: unlock removes the flag',
+  unlockedReply.locked === false && lockState.scenes.work.locked === undefined && equal(unlockedReply.lockedScenes, []))
+await expectFailure('scene.lock: a non-boolean is refused',
+  () => Promise.resolve().then(() => scenes.handlers['scene.lock']({ name: 'work', locked: 'yes' }, lockEnv)), 'bad-payload')
+await expectFailure('scene.lock: an unknown scene is refused',
+  () => Promise.resolve().then(() => scenes.handlers['scene.lock']({ name: 'ghost', locked: true }, lockEnv)), 'unknown-scene')
+
+const modeV2 = readMode(makeState({ mode: { version: 2, name: 'work', at: 9, snapshot: { at: 9, toolDeny: [], sessions: {}, mcp: {}, plugins: { p1: true, p2: false }, skills: { s1: true } } } }))
+check('readMode: member maps survive the round trip',
+  modeV2.snapshot.plugins['p1'] === true && modeV2.snapshot.plugins['p2'] === false && equal(modeV2.snapshot.skills, { s1: true }))
+check('readMode: a version 1 record without member maps keeps them absent',
+  readMode(makeState({ mode: { version: 1, name: 'old', at: 1, snapshot: { at: 1, toolDeny: [], sessions: {}, mcp: {} } } })).snapshot.plugins === undefined)
+
+const brokenMembers = { rows() { throw new Error('catalog exploded') }, setEnabled() { return { ok: true } } }
+const degradedState = makeState({ scenes: { work: { name: 'work', plugins: ['p1'], tools: { deny: [] } } } })
+const degradedPlan = await scenes.handlers['scene.plan']({ name: 'work' }, makeEnv({ state: degradedState, services: { 'toolHub.members': brokenMembers } }))
+check('scene.plan: an unreadable member catalog is reported, not called "missing"',
+  degradedPlan.degraded !== null && /catalog exploded/.test(degradedPlan.degraded) && degradedPlan.missing.length === 0, JSON.stringify(degradedPlan))
+const degradedApplyState = makeState({ scenes: { work: { name: 'work', plugins: ['p1'], tools: { deny: [] } } } })
+const degradedApply = await scenes.handlers['scene.apply']({ name: 'work' }, makeEnv({ state: degradedApplyState, services: { 'toolHub.members': brokenMembers, 'toolHub.surface': surfacePort(['mcp__a__1']) } }))
+check('scene.apply: a degraded member catalog is carried in the warning and the snapshot omits the maps',
+  /member catalog unavailable/.test(String(degradedApply.warn)) && readMode(degradedApplyState).snapshot.plugins === undefined, JSON.stringify(degradedApply.warn))
+
 // ---- 3. four sources, order, idempotent single restrict --------------------
 
 const merged = mergeSurface({
   install: ['mcp__a__1'],
-  session: ['mcp__s__2', 'mcp__a__1', 'plain-name'],
+  session: ['mcp__s__2', 'mcp__a__1'],
   lazy: ['mcp__l__3'],
-  onDemand: ['mcp__o__4', 'mcp__a__1'],
+  onDemand: ['mcp__o__4', 'mcp__a__1', 'pwsh'],
 })
 check('surface: the merge order is install, session, lazy, onDemand',
   equal(SURFACE_SOURCES, ['install', 'session', 'lazy', 'onDemand']))
 check('surface: every source contributes its own names',
-  equal(merged.deny, ['mcp__a__1', 'mcp__l__3', 'mcp__o__4', 'mcp__s__2'])
+  equal(merged.deny, ['mcp__a__1', 'mcp__l__3', 'mcp__o__4', 'mcp__s__2', 'pwsh'])
   && merged.counts.install === 1 && merged.counts.session === 1
-  && merged.counts.lazy === 1 && merged.counts.onDemand === 1)
+  && merged.counts.lazy === 1 && merged.counts.onDemand === 2)
 check('surface: a name denied twice belongs to the earliest source',
-  merged.attributed.install.includes('mcp__a__1') && equal(merged.attributed.onDemand, ['mcp__o__4']))
-check('surface: non-MCP names never enter the mask', !merged.deny.includes('plain-name'))
+  merged.attributed.install.includes('mcp__a__1') && equal(merged.attributed.onDemand, ['mcp__o__4', 'pwsh']))
+check('surface: a built-in tool name enters the mask like any other', merged.deny.includes('pwsh'))
+check('surface: a reserved name is reported, never applied', (() => {
+  const withReserved = mergeSurface({ install: ['run_code'] })
+  return equal(withReserved.deny, []) && equal(withReserved.reserved, ['run_code'])
+})())
 check('surface: describe names the same order',
-  describeSurface(merged) === 'deny: 4 (install 1 · session 1 · lazy 1 · onDemand 1)')
-const knownFiltered = mergeSurface({ install: ['mcp__a__1'], onDemand: ['mcp__o__4'], known: ['mcp__a__1'] })
+  describeSurface(merged) === 'deny: 5 (install 1 · session 1 · lazy 1 · onDemand 2)')
+const knownFiltered = mergeSurface({ install: ['mcp__a__1', 'pwsh'], onDemand: ['mcp__o__4'], known: ['mcp__a__1'] })
 check('surface: names the host cannot restrict are reported, not applied',
-  equal(knownFiltered.deny, ['mcp__a__1']) && equal(knownFiltered.unreachable, ['mcp__o__4']))
+  equal(knownFiltered.deny, ['mcp__a__1']) && equal(knownFiltered.unreachable, ['mcp__o__4', 'pwsh']))
 const plan = planSurface(['mcp__a__1'], mergeSurface({ install: ['mcp__a__1', 'mcp__s__2'] }))
 check('surface: the plan separates add from unchanged',
   equal(plan.add, ['mcp__s__2']) && equal(plan.unchanged, ['mcp__a__1']) && plan.changed === true)
@@ -374,9 +585,9 @@ check('lineage: overlays union nearest-first without duplicates',
 
 const sessions = sessionsDomain()
 const sessionEnv = makeEnv({ state: makeState(), services: { 'toolHub.surface': surfacePort([]) } })
-await sessions.handlers['session.set']({ sessionId: ' s1 ', names: ['mcp__a__1', 'plain', 'mcp__a__1'] }, sessionEnv)
-check('session.set: keeps only MCP names, deduplicated',
-  equal(sessionEnv.state.sessions.s1, ['mcp__a__1']))
+await sessions.handlers['session.set']({ sessionId: ' s1 ', names: ['mcp__a__1', 'pwsh', 'run_code', 'mcp__a__1'] }, sessionEnv)
+check('session.set: keeps any maskable name, deduplicated, reserved names dropped',
+  equal(sessionEnv.state.sessions.s1, ['mcp__a__1', 'pwsh']))
 await sessions.handlers['session.set']({ sessionId: 's1', names: [] }, sessionEnv)
 check('session.set: an empty list removes the entry', !('s1' in sessionEnv.state.sessions))
 await sessions.handlers['session.set']({ sessionId: 's1', names: ['mcp__a__1'] }, sessionEnv)
@@ -535,10 +746,99 @@ check('modules: 1.x op ids kept', ['scene.save', 'scene.apply', 'scene.exit', 't
   'group.reorder', 'group.move', 'group.clean', 'group.add', 'group.remove', 'collection.save',
   'collection.delete', 'preset.save', 'preset.update', 'preset.delete', 'preset.apply']
   .every(opId => allOpIds.includes(opId)))
+check('modules: 2.x scene ops are declared', ['scene.delete', 'scene.lock'].every(opId => allOpIds.includes(opId)))
 
 // ---- report ---------------------------------------------------------------
 
 console.log('')
+// ---- 7. preset tool policy (G11a) -----------------------------------------
+
+const { policyIssues, projectPolicy } = await import(pathToFileURL(join(distRoot, 'domains', 'preset-policy.js')).href)
+
+check('preset.policy: a saved policy reads back identically',
+  await (async () => {
+    const state = makeState({ presets: [{ name: 'p', enabled: { plugin: [], skill: [], tool: [] }, note: '', createdAt: 1 }] })
+    const env = makeEnv({ state, services: { 'toolHub.members': memberPort([]), 'toolHub.surface': surfacePort(['mcp__a__1', 'mcp__b__1']) } })
+    await presetsDomain().handlers['preset.policy']({
+      name: 'p',
+      toolPolicy: { disabled: ['mcp__b__1'], groups: [{ name: 'g', patterns: ['mcp__a__1'] }] },
+    }, env)
+    const read = await presetsDomain().handlers['preset.policy']({ name: 'p' }, makeEnv({ state, services: {} }))
+    return equal(read.toolPolicy, { disabled: ['mcp__b__1'], groups: [{ name: 'g', patterns: ['mcp__a__1'] }] })
+      && env.saves.length === 1 && env.saves[0] === 'preset-policy'
+  })())
+const policyEnvState = makeState({
+  presets: [{ name: 'p2', enabled: { plugin: [], skill: [], tool: [] }, note: '', createdAt: 1, updatedAt: 77 }],
+})
+const policyEnv = makeEnv({ state: policyEnvState, services: { 'toolHub.members': memberPort([]), 'toolHub.surface': surfacePort(['mcp__a__1']) } })
+await expectFailure('preset.policy: an empty group name is refused',
+  () => presetsDomain().handlers['preset.policy']({ name: 'p2', toolPolicy: { disabled: [], groups: [{ name: ' ', patterns: ['mcp__a__1'] }] } }, policyEnv), 'empty-group')
+await expectFailure('preset.policy: a group without patterns is refused',
+  () => presetsDomain().handlers['preset.policy']({ name: 'p2', toolPolicy: { disabled: [], groups: [{ name: 'g', patterns: [] }] } }, policyEnv), 'empty-group')
+await expectFailure('preset.policy: a stale expect.updatedAt is refused',
+  () => presetsDomain().handlers['preset.policy']({ name: 'p2', toolPolicy: { disabled: [], groups: [] }, expect: { updatedAt: 76 } }, policyEnv), 'stale-preset')
+check('preset.policy: a refused save changes nothing',
+  policyEnv.saves.length === 0 && policyEnvState.presets[0].toolPolicy === undefined)
+
+const copySourceState = makeState({
+  presets: [
+    { name: 'src', enabled: { plugin: [], skill: [], tool: ['mcp__a__1'] }, note: '', createdAt: 1,
+      toolPolicy: { disabled: ['mcp__a__1', 'mcp__gone__1'], groups: [{ name: 'a', patterns: ['mcp__a__*'] }, { name: 'gone', patterns: ['mcp__gone__*'] }] } },
+    { name: 'dst', enabled: { plugin: [], skill: [], tool: [] }, note: '', createdAt: 2 },
+  ],
+})
+const copySourceEnv = makeEnv({ state: copySourceState, services: { 'toolHub.members': memberPort([]), 'toolHub.surface': surfacePort(['mcp__a__1']) } })
+const projected = await presetsDomain().handlers['preset.copy']({ from: 'src', to: ['dst'], what: 'policy' }, copySourceEnv)
+check('preset.copy: the projection shrinks to the target catalog and names the dropped group',
+  projected.copied.length === 1 && projected.copied[0].disabled === 1 && projected.copied[0].groups === 1
+  && equal(projected.copied[0].skippedGroups, ['gone'])
+  && equal(copySourceState.presets[1].toolPolicy.groups.map(group => group.name), ['a']))
+check('preset.copy: the copy is backed up once',
+  equal(copySourceEnv.saves, ['preset-copy']))
+check('preset.copy whole: a missing target is created from the source',
+  await (async () => {
+    const state = makeState({ presets: [{ name: 'src', enabled: { plugin: ['p1'], skill: [], tool: [] }, toolDeny: ['mcp__a__1'], note: 'n', createdAt: 1 }] })
+    const env = makeEnv({ state, services: { 'toolHub.members': memberPort([]), 'toolHub.surface': surfacePort([]) } })
+    await presetsDomain().handlers['preset.copy']({ from: 'src', to: ['fresh'], what: 'whole' }, env)
+    const fresh = state.presets.find(preset => preset.name === 'fresh')
+    return fresh !== undefined && equal(fresh.enabled.plugin, ['p1']) && equal(fresh.toolDeny, ['mcp__a__1']) && fresh.note === 'n'
+  })())
+
+const resetPolicyState = makeState({
+  presets: [{ name: 'r', enabled: { plugin: ['p1'], skill: [], tool: [] }, toolDeny: ['mcp__a__1'], note: '', createdAt: 1,
+    toolPolicy: { disabled: ['mcp__a__1'], groups: [{ name: 'g', patterns: ['mcp__a__1'] }] } }],
+})
+const resetPolicyEnv = makeEnv({ state: resetPolicyState, services: { 'toolHub.members': memberPort([]), 'toolHub.surface': surfacePort([]) } })
+await presetsDomain().handlers['preset.policyReset']({ name: 'r' }, resetPolicyEnv)
+check('preset.policyReset: clears the policy and leaves plugins, skills and the deny list alone',
+  equal(resetPolicyState.presets[0].toolPolicy, { disabled: [], groups: [] })
+  && equal(resetPolicyState.presets[0].enabled.plugin, ['p1'])
+  && equal(resetPolicyState.presets[0].toolDeny, ['mcp__a__1'])
+  && equal(resetPolicyEnv.saves, ['preset-policy-reset']))
+
+const policyApplyState = makeState({
+  toolDeny: ['mcp__b__1'],
+  presets: [{ name: 'mask', enabled: { plugin: [], skill: [], tool: ['mcp__a__1'] }, toolDeny: ['mcp__a__1'], note: '', createdAt: 1,
+    toolPolicy: { disabled: ['mcp__a__1'], groups: [{ name: 'g', patterns: ['mcp__a__1'] }] } }],
+})
+const policyApplyEnv = makeEnv({ state: policyApplyState, services: { 'toolHub.members': memberPort([]), 'toolHub.surface': surfacePort(['mcp__a__1', 'mcp__b__1']) } })
+const policyApplied = await presetsDomain().handlers['preset.apply']({ name: 'mask', mode: 'exact' }, policyApplyEnv)
+check('preset.apply: a policy wins over the recorded deny list and says so',
+  equal(policyApplyState.toolDeny, ['mcp__a__1']) && policyApplied.tools.source === 'policy')
+check('preset.apply: the receipt counts the policy',
+  equal(policyApplied.tools.policy, { disabled: 1, groups: 1 }))
+check('preset.apply: the derived enabled.tool view follows the policy',
+  equal(policyApplyState.presets[0].enabled.tool, ['mcp__b__1']))
+check('preset.apply: groups are recorded but not part of the deny list yet',
+  equal(resolvePresetTools({ toolPolicy: { disabled: [], groups: [{ name: 'g', patterns: ['mcp__a__1'] }] }, enabled: { plugin: [], skill: [], tool: [] } }, 'exact', [], []),
+    { kind: 'deny', source: 'policy', deny: [] }))
+check('preset policy: the diagnostics and projection agree on group ownership',
+  policyIssues({ disabled: [], groups: [{ name: 'a', patterns: ['mcp__*'] }, { name: 'b', patterns: ['mcp__a__1'] }] }, ['mcp__a__1']).duplicateMembers.length === 1
+  && projectPolicy({ disabled: [], groups: [{ name: 'a', patterns: ['mcp__*'] }, { name: 'b', patterns: ['mcp__a__1'] }] }, ['mcp__a__1']).skippedGroups.length === 1)
+check('preset policy: normalizePresets keeps a policy and never invents one',
+  normalizePresets([{ name: 'k', enabled: {}, toolPolicy: { disabled: ['mcp__a__1'], groups: [] } }])[0].toolPolicy !== undefined
+  && normalizePresets([{ name: 'k', enabled: {} }])[0].toolPolicy === undefined)
+
 console.log('domain-workflows probe: ' + passed + ' passed, ' + failed + ' failed')
 if (failed > 0) {
   console.log('failed: ' + failures.join('; '))

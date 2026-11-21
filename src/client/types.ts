@@ -71,6 +71,10 @@ export interface GroupRow {
   id: string
   name: string
   members: GroupMember[]
+  /** On-demand groups keep their tools out of the model until opened for a session. */
+  onDemand?: boolean
+  /** Explicit tool names this group owns for on-demand masking. */
+  tools?: string[]
   collection?: string | null
   enabled?: boolean
   /** Members listed in the group whose row no longer exists. */
@@ -82,6 +86,8 @@ export interface PresetRow {
   plugin?: string[]
   skill?: string[]
   tool?: string[]
+  /** Present when the preset carries its own tool policy (G11). */
+  toolPolicy?: { disabled: string[]; groups: Array<{ name: string; description: string; patterns: string[] }> }
 }
 
 export interface PatchBlockInfo {
@@ -173,6 +179,8 @@ export interface ToolRow {
   enabled: boolean
   server?: string | null
   lazy?: boolean
+  /** Agent-scope registrations cannot be restricted; the panel shows them as fixed. */
+  fixed?: boolean
 }
 
 /** The normalised snapshot: arrays are always present, so a view can map without a guard. */

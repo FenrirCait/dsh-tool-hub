@@ -1,10 +1,11 @@
 /**
  * Op dispatch: the one door between the HTTP routes and the domain handlers.
  *
- * Three facts live here instead of in every handler: whether an op exists (the registry is the
+ * Four facts live here instead of in every handler: whether an op exists (the registry is the
  * table), whether it carries an unconditional confirmation gate (`confirm` on its definition),
- * and one audit line per call in `history.jsonl`. A handler therefore only sees a payload and the
- * `HostEnv`; no domain can forget the gate or the audit trail.
+ * whether a locked scene freezes it (`domains/scene-lock`), and one audit line per call in
+ * `history.jsonl`. A handler therefore only sees a payload and the `HostEnv`; no domain can
+ * forget the gate, the lock or the audit trail.
  *
  * History is advisory by design: a failed append must never fail the op it was recording.
  */
@@ -16,6 +17,7 @@ import type { Registry } from '../core/registry.js'
 import type { StateV2 } from '../core/state.js'
 import type { DomainRegistration, HostEnv, OpHandler } from '../shared/contract.js'
 import type { OpDefinition } from '../shared/types.js'
+import { frozenRejection } from '../domains/scene-lock.js'
 
 // ── failures ─────────────────────────────────────────────────────────────────
 
@@ -262,6 +264,11 @@ export class Dispatcher {
     const definition = this.registry.findOp(id)
     if (definition === undefined) throw new Failure('bad-op', `unknown op ${id}`)
     assertConfirmed(definition, id, payload)
+    // One judgement point for the HTTP route, the model-side tool call and the CLI: a locked
+    // scene refuses the ops that would change the environment it describes. The scene engine
+    // itself writes state and ports directly, so a locked scene can still be applied and exited.
+    const frozen = frozenRejection(this.state, id, payload)
+    if (frozen !== null) throw new Failure('scene-locked', frozen)
     const handler = this.handlers.get(id)
     if (handler === undefined) throw new Failure('no-handler', `op ${id} is declared but no handler is bound`)
     return await handler(payload, this.env)

@@ -221,7 +221,7 @@ check('no-todo', () => {
 })
 
 check('imports', () => {
-  const allowed = new Set(['react', '../api.js', '../components.js', '../types.js'])
+  const allowed = new Set(['react', '../api.js', '../components.js', '../types.js', './scope-card.js', './on-demand-card.js'])
   for (const match of body.matchAll(/from '([^']+)'/g)) {
     assert(allowed.has(match[1]), "unexpected import '" + match[1] + "'")
   }
@@ -243,8 +243,8 @@ check('file-length', () => {
 check('tool-row-fields', () => {
   const stripped = body.replace(/'[^']*'/g, "''")
   const fields = new Set([...stripped.matchAll(/\btool\.([A-Za-z]+)/g)].map(match => match[1]))
-  for (const field of fields) assert(['name', 'enabled', 'server', 'lazy'].includes(field), 'ToolRow has no field ' + field)
-  for (const field of ['name', 'enabled', 'server', 'lazy']) assert(fields.has(field), 'the view never reads tool.' + field)
+  for (const field of fields) assert(['name', 'enabled', 'server', 'lazy', 'fixed'].includes(field), 'ToolRow has no field ' + field)
+  for (const field of ['name', 'enabled', 'server', 'lazy', 'fixed']) assert(fields.has(field), 'the view never reads tool.' + field)
   const entries = new Set([...stripped.matchAll(/\bentry\.([A-Za-z]+)/g)].map(match => match[1]))
   for (const field of entries) assert(['server', 'tools', 'lazy'].includes(field), 'ServerEntry has no field ' + field)
   return [...fields].sort().join(', ') + ' / entry ' + [...entries].sort().join(', ')

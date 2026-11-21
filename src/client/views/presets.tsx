@@ -18,6 +18,7 @@
  */
 import * as React from 'react'
 import { Badge, Button, Callout, Card, Dialog, Empty, Field, SearchBox, Select } from '../components.js'
+import { PresetPolicyDialog } from './presets-policy.js'
 import type { PresetRow, RunOutcome, ViewProps } from '../types.js'
 
 /** The ops this view sends; api.ts's OPS table covers toggles, scenes and doctor only. */
@@ -46,6 +47,16 @@ function useLocalId(prefix: string): string {
     return `${prefix}-${seq}`
   })
   return id
+}
+
+/** The policy counts a row carries once the snapshot projects them; null while it does not. */
+function policyOf(row: PresetRow): { disabled: number, groups: number } | null {
+  const raw = (row as unknown as { toolPolicy?: { disabled?: unknown, groups?: unknown } }).toolPolicy
+  if (typeof raw !== 'object' || raw === null) return null
+  return {
+    disabled: Array.isArray(raw.disabled) ? raw.disabled.length : 0,
+    groups: Array.isArray(raw.groups) ? raw.groups.length : 0,
+  }
 }
 
 /** How many ids a preset would switch, for the row badge. */
@@ -118,6 +129,8 @@ export function PresetsView(props: ViewProps): React.ReactElement {
   const [pending, setPending] = React.useState<Pending | null>(null)
   // True once an apply deferred its tool dimension and the one retry was spent.
   const [deferred, setDeferred] = React.useState(false)
+  // The preset whose tool policy dialog is open; null while it is closed.
+  const [policyFor, setPolicyFor] = React.useState<string | null>(null)
   const modeId = useLocalId('th-presets-mode')
   const nameId = useLocalId('th-presets-name')
 
@@ -215,12 +228,16 @@ export function PresetsView(props: ViewProps): React.ReactElement {
           <div className="th-list">
             {rows.map(name => {
               const row = snapshot.presets[name] ?? {}
+              const policy = policyOf(row)
               return (
                 <div className="th-row" key={name}>
                   <div className="th-row-body">
                     <span className="th-row-name">{name}</span>
                     <span className="th-row-meta">
                       <Badge>{t('presets.entries', { n: entries(row) })}</Badge>
+                      {policy === null ? null : (
+                        <Badge tone="brand">{t('presets.policyBadge', { k: policy.disabled, m: policy.groups })}</Badge>
+                      )}
                       <span className="th-mono">{composition(row, lang)}</span>
                     </span>
                   </div>
@@ -233,6 +250,15 @@ export function PresetsView(props: ViewProps): React.ReactElement {
                     }}
                   >
                     {t('presets.apply')}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    label={t('presets.policy') + ': ' + name}
+                    onClick={() => {
+                      setPolicyFor(name)
+                    }}
+                  >
+                    {t('presets.policy')}
                   </Button>
                   <Button
                     variant="ghost"
@@ -347,6 +373,17 @@ export function PresetsView(props: ViewProps): React.ReactElement {
           </div>
         )}
       </Dialog>
+
+      <PresetPolicyDialog
+        open={policyFor !== null}
+        name={policyFor ?? ''}
+        t={t}
+        targets={Object.fromEntries(names.map(entry => [entry, snapshot.presets[entry]?.tool ?? []]))}
+        runDetailed={runDetailed}
+        onClose={() => {
+          setPolicyFor(null)
+        }}
+      />
     </div>
   )
 }

@@ -12,8 +12,11 @@ import type { SettingsField } from '../shared/types.js'
 export const OPS = {
   toggle: 'toggle',
   bulk: 'bulk',
+  sceneSave: 'scene.save',
   sceneApply: 'scene.apply',
   sceneExit: 'scene.exit',
+  sceneDelete: 'scene.delete',
+  sceneLock: 'scene.lock',
   doctor: 'doctor',
 } as const
 
@@ -217,6 +220,8 @@ function groupOf(row: Record<string, unknown>): GroupRow | null {
     id,
     name: asString(row.name, id),
     members,
+    onDemand: asBoolean(row.onDemand),
+    tools: asStringList(row.tools),
     collection: asStringOrNull(row.collection),
     enabled: asBoolean(row.enabled),
     stale: typeof row.stale === 'number' ? row.stale : 0,
@@ -314,7 +319,7 @@ function collectionOf(row: Record<string, unknown>): CollectionRow | null {
 function toolOf(row: Record<string, unknown>): ToolRow | null {
   const name = asString(row.name)
   if (name === '') return null
-  return { name, enabled: asBoolean(row.enabled), server: asStringOrNull(row.server), lazy: asBoolean(row.lazy) }
+  return { name, enabled: asBoolean(row.enabled), server: asStringOrNull(row.server), lazy: asBoolean(row.lazy), fixed: asBoolean(row.fixed) }
 }
 
 function rootOf(row: Record<string, unknown>): SkillRootInfo | null {
@@ -334,7 +339,18 @@ function presetsOf(value: unknown): Record<string, PresetRow> {
   for (const [name, entry] of Object.entries(asRecord(value))) {
     if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) continue
     const row = entry as Record<string, unknown>
-    out[name] = { plugin: asStringList(row.plugin), skill: asStringList(row.skill), tool: asStringList(row.tool) }
+    const rawPolicy = asRecord(row.toolPolicy)
+    const policy = Array.isArray(rawPolicy.groups) || Array.isArray(rawPolicy.disabled)
+      ? {
+          disabled: asStringList(rawPolicy.disabled),
+          groups: (Array.isArray(rawPolicy.groups) ? rawPolicy.groups : []).map(group => asRecord(group)).filter(group => asString(group.name) !== '').map(group => ({
+            name: asString(group.name),
+            description: asString(group.description),
+            patterns: asStringList(group.patterns),
+          })),
+        }
+      : undefined
+    out[name] = { plugin: asStringList(row.plugin), skill: asStringList(row.skill), tool: asStringList(row.tool), ...(policy === undefined ? {} : { toolPolicy: policy }) }
   }
   return out
 }

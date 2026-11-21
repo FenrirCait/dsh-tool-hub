@@ -13,15 +13,25 @@
  *      appliedAt, saves once, and an empty plan is safe;
  *   5. a degraded catalog: preview degrades with a reason, apply refuses and writes nothing.
  */
-import {
+import { pathToFileURL } from 'node:url'
+import { join } from 'node:path'
+
+// The built host, or a copy when TOOL_HUB_DIST points at one (same override as tool-mask.mjs).
+const distRoot = process.env.TOOL_HUB_DIST ?? join(process.cwd(), 'dist')
+const {
   AUTO_ROLE_NAMES,
   AUTO_ROWS_SERVICE,
   applyAutoPlan,
+  applyGroupOnDemand,
+  applyGroupSave,
+  applyGroupTools,
   autoRoleFor,
   buildAutoPlan,
+  cleanMembers,
   groupsDomain,
-} from '../../dist/domains/groups.js'
-import { DomainFailure } from '../../dist/domains/tool-surface.js'
+  normalizeGroups,
+} = await import(pathToFileURL(join(distRoot, 'domains', 'groups.js')).href)
+const { DomainFailure } = await import(pathToFileURL(join(distRoot, 'domains', 'tool-surface.js')).href)
 
 let passed = 0
 let failed = 0
@@ -269,6 +279,51 @@ check('auto: applyAutoPlan keeps hand-made groups and derives its own counts',
 const writtenEmpty = applyAutoPlan(manual, [], 1720000000000)
 check('auto: applyAutoPlan with no plan returns the hand-made list untouched',
   writtenEmpty.groups.length === 1 && writtenEmpty.created.length === 0 && writtenEmpty.members === 0)
+
+// ---- 7. on-demand tool members (G10) --------------------------------------
+
+const toolCtx = { known: new Set(), rows: [], collections: [{ id: 'default', name: 'd', order: 0 }], now: 1720000000000 }
+check('g10: normalizeGroups keeps an explicit tool list, reserved names stripped',
+  (() => {
+    const loaded = normalizeGroups([{ id: 'g1', name: 'Ops', members: [], onDemand: true, tools: ['t1', 'run_code', 't1'] }])
+    return loaded.length === 1 && equal(loaded[0].tools, ['t1']) && loaded[0].onDemand === true
+  })())
+check('g10: normalizeGroups accepts a tool member and refuses a reserved one',
+  (() => {
+    const loaded = normalizeGroups([{ id: 'g1', name: 'Ops', members: [{ kind: 'tool', id: ' pwsh ' }, { kind: 'tool', id: 'tool_list' }] }])
+    return equal(loaded[0].members, [{ kind: 'tool', id: 'pwsh' }])
+  })())
+check('g10: a generated bucket that appears twice unions its tools',
+  (() => {
+    const loaded = normalizeGroups([
+      { id: 'a1-x', name: 'MCP 服务器', role: 'mcp', auto: true, members: [{ kind: 'plugin', id: 'p' }], tools: ['t1'] },
+      { id: 'a2-y', name: 'MCP 服务器', role: 'mcp', auto: true, members: [], tools: ['t2', 't1'] },
+    ])
+    return loaded.length === 1 && equal(loaded[0].tools, ['t1', 't2'])
+  })())
+check('g10: group.save keeps tools when the payload omits them',
+  (() => {
+    const first = applyGroupSave([], { name: 'G', members: [], tools: ['t1', 'run_code'] }, toolCtx)
+    const second = applyGroupSave(first.groups, { id: first.group.id, name: 'G2', members: [] }, toolCtx)
+    return equal(first.group.tools, ['t1']) && equal(second.group.tools, ['t1'])
+  })())
+check('g10: applyGroupTools filters to the live view and applyGroupOnDemand flips the flag',
+  (() => {
+    const base = normalizeGroups([{ id: 'g1', name: 'Ops', members: [], onDemand: true, tools: [] }])
+    const written = applyGroupTools(base, 'g1', ['t1', 't2', 'run_code'], ['t1'])
+    const flipped = applyGroupOnDemand(written.groups, 'g1', false)
+    return equal(written.tools, ['t1']) && equal(written.group.tools, ['t1']) && flipped.group.onDemand === false
+  })())
+check('g10: cleanMembers resolves tool members against the tool inventory only',
+  (() => {
+    const kept = cleanMembers([{ kind: 'tool', id: 't1' }, { kind: 'tool', id: 't2' }], new Set(), new Set(['t1']))
+    return equal(kept, [{ kind: 'tool', id: 't1' }])
+  })())
+check('g10: group.onDemand and group.tools are declared write+audit and bound',
+  (() => {
+    const ids = ['group.onDemand', 'group.tools']
+    return ids.every(id => ops.get(id)?.write === true && ops.get(id)?.audit === true && typeof domain.handlers[id] === 'function')
+  })())
 
 // ---- report ---------------------------------------------------------------
 

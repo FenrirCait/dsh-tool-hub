@@ -5,7 +5,13 @@
  * Built dist is imported so the probe exercises the same code the host registers; the
  * dispatcher is a recorder, so every branch is checked without a live host.
  */
-import { createCatalogTool } from '../../dist/host/catalog-tool.js'
+import { pathToFileURL } from 'node:url'
+import { join } from 'node:path'
+
+// The built host, or a copy when TOOL_HUB_DIST points at one (same override as tool-mask.mjs).
+const distRoot = process.env.TOOL_HUB_DIST ?? join(process.cwd(), 'dist')
+const { createCatalogTool } = await import(pathToFileURL(join(distRoot, 'host', 'catalog-tool.js')).href)
+const { createGroupTool } = await import(pathToFileURL(join(distRoot, 'host', 'group-tool.js')).href)
 
 let checks = 0
 const failures = []
@@ -74,6 +80,32 @@ check('missing-target-throws', /needs a server or names/.test(missing), missing)
 let bad = ''
 try { await tool.execute({ action: 'nope' }) } catch (error) { bad = String(error.message) }
 check('bad-action-throws', /list, enable or disable/.test(bad), bad)
+
+// ---- tool_list: the door into an on-demand group (G10) --------------------
+
+const groupCalls = []
+const groupTool = createGroupTool({
+  async execute(op, payload) {
+    groupCalls.push({ op, payload })
+    if (payload.group === 'Nope') throw Object.assign(new Error('no group named "Nope"'), { code: 'unknown-group' })
+    return { group: payload.group, tools: ['mcp__alpha__one'], opened: true }
+  },
+})
+check('tool_list-definition', groupTool.name === 'tool_list' && groupTool.parameters.group.required === true
+  && /on-demand/.test(groupTool.description), groupTool.name)
+const opened = await groupTool.execute({ group: 'Ops' }, { agent: { session: { id: 's1' } } })
+check('tool_list-open', groupCalls.length === 1 && groupCalls[0].op === 'session.open'
+  && groupCalls[0].payload.sessionId === 's1' && groupCalls[0].payload.group === 'Ops', JSON.stringify(groupCalls[0]))
+check('tool_list-render', JSON.stringify(groupTool.output.render({}, opened)) === JSON.stringify([{ type: 'text', text: JSON.stringify(opened) }]))
+let unknown = ''
+try { await groupTool.execute({ group: 'Nope' }, { agent: { session: { id: 's1' } } }) } catch (error) { unknown = String(error.message) }
+check('tool_list-unknown', /no group named "Nope"/.test(unknown), unknown)
+let noAgent = ''
+try { await groupTool.execute({ group: 'Ops' }, { agent: {} }) } catch (error) { noAgent = String(error.message) }
+check('tool_list-no-agent', /needs an agent session/.test(noAgent), noAgent)
+let noGroup = ''
+try { await groupTool.execute({}, { agent: { session: { id: 's1' } } }) } catch (error) { noGroup = String(error.message) }
+check('tool_list-no-group', /needs a group name/.test(noGroup), noGroup)
 
 if (failures.length > 0) {
   console.error('tool-catalog probe: ' + failures.length + ' failed of ' + checks)

@@ -14,6 +14,8 @@ import * as React from 'react'
 import { runOp } from '../api.js'
 import { Badge, Button, Callout, Card, Dialog, Empty, SearchBox, Switch, Toolbar } from '../components.js'
 import type { ToolRow, ViewProps } from '../types.js'
+import { ScopeCard } from './scope-card.js'
+import { OnDemandCard } from './on-demand-card.js'
 
 /** Op ids this view sends; the tool-surface domain owns their payloads. */
 const SAVE = 'tool.save'
@@ -21,6 +23,10 @@ const PLAN = 'tool.plan'
 const LAZY_SET = 'lazy.set'
 const LAZY_LOAD = 'lazy.load'
 const LAZY_UNLOAD = 'lazy.unload'
+
+function copyLabel(lang: 'zh' | 'en', zh: string, en: string): string {
+  return lang === 'zh' ? zh : en
+}
 
 /** The merge sources in the order tool-surface reports them. */
 const SOURCES = ['install', 'session', 'lazy', 'onDemand'] as const
@@ -288,6 +294,7 @@ export function ToolsView(props: ViewProps): React.ReactElement {
                           {hidden ? t('tools.masked') : t('tools.visible')}
                         </Badge>
                         {tool.lazy === true ? <Badge tone="off">{t('tools.lazy')}</Badge> : null}
+                        {tool.fixed === true ? <Badge tone="warn">{copyLabel(lang, '固定', 'fixed')}</Badge> : null}
                         {showCosts && costs[tool.name] !== undefined ? <Badge tone="neutral">{'~' + String(costs[tool.name]) + ' tok'}</Badge> : null}
                       </span>
                     </div>
@@ -372,6 +379,10 @@ export function ToolsView(props: ViewProps): React.ReactElement {
       >
         {pending === null ? '' : pending.body}
       </Dialog>
+
+      <OnDemandCard {...props} />
+
+      <ScopeCard {...props} />
     </div>
   )
 }

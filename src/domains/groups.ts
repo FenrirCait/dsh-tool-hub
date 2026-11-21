@@ -18,7 +18,8 @@
  */
 import type { DomainRegistration, HostEnv, OpHandler } from '../shared/contract.js'
 import type { StateV2 } from '../core/state.js'
-import { asRecord, asStringList, errorText, fail, failureOf, type ToggleOutcome } from './tool-surface.js'
+import { asRecord, asStringList, errorText, fail, failureOf, resolveSurfacePort, type ToggleOutcome } from './tool-surface.js'
+import { maskable, toolNames, RESERVED_TOOLS } from '../core/tool-names.js'
 import { readFile } from 'node:fs/promises'
 import { writeFileAtomic } from '../core/atomic.js'
 import { listBundles, listPluginRows, toggleOne, invalidatePluginCache } from './plugins.js'
@@ -27,10 +28,11 @@ import { patchPathFor } from './mcp.js'
 import { insertOutsideBlocks } from '../core/patch-blocks.js'
 import { removeRow, setRowDisabled } from '../../lib/patch-rows.js'
 
-export type MemberKind = 'plugin' | 'skill'
+export type MemberKind = 'plugin' | 'skill' | 'tool'
 
 export interface Member {
   kind: MemberKind
+  /** Plugin id, skill id, or tool name when the kind is 'tool'. */
   id: string
 }
 
@@ -47,6 +49,12 @@ export interface GroupRecord {
   createdAt: number
   /** 2.0: members stay out of the model until this group is switched on. */
   onDemand: boolean
+  /**
+   * Tool names this group owns for on-demand masking, resolved against the live view. Explicit
+   * data: the host tool definition carries no owner, so a plugin member cannot be mapped onto the
+   * tools it registers. A 'tool' member is the same fact in member form; both are honoured.
+   */
+  tools?: string[]
 }
 
 export interface CollectionRecord {
@@ -178,9 +186,13 @@ export function cleanTags(value: unknown): string[] {
 
 export function normalizeMember(value: unknown): Member | null {
   const raw = asRecord(value)
-  const kind: MemberKind | null = raw.kind === 'skill' ? 'skill' : raw.kind === 'plugin' ? 'plugin' : null
-  const id = typeof raw.id === 'string' ? raw.id.trim() : ''
-  return kind === null || id === '' ? null : { kind, id }
+  const kind: MemberKind | null = raw.kind === 'skill'
+    ? 'skill'
+    : raw.kind === 'plugin' ? 'plugin' : raw.kind === 'tool' ? 'tool' : null
+  if (kind === null) return null
+  const id = kind === 'tool' ? toolNames([raw.id])[0] ?? '' : typeof raw.id === 'string' ? raw.id.trim() : ''
+  if (id === '' || (kind === 'tool' && RESERVED_TOOLS.has(id))) return null
+  return { kind, id }
 }
 
 export function memberKey(member: Member): string {
@@ -235,6 +247,7 @@ export function normalizeGroups(value: unknown): GroupRecord[] {
       auto: raw.auto === true,
       createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : Date.now(),
       onDemand: raw.onDemand === true,
+      tools: maskable(asStringList(raw.tools)),
     })
   }
   const byKey = new Map<string, GroupRecord>()
@@ -260,6 +273,8 @@ export function normalizeGroups(value: unknown): GroupRecord[] {
     }
     kept.tags = cleanTags([...kept.tags, ...group.tags])
     kept.onDemand = kept.onDemand || group.onDemand
+    // A generated bucket that appears twice keeps every tool either copy named.
+    kept.tools = maskable([...(kept.tools ?? []), ...(group.tools ?? [])])
   }
   return merged
 }
@@ -272,15 +287,24 @@ export function knownKeys(rows: readonly CatalogRow[]): Set<string> {
   return keys
 }
 
-/** Keep members that resolve to a live row, deduplicated; unknown members never enter a group. */
-export function cleanMembers(value: unknown, known: ReadonlySet<string>): Member[] {
+/**
+ * Keep members that resolve to a live row, deduplicated; unknown members never enter a group.
+ * Tool members resolve against `knownTools` when the caller has the live view; without it they
+ * are kept (a group saved before the tools page loaded must not lose them).
+ */
+export function cleanMembers(value: unknown, known: ReadonlySet<string>, knownTools?: ReadonlySet<string>): Member[] {
   const out: Member[] = []
   const seen = new Set<string>()
   for (const candidate of Array.isArray(value) ? value : []) {
     const member = normalizeMember(candidate)
     if (member === null) continue
     const key = memberKey(member)
-    if (seen.has(key) || !known.has(key)) continue
+    // A tool member resolves against the tool inventory, not against the plugin/skill rows.
+    if (member.kind === 'tool') {
+      if (knownTools !== undefined && !knownTools.has(member.id)) continue
+    }
+    else if (!known.has(key)) continue
+    if (seen.has(key)) continue
     seen.add(key)
     out.push(member)
   }
@@ -350,6 +374,7 @@ export function applyGroupSave(groups: readonly GroupRecord[], payload: Record<s
   const id = typeof payload.id === 'string' ? payload.id : ''
   const existing = findGroup(groups, id)
   const onDemand = payload.onDemand === undefined ? (existing?.onDemand ?? false) : payload.onDemand === true
+  const tools = payload.tools === undefined ? maskable(existing?.tools ?? []) : cleanToolNames(payload.tools)
   if (existing !== undefined) {
     const next: GroupRecord = {
       ...existing,
@@ -360,6 +385,7 @@ export function applyGroupSave(groups: readonly GroupRecord[], payload: Record<s
       tags: payload.tags === undefined ? existing.tags : cleanTags(payload.tags),
       auto: false,
       onDemand,
+      tools,
     }
     return { groups: replace(groups, next), group: next }
   }
@@ -373,6 +399,7 @@ export function applyGroupSave(groups: readonly GroupRecord[], payload: Record<s
     auto: false,
     createdAt: ctx.now,
     onDemand,
+    tools,
   }
   return { groups: [...groups, created], group: created }
 }
@@ -462,7 +489,10 @@ export function planGroupToggle(
 ): TogglePlan {
   const group = findGroup(groups, id)
   if (group === undefined) throw fail('no-group', 'that group no longer exists')
-  let members = expandBundles(group.members, rows)
+  // Tool members are masking data, not switchable rows: a bulk switch must never hand them to
+  // the member port, which only knows plugins and skills.
+  const switchable = group.members.filter(member => member.kind !== 'tool')
+  let members = expandBundles(switchable, rows)
   if (skipShared) {
     const elsewhere = new Set<string>()
     for (const other of groups) {
@@ -471,16 +501,17 @@ export function planGroupToggle(
     }
     members = members.filter(member => !elsewhere.has(memberKey(member)))
   }
-  return { group, members, skippedShared: expandBundles(group.members, rows).length - members.length }
+  return { group, members, skippedShared: expandBundles(switchable, rows).length - members.length }
 }
 
-/** Ids of members that on-demand groups keep masked until the group is switched on. */
+/** Ids of switchable members that on-demand groups keep masked until the group is switched on. */
 export function onDemandMembers(groups: readonly GroupRecord[]): Member[] {
   const out: Member[] = []
   const seen = new Set<string>()
   for (const group of groups) {
     if (!group.onDemand) continue
     for (const member of group.members) {
+      if (member.kind === 'tool') continue
       const key = memberKey(member)
       if (seen.has(key)) continue
       seen.add(key)
@@ -488,6 +519,97 @@ export function onDemandMembers(groups: readonly GroupRecord[]): Member[] {
     }
   }
   return out
+}
+
+// -- on-demand tool names ----------------------------------------------------
+
+/** One trimmed, deduplicated, reserved-free list from whatever a caller passed. */
+function cleanToolNames(value: unknown): string[] {
+  return maskable(toolNames(value))
+}
+
+/** Every tool name one group owns, in `tools` or as a 'tool' member. */
+export function groupToolNames(group: GroupRecord): string[] {
+  const names: string[] = [...(group.tools ?? [])]
+  for (const member of group.members) if (member.kind === 'tool') names.push(member.id)
+  return maskable(names.filter(name => !RESERVED_TOOLS.has(name)))
+}
+
+/**
+ * Tool names on-demand groups own, resolved against the live view. `known` is the host's tool
+ * inventory; without it every stored name is reported (the panel still lists them), while
+ * {@link onDemandDeny} stays empty because a mask may only name tools the host can restrict.
+ */
+export function onDemandToolNames(groups: readonly GroupRecord[], known?: readonly string[] | null): string[] {
+  const allowed = known === undefined || known === null ? null : new Set(known)
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const group of groups) {
+    for (const name of groupToolNames(group)) {
+      if (seen.has(name) || (allowed !== null && !allowed.has(name))) continue
+      seen.add(name)
+      out.push(name)
+    }
+  }
+  return out
+}
+
+/**
+ * Names the mask must deny for one agent: the tools of every on-demand group that is not open.
+ *
+ * Group names compare case-insensitively (the reference implementation lowercases both sides).
+ * A tool shared by an open group and a closed one stays hidden: the closed group has not been
+ * switched on, so it still owns its tools.
+ */
+export function onDemandDeny(
+  groups: readonly GroupRecord[],
+  known: readonly string[],
+  open: ReadonlySet<string>,
+): string[] {
+  const allowed = new Set(known)
+  const opened = new Set<string>()
+  for (const name of open) opened.add(name.trim().toLowerCase())
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const group of groups) {
+    if (group.onDemand !== true) continue
+    if (opened.has(group.name.trim().toLowerCase())) continue
+    for (const name of groupToolNames(group)) {
+      if (seen.has(name) || !allowed.has(name) || RESERVED_TOOLS.has(name)) continue
+      seen.add(name)
+      out.push(name)
+    }
+  }
+  return out
+}
+
+export interface GroupToolsResult {
+  groups: GroupRecord[]
+  group: GroupRecord
+  tools: string[]
+}
+
+/** Replace the explicit tool list of one group; names are filtered to the live view. */
+export function applyGroupTools(
+  groups: readonly GroupRecord[],
+  id: unknown,
+  tools: unknown,
+  known?: readonly string[] | null,
+): GroupToolsResult {
+  const group = findGroup(groups, id)
+  if (group === undefined) throw fail('no-group', 'that group no longer exists')
+  const allowed = known === undefined || known === null ? null : new Set(known)
+  const next = cleanToolNames(tools).filter(name => allowed === null || allowed.has(name))
+  group.tools = next
+  return { groups: replace(groups, group), group, tools: next }
+}
+
+/** Flip the on-demand flag of one group without touching its members. */
+export function applyGroupOnDemand(groups: readonly GroupRecord[], id: unknown, onDemand: unknown): { groups: GroupRecord[]; group: GroupRecord } {
+  const group = findGroup(groups, id)
+  if (group === undefined) throw fail('no-group', 'that group no longer exists')
+  group.onDemand = onDemand === true
+  return { groups: replace(groups, group), group }
 }
 
 // -- auto groups (rule-based taxonomy) ---------------------------------------
@@ -768,6 +890,34 @@ const groupSave: OpHandler = async (payload, env) => {
   return { group: result.group, groups: groupList(result.groups), backup, degraded: catalog.degraded }
 }
 
+/** Refresh the per-agent masks after the tool names of an on-demand group changed. */
+function refreshMasks(env: HostEnv): void {
+  const mask = env.services.get('toolHub.mask') as { sync?: () => void } | undefined
+  mask?.sync?.()
+}
+
+const groupOnDemand: OpHandler = async (payload, env) => {
+  const body = asRecord(payload)
+  const groups = normalizeGroups(env.state.groups)
+  const result = applyGroupOnDemand(groups, body.id, body.onDemand)
+  saveGroups(env, result.groups)
+  const backup = await env.save('group-on-demand')
+  refreshMasks(env)
+  return { group: result.group, groups: groupList(result.groups), backup }
+}
+
+const groupTools: OpHandler = async (payload, env) => {
+  const body = asRecord(payload)
+  if (!Array.isArray(body.tools)) throw fail('bad-payload', 'tools must be an array of tool names')
+  const known = resolveSurfacePort(env.services)?.known() ?? null
+  const groups = normalizeGroups(env.state.groups)
+  const result = applyGroupTools(groups, body.id, body.tools, known)
+  saveGroups(env, result.groups)
+  const backup = await env.save('group-tools')
+  refreshMasks(env)
+  return { group: result.group, tools: result.tools, groups: groupList(result.groups), backup }
+}
+
 const groupDelete: OpHandler = async (payload, env) => {
   const groups = normalizeGroups(env.state.groups)
   const next = applyGroupDelete(groups, asRecord(payload).id)
@@ -1043,6 +1193,8 @@ export function groupsDomain(): DomainRegistration {
       title: { zh: '分组', en: 'Groups' },
       ops: [
         { id: 'group.save', write: true, audit: true, note: 'Creates or updates a group; members are filtered to live rows and expanded to whole packages.' },
+        { id: 'group.onDemand', write: true, audit: true, note: 'Flips the on-demand flag of one group and refreshes the per-agent masks.' },
+        { id: 'group.tools', write: true, audit: true, note: 'Replaces the explicit tool list of one on-demand group, filtered to the live view and free of reserved names.' },
         { id: 'group.delete', write: true, audit: true, note: 'Removes a group from state.json.' },
         { id: 'group.toggle', write: true, audit: true, note: 'Switches the plugins and skills of a group through the host, honouring skipShared.' },
         { id: 'group.batch', write: true, audit: true, note: 'Switches a whole group in one patch write and one loader reload; the panel uses this.' },
@@ -1059,6 +1211,8 @@ export function groupsDomain(): DomainRegistration {
     },
     handlers: {
       'group.save': groupSave,
+      'group.onDemand': groupOnDemand,
+      'group.tools': groupTools,
       'group.delete': groupDelete,
       'group.toggle': groupToggle,
       'group.batch': groupBatch,

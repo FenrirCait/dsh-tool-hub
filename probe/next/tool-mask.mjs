@@ -69,13 +69,18 @@ function makeHost({ known = ['mcp__a__x', 'mcp__a__y'], viewThrows = false } = {
       }
     },
   }
-  function addAgent(id, { session = id, parent = undefined } = {}) {
+  function addAgent(id, { session = id, parent = undefined, workspace = undefined, depth = undefined, origin = undefined } = {}) {
     const disposers = []
+    const header = {}
+    if (parent !== undefined) header.parentSessionId = parent
+    if (workspace !== undefined) header.cwd = workspace
+    if (depth !== undefined) header.delegationDepth = depth
+    if (origin !== undefined) header.origin = origin
     const agent = {
       id,
       session: {
         id: session,
-        header: parent === undefined ? undefined : { parentSessionId: parent },
+        header: Object.keys(header).length === 0 ? undefined : header,
       },
       ctx: {
         plugin(plugin) {
@@ -228,6 +233,46 @@ check('surface port: restrict installs a layer and returns its lift', () => {
   equal(mask.info().deny, [])
   assert(host.undo() >= 1, 'host undo called')
 })
+check('workspace: a workspace deny applies only to agents in that workspace', () => {
+  const host = makeHost()
+  host.addAgent('work', { workspace: 'C:/repo/a' })
+  host.addAgent('other', { workspace: 'C:/repo/b' })
+  const mask = attachToolMask(host.ctx, {})
+  mask.setWorkspaceDeny('C:/repo/a', ['mcp__a__x'])
+  equal(mask.denyFor(host.agents[0]), ['mcp__a__x'])
+  equal(mask.denyFor(host.agents[1]), [])
+})
+check('session allow: subtracts a deny inherited from the parent', () => {
+  const host = makeHost()
+  host.addAgent('parent', { session: 's1' })
+  const mask = attachToolMask(host.ctx, { s1: ['mcp__a__x'] })
+  mask.setSessionAllow('s1', ['mcp__a__x'])
+  equal(mask.denyFor(host.agents[0]), [])
+})
+check('subagent policy: applies only to a subagent (origin/delegationDepth)', () => {
+  const host = makeHost()
+  host.addAgent('root', { session: 's1' })
+  const mask = attachToolMask(host.ctx, {})
+  mask.setSubagentPolicy(['mcp__a__y'], [])
+  equal(mask.denyFor(host.agents[0]), [])
+  host.addAgent('child', { session: 's2', parent: 's1', depth: 1 })
+  equal(mask.denyFor(host.agents[1]), ['mcp__a__y'])
+})
+check('subagent policy: a fork that keeps the parent link is not a subagent', () => {
+  const host = makeHost()
+  host.addAgent('root', { session: 's1' })
+  const mask = attachToolMask(host.ctx, {})
+  mask.setSubagentPolicy(['mcp__a__y'], [])
+  host.addAgent('fork', { session: 's2', parent: 's1' })
+  equal(mask.denyFor(host.agents[1]), [])
+})
+check('subagent policy: origin=subagent is enough without a parent header', () => {
+  const host = makeHost()
+  host.addAgent('sub', { session: 's9', origin: 'subagent' })
+  const mask = attachToolMask(host.ctx, {})
+  mask.setSubagentPolicy(['mcp__a__y'], [])
+  equal(mask.denyFor(host.agents[0]), ['mcp__a__y'])
+})
 check('agent disposed: its id is forgotten, a recreated id mounts again', () => {
   const host = makeHost()
   const first = host.addAgent('a1')
@@ -266,6 +311,32 @@ check('prompt: the scope registers the assembly waterfall', () => {
   host.addAgent('a1')
   attachToolMask(host.ctx, {}).addLayer(['mcp__a__x'])
   assert(host.scopeHandlers.has('system-prompt/assemble'), 'no handler')
+})
+
+// ---- G10: any model-callable name is maskable, reserved names never are ----
+
+check('name universe: addLayer takes a built-in tool and drops reserved names', () => {
+  const host = makeHost({ known: ['pwsh', 'run_code', 'tool_list', 'hub_tools', 'tool_switch', 'mcp__a__x'] })
+  host.addAgent('a1')
+  const mask = attachToolMask(host.ctx, {})
+  mask.addLayer(['pwsh', 'run_code', 'tool_list', 'hub_tools', 'tool_switch'])
+  equal(mask.info().deny, ['pwsh'])
+  equal(host.restrictCalls.at(-1), ['pwsh'])
+})
+check('name universe: setSessionDeny takes a built-in tool and drops reserved names', () => {
+  const host = makeHost({ known: ['pwsh', 'run_code', 'mcp__a__x'] })
+  host.addAgent('a1', { session: 's1' })
+  const mask = attachToolMask(host.ctx, {})
+  mask.setSessionDeny('s1', ['pwsh', 'run_code', 'tool_list'])
+  equal(mask.denyFor(host.agents[0]), ['pwsh'])
+  equal(host.restrictCalls.at(-1), ['pwsh'])
+})
+check('name universe: hydrate keeps a non-MCP name from state.json', () => {
+  const host = makeHost({ known: ['pwsh', 'mcp__a__x'] })
+  const mask = attachToolMask(host.ctx, { s1: ['pwsh', 'run_code'] })
+  host.addAgent('a1', { session: 's1' })
+  mask.addLayer(['mcp__a__x'])
+  equal(host.restrictCalls.at(-1), ['mcp__a__x', 'pwsh'])
 })
 
 console.log('\ntool-mask probe: ' + pass + ' PASS / ' + fail + ' FAIL')

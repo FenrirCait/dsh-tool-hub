@@ -26,6 +26,7 @@
 import type { DomainRegistration, HostEnv, OpHandler } from '../shared/contract.js'
 import type { StateV2 } from '../core/state.js'
 import { DEFAULT_COLLECTION } from '../core/state.js'
+import { maskable } from '../core/tool-names.js'
 import {
   cleanRole,
   cleanTags,
@@ -187,6 +188,7 @@ function toGroup(entry: unknown, fallbackId: string, now: number): GroupRecord {
     auto: entry.auto === true,
     createdAt: finiteNumber(entry.createdAt, now),
     onDemand: entry.onDemand === true,
+    tools: maskable(Array.isArray(entry.tools) ? entry.tools : []),
   }
 }
 

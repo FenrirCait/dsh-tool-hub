@@ -35,7 +35,15 @@ export interface StateV2 {
   presets: unknown[]
   toolDeny: string[]
   auto: StateAuto
+  /** Per-session deny overlays (nearest-first, inherited by descendants). */
   sessions: Record<string, string[]>
+  /** Per-session allow overlays: subtracted after every deny layer. */
+  sessionAllow: Record<string, string[]>
+  /** Per-workspace deny overrides, keyed by the normalized workspace root path. */
+  workspaces: Record<string, string[]>
+  /** Exceptions applied only to sessions the host marks as subagents. */
+  subagentAllow: string[]
+  subagentDeny: string[]
   scenes: Record<string, unknown>
   mode: unknown | null
   settings: Record<string, unknown>
@@ -57,6 +65,10 @@ export function emptyState(): StateV2 {
     toolDeny: [],
     auto: { appliedAt: null },
     sessions: {},
+    sessionAllow: {},
+    workspaces: {},
+    subagentAllow: [],
+    subagentDeny: [],
     scenes: {},
     mode: null,
     settings: {},
@@ -76,6 +88,10 @@ const KNOWN_KEYS = new Set([
   'toolDeny',
   'auto',
   'sessions',
+  'sessionAllow',
+  'workspaces',
+  'subagentAllow',
+  'subagentDeny',
   'scenes',
   'mode',
   'settings',
@@ -173,6 +189,10 @@ export function migrate(raw: unknown): StateV2 {
     const toolDeny = stringList(raw.toolDeny)
     const auto = normalizeAuto(raw.auto)
     const sessions = sessionMap(raw.sessions)
+    const sessionAllow = sessionMap(raw.sessionAllow)
+    const workspaces = sessionMap(raw.workspaces)
+    const subagentAllow = stringList(raw.subagentAllow)
+    const subagentDeny = stringList(raw.subagentDeny)
     const scenes = sceneMap(raw.scenes)
     const settings = recordMap(raw.settings)
     const modules = recordMap(raw.modules)
@@ -191,6 +211,10 @@ export function migrate(raw: unknown): StateV2 {
     if (toolDeny !== null) out.toolDeny = toolDeny
     if (auto !== null) out.auto = auto
     if (sessions !== null) out.sessions = sessions
+    if (sessionAllow !== null) out.sessionAllow = sessionAllow
+    if (workspaces !== null) out.workspaces = workspaces
+    if (subagentAllow !== null) out.subagentAllow = subagentAllow
+    if (subagentDeny !== null) out.subagentDeny = subagentDeny
     if (scenes !== null) out.scenes = scenes
     if ('mode' in raw) out.mode = isRecord(raw.mode) ? raw.mode : null
     if (settings !== null) out.settings = settings
