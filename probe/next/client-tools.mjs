@@ -180,10 +180,13 @@ const FIXTURE = [
   { name: 'task_get', enabled: false },
   { name: 'todo_write', enabled: true },
   { name: 'info', enabled: true },
+  { name: 'util_cache', enabled: true },
+  { name: 'util_read', enabled: true },
+  { name: 'util_write', enabled: false },
 ]
 
 const FIXTURE_JSON = JSON.stringify(FIXTURE)
-const LABELS = { 'tree.builtin': 'Built-in tools' }
+const LABELS = { 'tree.builtin': 'Built-in tools', 'tree.builtinOther': 'Other built-in' }
 const t = (key, vars) => {
   const base = LABELS[key] === undefined ? key : LABELS[key]
   return vars === undefined ? base : base + ' ' + String(vars.name)
@@ -299,10 +302,10 @@ check('tree-groups-by-server', () => {
 check('tree-groups-by-prefix', () => {
   const tree = build('')
   const prefixes = tree.groups.filter(group => group.kind === 'prefix')
-  assert(prefixes.map(group => group.key).join(' ') === 'prefix:task prefix:todo prefix:~', 'prefix groups, fallback last: ' + prefixes.map(group => group.key).join(' '))
-  assert(namesOf(prefixes[0]) === 'task_list,task_get', 'task must hold both task tools')
-  assert(prefixes[2].label === 'Built-in tools', 'the fallback bucket uses t(tree.builtin)')
-  assert(namesOf(prefixes[2]) === 'info', 'a name without a separator lands in the fallback bucket')
+  assert(prefixes.map(group => group.key).join(' ') === 'prefix:util prefix:other', 'only clusters of 3+ keep a prefix group: ' + prefixes.map(group => group.key).join(' '))
+  assert(namesOf(prefixes[0]) === 'util_cache,util_read,util_write', 'util keeps its three tools')
+  assert(prefixes[1].label === 'Other built-in', 'the small buckets merge into the other label')
+  assert(namesOf(prefixes[1]) === 'task_list,task_get,todo_write,info', 'pairs, singletons and the fallback merge: ' + namesOf(prefixes[1]))
   assert(tree.groups[0].kind === 'mcp' && tree.groups[tree.groups.length - 1].kind === 'prefix', 'servers come first, prefixes after')
   return prefixes.map(group => group.key + '(' + group.rows.length + ')').join(' ')
 })
@@ -327,8 +330,8 @@ check('tree-parent-label-match', () => {
   assert(byServerLabel.groups.length === 1, 'the server label keeps one parent')
   assert(namesOf(byServerLabel.groups[0]) === 'browser_navigate,browser_click,browser_snapshot', 'no tool name contains the server name, yet every child stays: ' + namesOf(byServerLabel.groups[0]))
   const byFallbackLabel = build('built-in')
-  assert(byFallbackLabel.groups.length === 1 && byFallbackLabel.groups[0].key === 'prefix:~', 'a fallback label match keeps its bucket')
-  assert(namesOf(byFallbackLabel.groups[0]) === 'info', 'the fallback bucket keeps children whose names never match')
+  assert(byFallbackLabel.groups.length === 1 && byFallbackLabel.groups[0].key === 'prefix:other', 'the other label keeps its bucket')
+  assert(namesOf(byFallbackLabel.groups[0]) === 'task_list,task_get,todo_write,info', 'the other bucket keeps children whose names never match')
   return 'server label 3/3, fallback label 1/1'
 })
 
@@ -348,7 +351,7 @@ check('tree-no-mutation', () => {
 
 check('tree-deny-arithmetic', () => {
   const api = requireTree()
-  assert(api.denyOf(FIXTURE).join(',') === 'browser_click,task_get', 'denyOf must read !enabled: ' + api.denyOf(FIXTURE).join(','))
+  assert(api.denyOf(FIXTURE).join(',') === 'browser_click,task_get,util_write', 'denyOf must read !enabled: ' + api.denyOf(FIXTURE).join(','))
   assert(api.nextDeny([], ['b', 'a'], false).join(',') === 'a,b', 'disable adds and sorts: ' + api.nextDeny([], ['b', 'a'], false).join(','))
   assert(api.nextDeny(['a', 'b', 'c'], ['b'], true).join(',') === 'a,c', 'enable removes the names')
   assert(api.nextDeny(['a'], ['a'], false).join(',') === 'a', 'disabling a denied name is idempotent')
@@ -371,8 +374,8 @@ check('tree-switch-guard', () => {
   const tree = build('')
   assert(groupOf(tree, 'mcp:github').switchable === true, 'every MCP server gets a lazy parent switch')
   assert(groupOf(tree, 'mcp:playwright').switchable === true, 'a fully restrictable server group may switch')
-  assert(groupOf(tree, 'prefix:task').switchable === false, 'built-in groups never carry a parent switch')
-  assert(groupOf(tree, 'prefix:~').switchable === false, 'the fallback bucket never carries a parent switch')
+  assert(groupOf(tree, 'prefix:util').switchable === false, 'built-in groups never carry a parent switch')
+  assert(groupOf(tree, 'prefix:other').switchable === false, 'the merged bucket never carries a parent switch')
   assert(api.groupSwitchable([]) === false, 'an empty group is not switchable')
   assert(api.groupSwitchable([{ name: 'x', enabled: true, fixed: true }]) === false, 'groupSwitchable reads fixed')
   assert(api.groupSwitchable([{ name: 'x', enabled: true }]) === true, 'groupSwitchable accepts plain rows')

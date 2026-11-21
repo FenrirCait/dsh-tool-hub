@@ -119,9 +119,16 @@ export function buildToolTree(tools: readonly ToolRow[], term: string, t: TFunct
 
   const ordered = [...servers.entries()].sort(([left], [right]) => (left < right ? -1 : 1))
   for (const [server, members] of ordered) take('mcp', server, server, 'MCP', members)
-  for (const bucket of groupByPrefix(loose, tool => tool.name, t('tree.builtin'))) {
-    take('prefix', bucket.key, bucket.label, undefined, bucket.rows)
+  // A prefix is worth its own parent only when it names a real cluster; singletons and pairs
+  // collapse into one "other built-ins" group so the top level stays short.
+  const MIN_PREFIX_GROUP = 3
+  const buckets = groupByPrefix(loose, tool => tool.name, t('tree.builtin'))
+  const looseRest: ToolRow[] = []
+  for (const bucket of buckets) {
+    if (bucket.key !== '~' && bucket.rows.length >= MIN_PREFIX_GROUP) take('prefix', bucket.key, bucket.label, undefined, bucket.rows)
+    else looseRest.push(...bucket.rows)
   }
+  if (looseRest.length > 0) take('prefix', 'other', t('tree.builtinOther'), undefined, looseRest)
 
   return { groups, rows: groups.flatMap(group => group.rows) }
 }
