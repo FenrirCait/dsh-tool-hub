@@ -24,6 +24,7 @@ interface ToolsMember {
 interface ScopeContext {
   tools?: ToolsMember
   get?: (name: string) => unknown
+  on?: (event: string, callback: (...args: unknown[]) => unknown) => (() => void) | void
 }
 
 interface AgentLike {
@@ -226,7 +227,7 @@ export class ToolMask {
     const mask = this
     const plugin = {
       name: 'dsh-tool-hub:tool-mask',
-      inject: ['tools'],
+      inject: ['tools', 'systemPrompt'],
       apply(scope: ScopeContext): void {
         let undo: (() => void) | undefined
         let applied: string | null = null
@@ -304,6 +305,29 @@ export class ToolMask {
           }
         }
         holder.sync = sync
+        // Prompt affinity without fiber reflection: the section names that advertise MCP tools
+        // are derived from the live names (mcp:<server>, tool:<tool>), and a section disappears
+        // once every tool it introduces is hidden. Returns the presentation untouched otherwise.
+        try {
+          scope.on?.('system-prompt/assemble', async (...args: unknown[]) => {
+            const next = args.at(-1)
+            if (typeof next !== 'function') return args[0]
+            const assembly = await (next as () => Promise<unknown>)()
+            let known: string[] = []
+            try {
+              const tools = (scope.tools ?? scope.get?.('tools')) as ToolsMember | undefined
+              const view = tools?.view?.(undefined)
+              known = namesFrom(view, 'knownNames') ?? namesFrom(view, 'restrictableNames') ?? []
+            }
+            catch {
+              known = []
+            }
+            return filterPromptSections(assembly, mask.denyFor(agent), known)
+          })
+        }
+        catch {
+          /* a host without the prompt waterfall keeps the tool mask only */
+        }
         try {
           // The host's plugin scope exposes effect(); call it through the scope object itself.
           const effect = (scope as unknown as { effect?: (fn: () => () => void) => void }).effect
@@ -446,6 +470,44 @@ export function attachToolMask(ctx: MaskCtx, sessions: unknown): ToolMask {
     originalDispose()
   }
   return mask
+}
+
+/**
+ * Drop prompt sections that exist only to advertise hidden tools.
+ *
+ * `mcp:<server>` disappears when every known tool of that server is denied;
+ * `mcp-resource-servers` disappears when every known MCP tool is denied. Tool schemas are filtered
+ * too on hosts whose waterfall still owns the declaration list. Other sections are untouched:
+ * family sections that do not name a tool need the fiber-affinity reflection and are out of scope.
+ */
+export function filterPromptSections(assembly: unknown, deny: readonly string[], known: readonly string[]): unknown {
+  if (!isRecord(assembly) || !Array.isArray(assembly.sections)) return assembly
+  const denied = new Set(deny)
+  const mcpKnown = known.filter(name => typeof name === 'string' && name.startsWith(MCP_TOOL_PREFIX))
+  const serverOf = (name: string): string | null => {
+    const rest = name.slice(MCP_TOOL_PREFIX.length)
+    const cut = rest.indexOf('__')
+    return cut <= 0 ? null : rest.slice(0, cut)
+  }
+  const sections = assembly.sections.filter(section => {
+    if (!isRecord(section)) return true
+    const name = typeof section.name === 'string' ? section.name : ''
+    if (name === 'mcp-resource-servers') {
+      return !(mcpKnown.length > 0 && mcpKnown.every(tool => denied.has(tool)))
+    }
+    if (!name.startsWith('mcp:')) return true
+    const server = name.slice(4)
+    const tools = mcpKnown.filter(tool => serverOf(tool) === server)
+    return !(tools.length > 0 && tools.every(tool => denied.has(tool)))
+  })
+  const filtered: Record<string, unknown> = { ...assembly, sections }
+  if (Array.isArray(assembly.tools)) {
+    filtered.tools = assembly.tools.filter(schema => {
+      const name = isRecord(schema) && typeof schema.name === 'string' ? schema.name : ''
+      return name === '' || !denied.has(name)
+    })
+  }
+  return filtered
 }
 
 /** The toolHub.surface port applySurface expects; each install is one mask layer. */

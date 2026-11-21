@@ -10,7 +10,7 @@ import { pathToFileURL } from 'node:url'
 import { join } from 'node:path'
 
 const distRoot = process.env.TOOL_HUB_DIST ?? join(process.cwd(), 'dist')
-const { attachToolMask, surfacePort } = await import(pathToFileURL(join(distRoot, 'host', 'tool-mask.js')).href)
+const { attachToolMask, surfacePort, filterPromptSections } = await import(pathToFileURL(join(distRoot, 'host', 'tool-mask.js')).href)
 
 let pass = 0
 let fail = 0
@@ -39,6 +39,7 @@ function makeHost({ known = ['mcp__a__x', 'mcp__a__y'], viewThrows = false } = {
   const restrictCalls = []
   const warnings = []
   const agents = []
+  const scopeHandlers = new Map()
   let undoCount = 0
   const tools = {
     view() {
@@ -81,6 +82,10 @@ function makeHost({ known = ['mcp__a__x', 'mcp__a__y'], viewThrows = false } = {
           const scope = {
             tools,
             get: name => ctx.get(name),
+            on(event, callback) {
+              scopeHandlers.set(event, callback)
+              return () => scopeHandlers.delete(event)
+            },
             effect(fn) { disposers.push(fn()) },
           }
           plugin.apply(scope)
@@ -101,7 +106,7 @@ function makeHost({ known = ['mcp__a__x', 'mcp__a__y'], viewThrows = false } = {
     if (at >= 0) agents.splice(at, 1)
     for (const callback of handlers.get('agent/disposed') ?? []) callback({ agent })
   }
-  return { ctx, tools, agents, handlers, restrictCalls, warnings, addAgent, removeAgent, undo: () => undoCount, known }
+  return { ctx, tools, agents, handlers, scopeHandlers, restrictCalls, warnings, addAgent, removeAgent, undo: () => undoCount, known }
 }
 
 check('mount: existing agents get a scope plugin and one restrict', () => {
@@ -232,6 +237,35 @@ check('agent disposed: its id is forgotten, a recreated id mounts again', () => 
   equal(mask.info().mounted, 0)
   host.addAgent('a1')
   equal(mask.info().mounted, 1)
+})
+
+check('prompt: one fully-hidden MCP server drops its section, the other stays', () => {
+  const assembly = { sections: [{ name: 'mcp:alpha' }, { name: 'mcp:beta' }, { name: 'tool:bash' }] }
+  const out = filterPromptSections(assembly, ['mcp__alpha__one'], ['mcp__alpha__one', 'mcp__beta__two'])
+  equal(out.sections.map(section => section.name), ['mcp:beta', 'tool:bash'])
+})
+check('prompt: mcp-resource-servers drops only when every MCP tool is hidden', () => {
+  const assembly = { sections: [{ name: 'mcp-resource-servers' }] }
+  equal(filterPromptSections(assembly, ['mcp__alpha__one'], ['mcp__alpha__one', 'mcp__beta__two']).sections.length, 1, 'kept')
+  equal(filterPromptSections(assembly, ['mcp__alpha__one', 'mcp__beta__two'], ['mcp__alpha__one', 'mcp__beta__two']).sections.length, 0, 'hidden')
+})
+check('prompt: the declaration list is filtered when the host still owns it', () => {
+  const out = filterPromptSections({ sections: [], tools: [{ name: 'mcp__a__x' }, { name: 'mcp__b__y' }] }, ['mcp__a__x'], ['mcp__a__x', 'mcp__b__y'])
+  equal(out.tools.map(tool => tool.name), ['mcp__b__y'])
+})
+check('prompt: no deny leaves the presentation untouched', () => {
+  const assembly = { sections: [{ name: 'mcp:alpha' }] }
+  equal(filterPromptSections(assembly, [], ['mcp__alpha__one']), assembly)
+})
+check('prompt: non-MCP sections keep their place', () => {
+  const out = filterPromptSections({ sections: [{ name: 'tool:bash' }, { name: 'identity' }] }, ['mcp__a__x'], ['mcp__a__x'])
+  equal(out.sections.map(section => section.name), ['tool:bash', 'identity'])
+})
+check('prompt: the scope registers the assembly waterfall', () => {
+  const host = makeHost()
+  host.addAgent('a1')
+  attachToolMask(host.ctx, {}).addLayer(['mcp__a__x'])
+  assert(host.scopeHandlers.has('system-prompt/assemble'), 'no handler')
 })
 
 console.log('\ntool-mask probe: ' + pass + ' PASS / ' + fail + ' FAIL')
