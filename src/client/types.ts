@@ -18,6 +18,15 @@ export interface SecretKeys {
 }
 
 /** One loader entry, optionally decorated with the MCP config it came from. */
+export interface BundleRow {
+  name: string
+  version?: string
+  enabled: boolean
+  official: boolean
+  /** Plugin entry ids (PluginRow.id) installed by this bundle. */
+  rows: string[]
+}
+
 export interface PluginRow {
   id: string
   name: string
@@ -190,6 +199,9 @@ export interface ToolRow {
 /** The normalised snapshot: arrays are always present, so a view can map without a guard. */
 export interface HubSnapshot {
   plugins: PluginRow[]
+  /** Installed bundles and their plugin entry ids; absent on an older host. */
+  bundles: BundleRow[]
+  bundleError?: string | null
   skills: SkillRow[]
   groups: GroupRow[]
   collections: CollectionRow[]

@@ -169,6 +169,14 @@ const CSS = `
 .th-content { flex: 1 1 auto; overflow-y: auto; padding: 16px 18px 28px; min-height: 0; }
 .th-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
 .th-list { display: flex; flex-direction: column; gap: 8px; }
+.th-groups { display: flex; flex-direction: column; gap: 10px; }
+.th-group-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--dsw-alias-border-subtle, rgba(127,127,127,0.24)); border-radius: 8px; background: var(--dsw-alias-card-fill, rgba(127,127,127,0.06)); }
+.th-group-toggle { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; margin: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.th-chevron { display: inline-block; width: 14px; flex: 0 0 auto; color: var(--dsw-alias-label-tertiary, rgba(127,127,127,0.8)); transition: transform 120ms ease; }
+.th-chevron.is-open { transform: rotate(90deg); }
+.th-group-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.th-group-meta { flex: 0 0 auto; font-size: 11px; color: var(--dsw-alias-label-tertiary, rgba(127,127,127,0.8)); }
+.th-group-body { margin-left: 18px; padding-left: 8px; border-left: 1px solid var(--dsw-alias-border-subtle, rgba(127,127,127,0.24)); }
 .th-card {
   border: 1px solid var(--dsw-alias-border-l1, rgba(127, 127, 127, 0.14));
   border-radius: 12px;

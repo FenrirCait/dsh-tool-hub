@@ -77,7 +77,7 @@ function makeIo({ failOn, failOnce } = {}) {
   check('a scene needs a name', normalizeScene({ tools: { deny: [] } }) === null)
   const scene = normalizeScene({ name: '  work  ', tools: { deny: ['mcp__a__x', 'not_a_tool', 'mcp__a__x'] }, mcp: { off: ['alpha', 'bad name', 'alpha'], on: ['beta'] } })
   check('normalize trims the name', scene?.name === 'work', scene?.name)
-  check('normalize keeps only mcp__ names, deduplicated', JSON.stringify(scene?.tools?.deny) === '["mcp__a__x"]', JSON.stringify(scene?.tools?.deny))
+  check('normalize keeps maskable names, deduplicated', JSON.stringify(scene?.tools?.deny) === '["mcp__a__x","not_a_tool"]', JSON.stringify(scene?.tools?.deny))
   check('normalize drops illegal server names', JSON.stringify(scene?.mcp) === '{"off":["alpha"],"on":["beta"]}', JSON.stringify(scene?.mcp))
   check('a missing section stays undefined', normalizeScene({ name: 'quiet' })?.tools === undefined && normalizeScene({ name: 'quiet' })?.mcp === undefined)
   check('an explicitly empty section stays empty', JSON.stringify(normalizeScene({ name: 'clear', tools: { deny: [] } })?.tools) === '{"deny":[]}')

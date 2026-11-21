@@ -14,8 +14,10 @@ import * as React from 'react'
 import { runOp } from '../api.js'
 import { Badge, Button, Callout, Card, Dialog, Empty, SearchBox, Select, Switch, Toolbar } from '../components.js'
 import type { ToolRow, ViewProps } from '../types.js'
+import type { TreeGroup } from './package-tree.js'
 import { ScopeCard } from './scope-card.js'
 import { OnDemandCard } from './on-demand-card.js'
+import { ToolsTree, buildToolTree, copyLabel, denyOf, nextDeny } from './tools-tree.js'
 
 /** Op ids this view sends; the tool-surface domain owns their payloads. */
 const SAVE = 'tool.save'
@@ -24,10 +26,6 @@ const LAZY_SET = 'lazy.set'
 const LAZY_LOAD = 'lazy.load'
 const LAZY_UNLOAD = 'lazy.unload'
 const LAZY_RESET = 'lazy.reset'
-
-function copyLabel(lang: 'zh' | 'en', zh: string, en: string): string {
-  return lang === 'zh' ? zh : en
-}
 
 /** The merge sources in the order tool-surface reports them. */
 const SOURCES = ['install', 'session', 'lazy', 'onDemand'] as const
@@ -116,20 +114,16 @@ export function ToolsView(props: ViewProps): React.ReactElement {
   const costTotal = Object.values(costs).reduce((sum, value) => sum + value, 0)
 
   // enabled is the installation mask only (snapshot.ts), so the draft starts from it.
-  const baseMask = React.useMemo(
-    () => snapshot.tools.filter(tool => !tool.enabled).map(tool => tool.name),
-    [snapshot.tools],
-  )
+  const baseMask = React.useMemo(() => denyOf(snapshot.tools), [snapshot.tools])
   const servers = React.useMemo(() => serversOf(snapshot.tools), [snapshot.tools])
   const mask = draft ?? baseMask
   const dirty = draft !== null && !sameNames(draft, baseMask)
   const masked = React.useMemo(() => new Set(mask), [mask])
 
   const term = query.trim().toLowerCase()
-  const rows = snapshot.tools.filter(tool => {
-    if (term === '') return true
-    return tool.name.toLowerCase().includes(term) || (tool.server ?? '').toLowerCase().includes(term)
-  })
+  /* The tree owns grouping and filtering; its rows feed the toolbar count and the empty branch. */
+  const tree = React.useMemo(() => buildToolTree(snapshot.tools, term, t), [snapshot.tools, term, t])
+  const rows = tree.rows
 
   const loadAll = lang === 'zh' ? '全部加载' : 'Load all'
   const unloadAll = lang === 'zh' ? '全部卸载' : 'Unload all'
@@ -170,6 +164,28 @@ export function ToolsView(props: ViewProps): React.ReactElement {
         : `Replace the installation mask with ${mask.length} tool names?`,
     })
   }, [lang, mask])
+
+  // A parent switch writes the whole mask at once: the next deny list is the committed one plus
+  // or minus the group, never an unsaved draft. A successful write drops that draft so no row can
+  // keep showing an edit the committed list no longer holds; a failed one leaves it alone.
+  const bulkGroup = React.useCallback((group: TreeGroup<ToolRow>, next: boolean) => {
+    // An MCP parent is the server's lazy switch: on loads every tool, off hides the server.
+    if (group.key.startsWith('mcp:')) {
+      const server = group.key.slice('mcp:'.length)
+      fire(LAZY_SET, server, { server, on: !next })
+      return
+    }
+    const deny = nextDeny(baseMask, group.rows.map(row => row.name), next)
+    setPlan(null)
+    void run(SAVE, { deny, id: group.key }).then(ok => { if (ok) setDraft(null) })
+  }, [baseMask, fire, run])
+
+  // The shell keys busy as op:id; MCP parents write lazy.set, prefix parents tool.save.
+  const bulkBusy = busy !== null && busy.startsWith(SAVE + ':')
+    ? busy.slice(SAVE.length + 1)
+    : busy !== null && busy.startsWith(LAZY_SET + ':')
+      ? busy.slice(LAZY_SET.length + 1)
+      : null
 
   const askLazy = React.useCallback((entry: ServerEntry, next: boolean) => {
     if (!next) {
@@ -281,37 +297,18 @@ export function ToolsView(props: ViewProps): React.ReactElement {
           />
         ) : (
           <Card label={t('tools.title')}>
-            <div className="th-list">
-              {rows.map(tool => {
-                const hidden = masked.has(tool.name)
-                return (
-                  <div className="th-row" key={tool.name}>
-                    <div className="th-row-body">
-                      <span className="th-row-name th-mono">{tool.name}</span>
-                      <span className="th-row-meta">
-                        {tool.server === null || tool.server === undefined ? null : (
-                          <Badge>
-                            {t('tools.server')} {tool.server}
-                          </Badge>
-                        )}
-                        <Badge tone={hidden ? 'warn' : 'on'}>
-                          {hidden ? t('tools.masked') : t('tools.visible')}
-                        </Badge>
-                        {tool.lazy === true ? <Badge tone="off">{t('tools.lazy')}</Badge> : null}
-                        {tool.fixed === true ? <Badge tone="warn">{copyLabel(lang, '固定', 'fixed')}</Badge> : null}
-                        {tool.lazyHidden === true ? <Badge tone="off">{copyLabel(lang, '懒加载隐藏', 'lazy-hidden')}</Badge> : null}
-                        {showCosts && costs[tool.name] !== undefined ? <Badge tone="neutral">{'~' + String(costs[tool.name]) + ' tok'}</Badge> : null}
-                      </span>
-                    </div>
-                    <Switch
-                      checked={!hidden}
-                      label={t('a11y.switch', { name: tool.name })}
-                      onChange={next => { toggleMask(tool.name, !next) }}
-                    />
-                  </div>
-                )
-              })}
-            </div>
+            <ToolsTree
+              groups={tree.groups}
+              lang={lang}
+              t={t}
+              masked={masked}
+              costs={costs}
+              showCosts={showCosts}
+              forceOpen={term !== ''}
+              busyKey={bulkBusy}
+              onToggle={toggleMask}
+              onBulk={bulkGroup}
+            />
           </Card>
         )}
       </div>

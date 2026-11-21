@@ -963,10 +963,10 @@ async function sceneCommands() {
   check('scene list: empty to start', Array.isArray(listed.scenes) && listed.scenes.length === 0 && listed.active === null, JSON.stringify(listed))
 
   const saved = jsonOf(run(['scene', 'save', 'quiet', '--tools-deny', 'shell_exec,mcp__alpha__one', '--mcp-off', 'alpha', '--json']))
-  check('scene save: keeps only mcp names', JSON.stringify(saved.scene.tools?.deny) === '["mcp__alpha__one"]', JSON.stringify(saved.scene))
-  check('scene save: reports what it dropped', JSON.stringify(saved.dropped?.tools) === '["shell_exec"]', JSON.stringify(saved.dropped))
+  check('scene save: keeps every maskable name', JSON.stringify(saved.scene.tools?.deny) === '["shell_exec","mcp__alpha__one"]', JSON.stringify(saved.scene))
+  check('scene save: drops nothing when every name is maskable', JSON.stringify(saved.dropped?.tools) === '[]', JSON.stringify(saved.dropped))
   const stored = await stateOf()
-  check('scene save: lands in the state file under its name', JSON.stringify(stored.scenes?.quiet?.tools?.deny) === '["mcp__alpha__one"]' && JSON.stringify(stored.scenes?.quiet?.mcp?.off) === '["alpha"]', JSON.stringify(stored.scenes))
+  check('scene save: lands in the state file under its name', JSON.stringify(stored.scenes?.quiet?.tools?.deny) === '["shell_exec","mcp__alpha__one"]' && JSON.stringify(stored.scenes?.quiet?.mcp?.off) === '["alpha"]', JSON.stringify(stored.scenes))
 
   const mcpOnly = jsonOf(run(['scene', 'save', 'mcp-only', '--mcp-off', 'beta', '--json']))
   check('scene save: a flag left out leaves that domain untracked', mcpOnly.scene.tools === undefined && JSON.stringify(mcpOnly.scene.mcp.off) === '["beta"]', JSON.stringify(mcpOnly.scene))
@@ -984,12 +984,12 @@ async function sceneCommands() {
   const afterApply = await stateOf()
   const afterPatch = await patchOf()
   const delta = multisetDelta(beforePatch, afterPatch)
-  check('scene apply: replaces toolDeny with the scene list', JSON.stringify(afterApply.toolDeny) === '["mcp__alpha__one"]', JSON.stringify(afterApply.toolDeny))
+  check('scene apply: replaces toolDeny with the scene list', JSON.stringify(afterApply.toolDeny) === '["shell_exec","mcp__alpha__one"]', JSON.stringify(afterApply.toolDeny))
   check('scene apply: the patch gains exactly one disabled line', delta.added.length === 1 && delta.removed.length === 0 && delta.added[0].trim() === 'disabled: true', JSON.stringify(delta))
   check('scene apply: the named server is off', rowOf(afterPatch, 'mcp-alpha')?.disabled === true)
   check('scene apply: the other server row keeps its flag', rowOf(afterPatch, 'mcp-beta')?.disabled === true)
   check('scene apply: records the environment it replaced', afterApply.mode?.name === 'quiet' && JSON.stringify(afterApply.mode?.snapshot?.toolDeny) === '["shell_exec"]' && afterApply.mode?.snapshot?.mcp?.alpha?.enabled === true, JSON.stringify(afterApply.mode))
-  check('scene apply: names the plan it ran', /tools: 1 masked/.test(applied.plan ?? '') && JSON.stringify(applied.missing) === '[]', JSON.stringify(applied.plan))
+  check('scene apply: names the plan it ran', /tools: 2 masked/.test(applied.plan ?? '') && JSON.stringify(applied.missing) === '[]', JSON.stringify(applied.plan))
 
   const active = jsonOf(run(['scene', 'list', '--json']))
   check('scene list: marks the active scene', active.active === 'quiet' && active.scenes.find(row => row.name === 'quiet')?.active === true, JSON.stringify(active))

@@ -1,17 +1,17 @@
 /**
- * Skills: every folder under every configured root, and the moves that take one out of the way
- * and bring it back.
+ * Skills: every folder under every configured root, folded into one parent per name prefix.
  *
- * The switch is per row, exactly like the plugins view. Import, move and delete each need an
- * argument the row cannot supply (a source path, a target root, a confirmation), so each one is a
- * dialog. Restore reads the trash folder through the read-only `skill.trash` op: the snapshot
- * carries roots and skills but never the trash, so the view does that single read itself and
- * keeps the answer in local state. Every write still goes through `run`, so the shell owns the
+ * The switch is per row; a parent switch writes its whole group through that same per-row op, one
+ * call at a time, because the host has no group op for skills. Import, move and delete each need
+ * an argument the row cannot supply, so each one is a dialog. Restore reads the trash folder
+ * through the read-only `skill.trash` op. Every write goes through `run`, so the shell owns the
  * busy key, the notice and the snapshot refresh.
  */
 import * as React from 'react'
 import { runOp } from '../api.js'
 import { Badge, Button, Callout, Card, Dialog, Empty, Field, SearchBox, Select, Switch, Toolbar } from '../components.js'
+import { groupByPrefix, type TreeGroup } from './package-tree.js'
+import { SkillTree, skillTree } from './skills-tree.js'
 import type { SkillRootInfo, SkillRow, ViewProps } from '../types.js'
 
 /** Op ids of the skills domain; the generic `toggle` op takes a kind, this one does not. */
@@ -93,6 +93,7 @@ export function SkillsView(props: ViewProps): React.ReactElement {
   const { snapshot, t, lang, busy, run } = props
   const [query, setQuery] = React.useState('')
   const [root, setRoot] = React.useState('all')
+  const [bulkKey, setBulkKey] = React.useState<string | null>(null)
   const [importing, setImporting] = React.useState(false)
   const [importPath, setImportPath] = React.useState('')
   const [importRoot, setImportRoot] = React.useState('')
@@ -114,11 +115,11 @@ export function SkillsView(props: ViewProps): React.ReactElement {
   const targetRoot = importRoot !== '' ? importRoot : (roots[0] === undefined ? '' : roots[0].id)
   const term = query.trim().toLowerCase()
 
-  const rows = snapshot.skills.filter(row => {
-    if (root !== 'all' && row.rootId !== root) return false
-    if (term === '') return true
-    return row.name.toLowerCase().includes(term) || row.id.toLowerCase().includes(term)
-  })
+  // The root filter runs here and the search runs in the tree: a hit on a parent label keeps
+  // every child, which a plain row filter would have thrown away.
+  const scoped = snapshot.skills.filter(row => root === 'all' || row.rootId === root)
+  const groups = skillTree(groupByPrefix(scoped, row => row.name, t('tree.ungrouped')), term, row => row.name + ' ' + row.id)
+  const visible = groups.reduce((count, group) => count + group.rows.length, 0)
 
   // The one read the view performs itself: the snapshot never carries the trash, and restore
   // needs a trashPath the rows cannot supply on their own.
@@ -139,6 +140,21 @@ export function SkillsView(props: ViewProps): React.ReactElement {
       live = false
     }
   }, [trashTick])
+
+  // One write per child, in order: a failure part-way stops the run instead of writing over the
+  // error the shell already reported. The parent switch spins on the group key meanwhile.
+  const bulkToggle = async (group: TreeGroup<SkillRow>, next: boolean): Promise<void> => {
+    if (group.rows.length === 0) return
+    setBulkKey(group.key)
+    try {
+      for (const row of group.rows) {
+        const ok = await run(OPS.toggle, { id: row.id, enabled: next })
+        if (!ok) return
+      }
+    } finally {
+      setBulkKey(null)
+    }
+  }
 
   const openImport = (): void => {
     setImportPath('')
@@ -237,7 +253,7 @@ export function SkillsView(props: ViewProps): React.ReactElement {
           clearLabel={t('action.clear')}
         />
         <Select id="th-skill-root-filter" value={root} options={rootOptions} onChange={setRoot} label={t('skills.root')} />
-        <Badge tone="brand">{t('skills.count', { n: rows.length })}</Badge>
+        <Badge tone="brand">{t('skills.count', { n: visible })}</Badge>
         <Button disabled={roots.length === 0} onClick={openImport} title={roots.length === 0 ? pick(lang, '先在设置里配置一个技能根目录', 'Configure a skill root in Settings first') : undefined}>
           {pick(lang, '导入技能', 'Import a skill')}
         </Button>
@@ -249,12 +265,17 @@ export function SkillsView(props: ViewProps): React.ReactElement {
           hint={pick(lang, '技能根目录在设置里配置，这里会列出每个根目录下的技能。', 'Skill roots live in Settings; every skill under one is listed here.')}
           action={roots.length === 0 ? undefined : <Button onClick={openImport}>{pick(lang, '导入技能', 'Import a skill')}</Button>}
         />
-      ) : rows.length === 0 ? (
+      ) : groups.length === 0 ? (
         <Empty title={t('skills.emptyFiltered', { query })} />
       ) : (
         <Card label={t('skills.title')}>
-          <div className="th-list">
-            {rows.map(row => {
+          <SkillTree
+            groups={groups}
+            lang={lang}
+            forceOpen={term !== ''}
+            busyKey={bulkKey}
+            onBulk={(group, next) => { void bulkToggle(group, next) }}
+            renderRow={row => {
               const rootInfo = roots.find(item => item.id === row.rootId) ?? null
               return (
                 <div className="th-row" key={row.id}>
@@ -302,8 +323,8 @@ export function SkillsView(props: ViewProps): React.ReactElement {
                   </div>
                 </div>
               )
-            })}
-          </div>
+            }}
+          />
         </Card>
       )}
 

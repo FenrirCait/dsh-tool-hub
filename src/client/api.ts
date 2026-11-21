@@ -409,6 +409,16 @@ export function normalizeSnapshot(raw: unknown): HubSnapshot {
   const limits = asRecord(record.limits)
   return {
     plugins: asRows(record.plugins, pluginOf),
+    bundles: Array.isArray(record.bundles)
+      ? record.bundles.map(item => asRecord(item)).filter(item => asString(item.name) !== '').map(item => ({
+          name: asString(item.name),
+          ...(typeof item.version === 'string' ? { version: item.version } : {}),
+          enabled: asBoolean(item.enabled),
+          official: asBoolean(item.official),
+          rows: asStringList(item.rows),
+        }))
+      : [],
+    bundleError: typeof record.bundleError === 'string' ? record.bundleError : null,
     skills: asRows(record.skills, skillOf),
     groups: asRows(record.groups, groupOf),
     collections: asRows(record.collections, collectionOf),
