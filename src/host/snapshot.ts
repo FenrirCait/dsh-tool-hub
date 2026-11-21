@@ -83,7 +83,10 @@ async function cachedSessionOptions(): Promise<SessionOptionRow[]> {
         const raw = record?.record?.rows?.title?.val
         const title = typeof raw === 'string' ? raw : ''
         const id = item.name.slice(0, -'.json'.length)
-        if (id !== '') rows.push({ id, title: title === '' ? id : title, updatedAt: item.mtime })
+        // User-visible sessions use the `session-` prefix; subagent children are bare UUIDs
+        // (confirmed against session.v4 headers: origin=subagent, delegationDepth=1).
+        if (!id.startsWith('session-')) continue
+        rows.push({ id, title: title === '' ? id : title, updatedAt: item.mtime })
       }
       catch {
         /* a half-written cache file is skipped, not fatal */
@@ -118,6 +121,9 @@ async function sessionOptions(env: HostEnv): Promise<SessionOptionRow[]> {
     const byId = asRecord(record.byId)
     for (const id of ids) {
       const row = asRecord(byId[String(id)])
+      const origin = typeof row.origin === 'string' ? row.origin : ''
+      const depth = typeof row.delegationDepth === 'number' ? row.delegationDepth : 0
+      if (origin === 'subagent' || depth > 0) continue
       add(row.id ?? row.sessionId ?? id, row.title ?? row.name, row.updatedAt ?? row.lastActiveAt)
     }
     const rows = Array.isArray(raw) ? raw : record.sessions
