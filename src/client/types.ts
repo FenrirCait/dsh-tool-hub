@@ -154,6 +154,8 @@ export interface ExtensionStatus {
   styles?: string[]
   /** CSS text injected while the extension is loaded. */
   css?: string[]
+  /** True when the extension comes from the plugin package's compat/ directory. */
+  bundled?: boolean
 }
 
 export interface HistoryEntry {

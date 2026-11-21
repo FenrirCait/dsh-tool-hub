@@ -297,6 +297,7 @@ function extensionOf(row: Record<string, unknown>): ExtensionStatus | null {
     views,
     styles: asStringList(row.styles),
     css: asStringList(row.css),
+    bundled: row.bundled === true,
   }
 }
 

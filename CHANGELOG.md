@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.0-alpha.61
+
+- Extensions from the package's `compat/` are marked **From package / 来自插件包** in the
+  Extensions page (status flag `bundled`, carried through the snapshot).
+
 ## 2.0.0-alpha.60
 
 - `compat/` is now an extension root: official compat packs appear in **Extensions** straight

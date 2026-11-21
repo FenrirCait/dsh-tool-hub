@@ -62,12 +62,15 @@ export interface ExtensionStatus {
   styles: string[]
   /** CSS text of the declared styles, loaded only while enabled. */
   css: string[]
+  /** True when the folder comes from the plugin package's own compat/ directory. */
+  bundled: boolean
 }
 
 export interface ExtensionDiscovered {
   manifest: ExtensionManifest
   dir: string
   hostFile: string
+  bundled: boolean
 }
 
 export interface ExtensionLoadResult {
@@ -86,9 +89,10 @@ export interface ExtensionManagerOptions {
  * A profile copy wins on an id clash; bundled packs are read-only until the owner enables them,
  * so they appear in the Extensions page without being copied into the profile.
  */
+const BUNDLED_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'compat')
+
 export function extensionRoots(): string[] {
-  const bundled = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'compat')
-  const roots = [join(stateDir(), 'extensions'), join(homedir(), '.dsh', 'tool-hub', 'extensions'), bundled]
+  const roots = [join(stateDir(), 'extensions'), join(homedir(), '.dsh', 'tool-hub', 'extensions'), BUNDLED_ROOT]
   return [...new Set(roots.map(root => resolve(root)))]
 }
 
@@ -179,6 +183,7 @@ export class ExtensionManager {
     const problems: ExtensionStatus[] = []
     const seen = new Set<string>()
     for (const root of this.options.roots) {
+      const bundled = resolve(root) === BUNDLED_ROOT
       let names: string[] = []
       try {
         names = await readdir(root)
@@ -201,7 +206,7 @@ export class ExtensionManager {
         catch (error) {
           problems.push({
             id: name, name: fallbackName(name), version: '', apiVersion: EXTENSION_API_VERSION,
-            dir: extDir, enabled: false, loaded: false, error: 'manifest.json: ' + errorText(error), ops: [], views: [], styles: [], css: [],
+            dir: extDir, enabled: false, loaded: false, error: 'manifest.json: ' + errorText(error), ops: [], views: [], styles: [], css: [], bundled,
           })
           continue
         }
@@ -212,7 +217,7 @@ export class ExtensionManager {
         catch (error) {
           problems.push({
             id: name, name: fallbackName(name), version: '', apiVersion: EXTENSION_API_VERSION,
-            dir: extDir, enabled: false, loaded: false, error: 'manifest.json is not JSON: ' + errorText(error), ops: [], views: [], styles: [], css: [],
+            dir: extDir, enabled: false, loaded: false, error: 'manifest.json is not JSON: ' + errorText(error), ops: [], views: [], styles: [], css: [], bundled,
           })
           continue
         }
@@ -220,14 +225,14 @@ export class ExtensionManager {
         if (!normalized.ok) {
           problems.push({
             id: name, name: fallbackName(name), version: '', apiVersion: EXTENSION_API_VERSION,
-            dir: extDir, enabled: false, loaded: false, error: normalized.error, ops: [], views: [], styles: [], css: [],
+            dir: extDir, enabled: false, loaded: false, error: normalized.error, ops: [], views: [], styles: [], css: [], bundled,
           })
           continue
         }
         const manifest = normalized.manifest
         if (seen.has(manifest.id)) continue
         seen.add(manifest.id)
-        entries.push({ manifest, dir: extDir, hostFile: resolve(extDir, manifest.host) })
+        entries.push({ manifest, dir: extDir, hostFile: resolve(extDir, manifest.host), bundled })
       }
     }
     return { entries, problems }
@@ -248,7 +253,7 @@ export class ExtensionManager {
         statuses.push({
           id: manifest.id, name: manifest.name, version: manifest.version, apiVersion: manifest.apiVersion,
           dir, enabled: false, loaded: false, error: null, ops: [], views: manifest.views,
-          styles: manifest.styles, css: [],
+          styles: manifest.styles, css: [], bundled: entry.bundled,
         })
         continue
       }
@@ -261,7 +266,7 @@ export class ExtensionManager {
       statuses.push({
         id, name: fallbackName(id), version: '', apiVersion: EXTENSION_API_VERSION,
         dir: '', enabled: true, loaded: false, error: 'extension folder not found', ops: [], views: [],
-        styles: [], css: [],
+        styles: [], css: [], bundled: false,
       })
     }
     statuses.sort((left, right) => left.id.localeCompare(right.id))
@@ -272,7 +277,7 @@ export class ExtensionManager {
     const { manifest, dir, hostFile } = entry
     const base = {
       id: manifest.id, name: manifest.name, version: manifest.version, apiVersion: manifest.apiVersion,
-      dir, enabled: true, views: manifest.views, styles: manifest.styles,
+      dir, enabled: true, views: manifest.views, styles: manifest.styles, bundled: entry.bundled,
     }
     let key = ''
     let css: string[] = []

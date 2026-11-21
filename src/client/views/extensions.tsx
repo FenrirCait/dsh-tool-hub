@@ -514,6 +514,7 @@ function ExtensionPanel(props: PanelProps): React.ReactElement {
             {entry.version === '' ? null : (
               <Badge title={t('extensions.version')}>{t('extensions.version') + ' ' + entry.version}</Badge>
             )}
+            {entry.bundled === true ? <Badge tone="neutral">{t('extensions.bundled')}</Badge> : null}
             <Badge tone={entry.enabled ? 'on' : 'off'}>
               {entry.enabled ? t('extensions.enabled') : t('extensions.disabled')}
             </Badge>

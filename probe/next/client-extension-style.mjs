@@ -13,12 +13,15 @@ function check(name, ok, detail = '') {
   else { failed += 1; console.log('FAIL ' + name + (detail === '' ? '' : '  ' + detail)) }
 }
 const read = path => readFile(resolve(repo, path), 'utf8')
-const [style, shell, entry, dock, components] = await Promise.all([
+const [style, shell, entry, dock, components, view, types, api] = await Promise.all([
   read('src/client/extension-style.ts'),
   read('src/client/shell.tsx'),
   read('src/client/entry.tsx'),
   read('src/client/dock.tsx'),
   read('src/client/components.tsx'),
+  read('src/client/views/extensions.tsx'),
+  read('src/client/types.ts'),
+  read('src/client/api.ts'),
 ])
 
 check('style module removes stale tags', style.includes("querySelectorAll('style[' + STYLE_ATTR + ']')"))
@@ -29,6 +32,9 @@ check('entry installs the fallback fetch', entry.includes('installExtensionStyle
 check('dock button has a stable hook', dock.includes('className="th-dock-btn"'))
 check('sidebar entry has a stable hook', entry.includes("className: 'th-sidebar-entry'"))
 check('button forwards className', components.includes("props.className") && components.includes('className?: string'))
+
+check('the extension row shows the bundled badge', view.includes("entry.bundled === true") && view.includes("t('extensions.bundled')"))
+check('the snapshot carries the bundled flag', types.includes('bundled?: boolean') && api.includes('bundled: row.bundled === true'))
 
 const styleTag = 'data-extension-style'
 check('style tags are identified', style.includes("const STYLE_ATTR = '" + styleTag + "'"))

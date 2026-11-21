@@ -5,7 +5,7 @@
  */
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { normalizeManifest, ExtensionManager, extensionRoots } from '../../dist/host/extensions.js'
 
 let passed = 0
@@ -34,6 +34,10 @@ try {
   const bundled = extensionRoots().find(root => root.replace(/\\/g, '/').endsWith('/compat'))
   const bundledManifest = bundled === undefined ? null : await import('node:fs/promises').then(fs => fs.readFile(join(bundled, 'codex-ui-glass', 'manifest.json'), 'utf8'))
   check('the official pack is discoverable there', bundledManifest !== null && JSON.parse(bundledManifest).id === 'codex-ui-glass')
+  const bundledManager = new ExtensionManager({ roots: [resolve('compat')], services: { get: () => undefined }, log: () => {} })
+  const bundledRows = await bundledManager.load([])
+  const bundledRow = bundledRows.statuses.find(status => status.id === 'codex-ui-glass')
+  check('the bundled row is flagged as bundled', bundledRow?.bundled === true, JSON.stringify(bundledRow))
 
   const ok = normalizeManifest({ ...base, styles: ['style.css'] })
   check('manifest accepts a relative css path', ok.ok && ok.manifest.styles[0] === 'style.css')
