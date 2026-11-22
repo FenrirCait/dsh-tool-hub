@@ -36,7 +36,7 @@
 推荐固定 release：
 
 ```bash
-dsh plugin --profile <profile> add github:FenrirCait/dsh-tool-hub#v2.0.0-alpha.76
+dsh plugin --profile <profile> add github:FenrirCait/dsh-tool-hub#v2.0.0-alpha.77
 ```
 
 从本地目录安装：
