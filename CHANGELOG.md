@@ -4,7 +4,7 @@
 
 2.0 rewrite: the package is now a manager for a separate official-pack repository.
 
-- Bundled `compat/` packs removed. Official packs are read from the remote catalog, installed
+- No bundled `compat/` packs. Official packs are new in 2.0, read from the remote catalog, installed
   with explicit confirmation, verified (bytes + SHA-256), backed up and replaced atomically.
 - Official packs can be installed, updated, uninstalled and batch-synced from the panel; uninstall
   is never part of a batch action.

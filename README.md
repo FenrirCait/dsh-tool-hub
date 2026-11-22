@@ -15,7 +15,7 @@ It shows up twice: as a **Hub tab** on the Plugins page, and as a **sidebar pane
 
 2.0 is a rewrite of both the panel and how compatibility packs are distributed, not a version bump:
 
-- **Manager only.** The plugin package no longer bundles `compat/` packs. Official packs live in
+- **Manager only.** The plugin package ships no `compat/` packs. Official packs live in
   [FenrirCait/dsh-tool-hub-packs](https://github.com/FenrirCait/dsh-tool-hub-packs), are read from a
   remote catalog, and are installed on explicit confirmation.
 - **Verified pack lifecycle.** Install/update downloads to staging, checks byte counts and SHA-256,
@@ -95,10 +95,11 @@ manager and can be uninstalled independently. It follows codex-ui's own attribut
 
 ## Upgrading from 1.x
 
-- Bundled compatibility packs are gone from the package. Install the packs you need from the
-  **Official packs** card after upgrading; nothing is installed or enabled automatically.
-- The manager, groups, presets and state file are preserved. Existing local extension copies remain
-  normal extensions until you install/update them through the official catalog.
+- 1.x had no official-pack catalog. Official packs are a new 2.0 feature; there is no pack
+  migration step. Install only what you need from the **Official packs** card; nothing is installed
+  or enabled automatically.
+- Groups, presets and the state file are preserved. Local extensions that already exist remain
+  normal extensions; the official catalog manages only packs installed through it.
 - The install command now pins a release tag, so a profile can stay on a known artifact instead of
   following `main`.
 - The panel UI, dark/light support and the usage guide are new; existing behavior for switches,

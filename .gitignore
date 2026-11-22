@@ -8,3 +8,5 @@ release-*.md
 !docs/releases/**
 
 dist/
+# Local design/research notes; never shipped or published.
+research/
