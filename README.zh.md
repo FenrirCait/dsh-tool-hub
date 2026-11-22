@@ -36,7 +36,7 @@
 推荐固定 release：
 
 ```bash
-dsh plugin --profile <profile> add github:FenrirCait/dsh-tool-hub#v2.0.0-alpha.77
+dsh plugin --profile <profile> add github:FenrirCait/dsh-tool-hub#v2.1.0
 ```
 
 从本地目录安装：
@@ -66,7 +66,7 @@ dsh plugin --profile <profile> add ./dsh-tool-hub
 
 ### 扩展 API v2 与实验包 thirdparty-lazy
 
-Tool Hub `2.0.0-alpha.77` 增加 **Extension API v2**：官方包可以声明 `apiVersion: 2`，拿到受信任的
+Tool Hub `2.1.0` 提供 **Extension API v2**：官方包可以声明 `apiVersion: 2`，拿到受信任的
 宿主根上下文和 `api.onDispose`，从而在不改核心插件的情况下安装 per-agent 生命周期钩子。扩展包是
 本机受信任代码，只安装你信任的包。
 
@@ -80,7 +80,15 @@ Tool Hub `2.0.0-alpha.77` 增加 **Extension API v2**：官方包可以声明 `a
   `screen_`、`window_`）。
 - 实验限制：启用状态只在内存中，进程重启后重置；保护名单是静态 allowlist，不是 owner 注册表，
   名单外的工具可能被误隐藏。
-- 需要 Tool Hub `2.0.0-alpha.77` 或更新版本；主包不内置该实验包。
+- 需要 Tool Hub `2.1.0` 或更新版本；主包不内置该实验包。
+
+### 官方插件基线
+
+设置 → **官方插件基线** 会列出 DSH shipped profile（`--dump-default-config`，不含用户层）里的官方
+条目及其当前开关。默认关闭的保持“默认关”；条件项和带 config 的条目只标注，不猜测。点
+**预览并恢复…** 会列出具体官方变更和将被禁用的第三方插件，先备份 `cordis.patch.yml` 与插件状态，
+确认后才执行。保留 `dsh-tool-hub` 和 `dshmarket`，不卸载任何包，也不修改技能、MCP、config 或
+Agent 预设文件。某个第三方插件的 Agent 预设需要继续可用时，在预览里勾选“保留”即可豁免。
 
 ## 使用指引
 

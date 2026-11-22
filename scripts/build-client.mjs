@@ -21,6 +21,7 @@ await build({
   format: 'iife',
   globalName: '__toolHubClient',
   external: ['react'],
+  loader: { '.svg': 'text' },
   jsx: 'transform',
   jsxFactory: 'React.createElement',
   jsxFragment: 'React.Fragment',

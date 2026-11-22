@@ -1,6 +1,7 @@
 import type { Registry } from '../core/registry.js'
 import type { DomainRegistration } from '../shared/contract.js'
 import { configDomain } from './config.js'
+import { officialDomain } from './official.js'
 import { backupsDomain } from './backups.js'
 import { createMcpDomain } from './mcp.js'
 import { createPluginsDomain } from './plugins.js'
@@ -19,6 +20,7 @@ import { toolSurfaceDomain } from './tool-surface.js'
 export function registerAll(registry: Registry): DomainRegistration[] {
   const registrations: DomainRegistration[] = [
     createPluginsDomain(),
+    officialDomain(),
     createSkillsDomain(),
     createMcpDomain(),
     groupsDomain(),

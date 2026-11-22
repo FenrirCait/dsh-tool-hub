@@ -27,11 +27,14 @@ import { ConfigView } from './views/config.js'
 import { ExtensionsView } from './views/extensions.js'
 import { SettingsView } from './settings/index.js'
 import { SkillsView } from './views/skills.js'
+import wordmarkSvg from './assets/dsh-wordmark.svg'
 
 export type ViewId = 'plugins' | 'skills' | 'mcp' | 'tools' | 'groups' | 'presets' | 'sessions' | 'scenes' | 'diagnostics' | 'config' | 'extensions' | 'settings'
 
 /** Which surface the slot asked for: the tab, the main area, or the narrow side panel. */
 export type ShellSurface = 'tab' | 'main' | 'panel'
+
+const BRAND_URI = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(wordmarkSvg)}`
 
 export interface ShellProps {
   surface?: ShellSurface
@@ -292,6 +295,7 @@ export function Shell(props: ShellProps): React.ReactElement {
   if (surface === 'panel') {
     return (
       <div className="th-root" role="region" aria-label={t('app.title')} data-th-theme={theme} data-th-density={density}>
+        <img className="th-brand-mark" src={BRAND_URI} alt="" aria-hidden="true" />
         {nav}
         <div className="th-main">
           <div className="th-top">
@@ -335,6 +339,7 @@ export function Shell(props: ShellProps): React.ReactElement {
 
   return (
     <div className="th-root" data-th-theme={theme} data-th-density={density}>
+      <img className="th-brand-mark" src={BRAND_URI} alt="" aria-hidden="true" />
       {nav}
       <div className="th-main">
         <header className="th-top">

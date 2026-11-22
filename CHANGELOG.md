@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.1.0
+
+Stable 2.1 release. The manager keeps its 2.0 direction: official packs are a separate catalog, and
+no packs are bundled with the plugin.
+
+- Settings → Official plugin baseline: lists every official loader entry with its shipped default
+  (including entries that ship disabled and conditional/config rows), compares it with the live
+  switch, and offers a preview + backup + confirm reset to shipped defaults while disabling
+  third-party rows. The reset keeps `dsh-tool-hub` and `dshmarket`, never uninstalls packages,
+  and does not touch skills, MCP, config or agent preset files; third-party rows can be exempted
+  in the preview.
+- Client brand slot for the official glass pack: a hidden `th-brand-mark` node is always rendered but
+  only displayed by a pack; with the pack off it takes no layout space.
+- Extension API v2 and the experimental `thirdparty-lazy` pack from the 2.0 alpha line are included.
+- `codex-ui-glass` 1.2.0 is released separately; 2.1.0 is the client it expects.
+
 > Scope note: **1.x never shipped extension-pack management.** Early 2.0 alpha builds experimented
 > with bundled packs; the final 2.0 manager ships no packs and reads the separate official catalog.
 

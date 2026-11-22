@@ -14,6 +14,7 @@ import { SAVE_OP } from './ops.js'
 import { Badge, Button, Callout, Card, Empty } from '../components.js'
 import { SP } from '../theme.js'
 import { FieldRow } from './fields.js'
+import { OfficialBaseline } from './official.js'
 import {
   dirtyOf,
   draftOf,
@@ -166,6 +167,7 @@ export function SettingsView(props: ViewProps): React.ReactElement {
           </section>
         )
       })}
+      <OfficialBaseline {...props} />
     </div>
   )
 }

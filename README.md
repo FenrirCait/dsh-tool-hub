@@ -45,7 +45,7 @@ Requires a DSH host that can install a GitHub plugin bundle.
 Pinned release, recommended:
 
 ```bash
-dsh plugin --profile <profile> add github:FenrirCait/dsh-tool-hub#v2.0.0-alpha.77
+dsh plugin --profile <profile> add github:FenrirCait/dsh-tool-hub#v2.1.0
 ```
 
 From a local checkout:
@@ -76,7 +76,7 @@ the public pack repository; a local HTTP fixture is supported for testing.
 
 ### Extension API v2 and the experimental thirdparty-lazy pack
 
-Tool Hub `2.0.0-alpha.77` adds **Extension API v2**. A pack may declare `apiVersion: 2` and receive
+Tool Hub `2.1.0` ships **Extension API v2**. A pack may declare `apiVersion: 2` and receive
 the trusted root host context plus `api.onDispose`; that lets an official pack install per-agent
 lifecycle hooks without changing the core plugin. Packs are trusted local code — install only packs
 you trust.
@@ -93,7 +93,18 @@ visible, restrictable tools from non-core plugins behind one meta tool:
   `window_`) are excluded explicitly.
 - Experimental limits: enabled state is in memory and resets on process restart; the protected
   list is a static allowlist, not an owner registry, and tools outside that list may be masked.
-- Requires Tool Hub `2.0.0-alpha.77` or newer. It is not bundled with the plugin.
+- Requires Tool Hub `2.1.0` or newer. It is not bundled with the plugin.
+
+### Official plugin baseline
+
+Settings → **Official plugin baseline** lists the official loader entries from DSH's shipped
+profile tree (`--dump-default-config`, without the user layer) next to their live switches. Entries
+that ship disabled stay marked **default off**; conditional and config-bearing rows are marked but
+not guessed. **Preview and restore…** shows the exact official changes and the third-party rows that
+would be disabled, backs up `cordis.patch.yml` plus the plugin state, and applies only after
+confirmation. `dsh-tool-hub` and `dshmarket` are kept, no package is uninstalled, and skills, MCP,
+config and agent preset files are never edited. Third-party rows can be ticked **Keep** in the
+preview when their agent preset must remain available.
 
 ## Usage guide
 

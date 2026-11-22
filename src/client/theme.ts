@@ -147,6 +147,7 @@ const CSS = `
   font-size: 11px;
   color: var(--dsw-alias-label-tertiary, rgba(127, 127, 127, 0.78));
 }
+.th-brand-mark { display: none; }
 .th-main { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .th-top {
   display: flex;
@@ -382,7 +383,8 @@ const CSS = `
   width: min(460px, 100%);
   border: 1px solid var(--dsw-alias-border-l2, rgba(127, 127, 127, 0.24));
   border-radius: 14px;
-  background: var(--dsw-alias-bg-elevated, rgb(255, 255, 255));
+  background-color: var(--dsw-alias-bg-base, rgb(255, 255, 255));
+  background-image: linear-gradient(var(--dsw-alias-bg-elevated, rgb(255, 255, 255)), var(--dsw-alias-bg-elevated, rgb(255, 255, 255)));
   color: var(--dsw-alias-label-primary, rgb(27, 27, 31));
   box-shadow: 0 18px 44px var(--dsw-alias-shadow-popover, rgba(0, 0, 0, 0.28));
   padding: 16px 18px;
@@ -390,9 +392,10 @@ const CSS = `
   overflow-y: auto;
 }
 .th-dialog:focus { outline: none; }
+html[data-ds-dark-theme] .th-dialog, body[data-ds-dark-theme] .th-dialog { background-color: var(--dsw-alias-bg-base, rgb(28, 28, 30)); background-image: linear-gradient(var(--dsw-alias-bg-elevated, rgb(28, 28, 30)), var(--dsw-alias-bg-elevated, rgb(28, 28, 30))); color: var(--dsw-alias-label-primary, rgb(242, 242, 247)); }
 @media (prefers-color-scheme: dark) {
   /* A shell without the elevated token still gets readable text in either theme. */
-  .th-dialog { background: var(--dsw-alias-bg-elevated, rgb(28, 28, 30)); color: var(--dsw-alias-label-primary, rgb(242, 242, 247)); }
+  .th-dialog { background-color: var(--dsw-alias-bg-base, rgb(28, 28, 30)); background-image: linear-gradient(var(--dsw-alias-bg-elevated, rgb(28, 28, 30)), var(--dsw-alias-bg-elevated, rgb(28, 28, 30))); color: var(--dsw-alias-label-primary, rgb(242, 242, 247)); }
 }
 .th-help-dialog { width: min(560px, 92vw); max-height: 86vh; margin: auto; padding: 16px 18px; border: 1px solid var(--dsw-alias-border-l2, rgba(127,127,127,0.24)); border-radius: 14px; background: var(--dsh-glass-card-raised, color-mix(in srgb, var(--dsw-alias-bg-elevated, rgb(255,255,255)) 72%, transparent)); color: var(--dsw-alias-label-primary, rgb(27,27,31)); box-shadow: 0 18px 44px var(--dsw-alias-shadow-popover, rgba(0,0,0,0.28)); overflow: auto; color-scheme: light; -webkit-backdrop-filter: blur(var(--dsh-glass-blur, 20px)) saturate(150%); backdrop-filter: blur(var(--dsh-glass-blur, 20px)) saturate(150%); }
 html[data-ds-dark-theme] .th-help-dialog, body[data-ds-dark-theme] .th-help-dialog { background: var(--dsh-glass-card-raised, color-mix(in srgb, var(--dsw-alias-bg-elevated, rgb(28,28,30)) 72%, transparent)); color: var(--dsw-alias-label-primary, rgb(242,242,247)); color-scheme: dark; }

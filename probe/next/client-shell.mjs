@@ -225,7 +225,7 @@ check('import-suffix', () => {
   for (const [path, source] of sources) {
     for (const match of source.matchAll(/from '(\.{1,2}\/[^']+)'/g)) {
       const spec = match[1]
-      assert(/\.(js|json)$/.test(spec), `${path}:${lineAt(source, match.index)} imports '${spec}' without a .js suffix`)
+      assert(/\.(js|json|svg)$/.test(spec), `${path}:${lineAt(source, match.index)} imports '${spec}' without a .js/.json/.svg suffix`)
     }
   }
   return 'relative imports carry .js'
