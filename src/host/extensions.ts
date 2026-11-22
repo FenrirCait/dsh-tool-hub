@@ -19,6 +19,7 @@ import type { DomainRegistration } from '../shared/contract.js'
 import type { DomainModule, LocalizedText } from '../shared/types.js'
 
 export const EXTENSION_API_VERSION = 2
+export const SUPPORTED_API_VERSIONS = [1, 2] as const
 
 const ID = /^[a-z0-9][a-z0-9_-]{0,31}$/
 const RESERVED = new Set([
@@ -137,9 +138,6 @@ export function normalizeManifest(raw: unknown): ManifestResult {
   if (name === null) return { ok: false, error: 'name needs zh and en' }
   const version = typeof raw.version === 'string' ? raw.version.trim() : ''
   if (version === '') return { ok: false, error: 'version is required' }
-  if (raw.apiVersion !== EXTENSION_API_VERSION) {
-    return { ok: false, error: `apiVersion must be ${EXTENSION_API_VERSION}` }
-  }
   const host = typeof raw.host === 'string' ? raw.host.trim() : ''
   if (host === '' || isAbsolute(host) || host.split(/[\\/]/).includes('..')) {
     return { ok: false, error: 'host must be a relative path inside the extension folder' }
@@ -168,8 +166,12 @@ export function normalizeManifest(raw: unknown): ManifestResult {
       if (!styles.includes(file)) styles.push(file)
     }
   }
+  const apiVersion: unknown = raw.apiVersion
+  if (apiVersion !== 1 && apiVersion !== 2) {
+    return { ok: false, error: 'apiVersion must be 1 or 2' }
+  }
   const description = localized(raw.description) ?? undefined
-  return { ok: true, manifest: { id, name, version, apiVersion: EXTENSION_API_VERSION, ...(description === undefined ? {} : { description }), host, views, styles } }
+  return { ok: true, manifest: { id, name, version, apiVersion, ...(description === undefined ? {} : { description }), host, views, styles } }
 }
 
 function errorText(error: unknown): string {
@@ -179,11 +181,13 @@ function errorText(error: unknown): string {
 export class ExtensionManager {
   private readonly cache = new Map<string, { key: string; registration: DomainRegistration }>()
   private readonly disposers = new Map<string, Set<() => void>>()
+  private readonly inactive = new Set<string>()
 
   constructor(private readonly options: ExtensionManagerOptions) {}
 
   /** Run and forget every disposer registered by one extension's activate(). */
   private disposeExtension(id: string): void {
+    this.inactive.add(id)
     const set = this.disposers.get(id)
     this.disposers.delete(id)
     if (set === undefined) return
@@ -323,7 +327,7 @@ export class ExtensionManager {
       return { status: { ...base, loaded: false, error: 'host entry: ' + errorText(error), ops: [], css: [] } }
     }
     const cached = this.cache.get(manifest.id)
-    if (cached !== undefined && cached.key === key) {
+    if (cached !== undefined && cached.key === key && !this.inactive.has(manifest.id)) {
       return {
         status: { ...base, loaded: true, error: null, ops: cached.registration.module.ops.map(op => op.id), css },
         registration: cached.registration,
@@ -337,12 +341,12 @@ export class ExtensionManager {
       const activate = loaded.default
       if (typeof activate !== 'function') throw new Error('the host entry must default-export an activate(api) function')
       const api = {
-        version: EXTENSION_API_VERSION,
+        version: manifest.apiVersion,
         id: manifest.id,
         dir,
         log: this.options.log,
         services: this.options.services,
-        ...(this.options.ctx === undefined ? {} : { ctx: this.options.ctx }),
+        ...(manifest.apiVersion < 2 || this.options.ctx === undefined ? {} : { ctx: this.options.ctx }),
         onDispose: (dispose: () => void) => {
           if (typeof dispose !== 'function') throw new Error('onDispose needs a function')
           current.add(dispose)
@@ -351,6 +355,7 @@ export class ExtensionManager {
       this.disposers.set(manifest.id, current)
       const registration = await (activate as (api: unknown) => DomainRegistration | Promise<DomainRegistration>)(api)
       const checked = validateRegistration(manifest, registration)
+      this.inactive.delete(manifest.id)
       this.cache.set(manifest.id, { key, registration: checked })
       return {
         status: { ...base, loaded: true, error: null, ops: checked.module.ops.map(op => op.id), css },

@@ -74,6 +74,27 @@ Official compatibility packs are **not bundled**. The manager reads a catalog fr
 Settings: `compat.indexUrl`, `compat.mirrorUrl` and `compat.cacheMinutes`. The defaults point at
 the public pack repository; a local HTTP fixture is supported for testing.
 
+### Extension API v2 and the experimental thirdparty-lazy pack
+
+Tool Hub `2.0.0-alpha.77` adds **Extension API v2**. A pack may declare `apiVersion: 2` and receive
+the trusted root host context plus `api.onDispose`; that lets an official pack install per-agent
+lifecycle hooks without changing the core plugin. Packs are trusted local code — install only packs
+you trust.
+
+`thirdparty-lazy` is an experimental API v2 pack in the official repository. It hides currently
+visible, restrictable tools from non-core plugins behind one meta tool:
+
+- `thirdparty_lazy({action:"list"})` lists hidden/enabled tools for the current session.
+- `thirdparty_lazy({action:"enable", names:[...]})` enables exact names for that session; `disable`
+  hides them again.
+- It skips MCP tools (the MCP lazy layer owns those), tools already hidden by another layer, the
+  Tool Hub control tools, and a static protected core list.
+- `dsh-computer-use-win` prefixes (`computer_`, `cua_`, `windows_computer_use_`, `screen_`,
+  `window_`) are excluded explicitly.
+- Experimental limits: enabled state is in memory and resets on process restart; the protected
+  list is a static allowlist, not an owner registry, and tools outside that list may be masked.
+- Requires Tool Hub `2.0.0-alpha.77` or newer. It is not bundled with the plugin.
+
 ## Usage guide
 
 The `?` button in the panel topbar opens the bilingual guide. It covers plugins, skills, MCP and

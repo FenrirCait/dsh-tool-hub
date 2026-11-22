@@ -7,6 +7,9 @@
 
 - Extension API v2: trusted official packs receive the root host context and `onDispose`, so
   lifecycle hooks, per-agent tool policies and cleanup can live in a pack without core changes.
+- Experimental `thirdparty-lazy` pack: hides visible third-party tools per agent, with a
+  session-scoped `thirdparty_lazy` meta tool; skips MCP, already-hidden, protected core and
+  dsh-computer-use-win prefixes.
 
 ## 2.0.0-alpha.76
 

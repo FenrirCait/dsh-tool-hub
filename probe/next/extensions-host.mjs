@@ -401,7 +401,7 @@ await writeExtension('dangling', manifestOf('dangling', {
 // the official-pack module (a folder of that name would clash with the compat domain).
 await writeExtension('core', manifestOf('core'), IDLE_HOST)
 await writeExtension('compat', manifestOf('compat'), IDLE_HOST)
-await writeExtension('badmanifest', { ...manifestOf('badmanifest'), apiVersion: 2 }, IDLE_HOST)
+await writeExtension('badmanifest', { ...manifestOf('badmanifest'), apiVersion: 3 }, IDLE_HOST)
 await writeExtension('nomanifest', null, IDLE_HOST)
 await writeExtension('escape', manifestOf('escape', { host: '../escape.mjs' }), IDLE_HOST)
 await writeExtension('invalid', { ...manifestOf('Bad_Id') }, IDLE_HOST)
@@ -543,7 +543,7 @@ try {
   await test('discover-manifest-rules', async () => {
     const { extensions } = await list(runtime)
     const api = oneRow(extensions, 'badmanifest')
-    includes(api.error, 'apiVersion must be 1', 'apiVersion')
+    includes(api.error, 'apiVersion must be 1 or 2', 'apiVersion')
     const missing = oneRow(extensions, 'nomanifest')
     includes(missing.error, 'manifest.json:', 'missing manifest')
     const escape = oneRow(extensions, 'escape')

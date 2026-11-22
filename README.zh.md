@@ -64,6 +64,24 @@ dsh plugin --profile <profile> add ./dsh-tool-hub
 设置项：`compat.indexUrl`、`compat.mirrorUrl`、`compat.cacheMinutes`。默认指向公开配套仓库；
 也支持本地 HTTP fixture 做测试。
 
+### 扩展 API v2 与实验包 thirdparty-lazy
+
+Tool Hub `2.0.0-alpha.77` 增加 **Extension API v2**：官方包可以声明 `apiVersion: 2`，拿到受信任的
+宿主根上下文和 `api.onDispose`，从而在不改核心插件的情况下安装 per-agent 生命周期钩子。扩展包是
+本机受信任代码，只安装你信任的包。
+
+`thirdparty-lazy` 是官方仓库里的实验性 API v2 包。它把当前可见、可限制的第三方插件工具隐藏到一个
+元工具后面：
+
+- `thirdparty_lazy({action:"list"})` 列出当前会话隐藏/已启用的工具。
+- `thirdparty_lazy({action:"enable", names:[...]})` 在当前会话启用精确工具名；`disable` 再隐藏。
+- 跳过 MCP 工具（由 MCP 懒加载层管理）、已被其他层隐藏的工具、Tool Hub 控制工具和静态核心保护名单。
+- 显式排除 `dsh-computer-use-win` 前缀（`computer_`、`cua_`、`windows_computer_use_`、
+  `screen_`、`window_`）。
+- 实验限制：启用状态只在内存中，进程重启后重置；保护名单是静态 allowlist，不是 owner 注册表，
+  名单外的工具可能被误隐藏。
+- 需要 Tool Hub `2.0.0-alpha.77` 或更新版本；主包不内置该实验包。
+
 ## 使用指引
 
 面板顶栏 `?` 打开中英双语指引，覆盖插件、技能、MCP 与懒加载、分组、预设、官方配套、诊断、扩展，
