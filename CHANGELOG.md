@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.0-alpha.73
+
+- Forced catalog refreshes bypass GitHub raw's CDN cache with a cache-busting query, so a
+  newly pushed pack version is visible immediately.
+
 ## 2.0.0-alpha.72
 
 - Remove the panel's brand dot; it read as a stray black blob in the sidebar.

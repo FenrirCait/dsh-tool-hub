@@ -255,17 +255,20 @@ export function normalizeIndex(raw: unknown): IndexParse {
 
 // ── fetching ────────────────────────────────────────────────────────────────
 
-async function fetchBytes(url: URL, limit: number, accept: string): Promise<Uint8Array> {
+async function fetchBytes(url: URL, limit: number, accept: string, bypassCache = false): Promise<Uint8Array> {
+  const target = new URL(url.href)
+  // GitHub's raw CDN can keep the previous catalog for a while; force reads must bypass it.
+  if (bypassCache) target.searchParams.set('th', String(Date.now()))
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
   timer.unref?.()
   try {
     let response: Response
     try {
-      response = await fetch(url, {
+      response = await fetch(target, {
         signal: controller.signal,
         redirect: 'follow',
-        headers: { accept },
+        headers: { accept, 'cache-control': 'no-cache', pragma: 'no-cache' },
       })
     }
     catch (error) {
@@ -322,7 +325,7 @@ export class CompatCatalog {
     for (const [source, url] of [['index', indexUrl], ['mirror', mirrorUrl]] as const) {
       if (url === null) continue
       try {
-        const body = await fetchBytes(url, MAX_INDEX_BYTES, 'application/json, text/plain;q=0.9')
+        const body = await fetchBytes(url, MAX_INDEX_BYTES, 'application/json, text/plain;q=0.9', force)
         let raw: unknown
         try {
           raw = JSON.parse(new TextDecoder().decode(body))
