@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.0-alpha.76
+
+- The usage-guide dialog uses codex's `--dsh-glass-card-raised` and `--dsh-glass-blur`, so its
+  translucency follows the Clear / Standard / Frosted material preset too.
+
 ## 2.0.0-alpha.75
 
 - The native usage-guide dialog follows dark mode (no more white-on-white) and uses a
