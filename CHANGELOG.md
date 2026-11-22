@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.0-alpha.75
+
+- The native usage-guide dialog follows dark mode (no more white-on-white) and uses a
+  translucent glass surface with a lighter scrim so the page behind stays visible.
+
 ## 2.0.0-alpha.74
 
 - Fix vertically stretched form inputs inside column fields (the `flex: 1 1 180px` basis applied
