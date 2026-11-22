@@ -2,6 +2,18 @@
 
 ## 2.0.0-alpha.76
 
+2.0 rewrite: the package is now a manager for a separate official-pack repository.
+
+- Bundled `compat/` packs removed. Official packs are read from the remote catalog, installed
+  with explicit confirmation, verified (bytes + SHA-256), backed up and replaced atomically.
+- Official packs can be installed, updated, uninstalled and batch-synced from the panel; uninstall
+  is never part of a batch action.
+- New in-panel `?` usage guide, dark/light theme, paged lists, sticky headers, deny reasons and
+  per-turn lazy unload.
+- Codex glass pack follows float/compat layouts, Clear/Standard/Frosted material presets and the
+  floor-glow switch; panel dialogs and fields consume codex's own glass tokens.
+- Fixes: dark primary buttons and count badges, white-on-white help dialog, stretched field inputs,
+  rounded rail/main alignment, DSH dot-grid/wordmark ground.
 - The usage-guide dialog uses codex's `--dsh-glass-card-raised` and `--dsh-glass-blur`, so its
   translucency follows the Clear / Standard / Frosted material preset too.
 
