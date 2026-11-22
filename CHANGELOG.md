@@ -1,5 +1,8 @@
 # Changelog
 
+> Scope note: **1.x never shipped extension-pack management.** Early 2.0 alpha builds experimented
+> with bundled packs; the final 2.0 manager ships no packs and reads the separate official catalog.
+
 ## 2.0.0-alpha.76
 
 2.0 rewrite: the package is now a manager for a separate official-pack repository.
