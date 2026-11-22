@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.0-alpha.66
+
+- New setting `tools.lazyUnloadEachTurn` (off by default): at `agent/turn-stopping`, clear the
+  current session's lazy loads only; global panel loads are untouched. The next turn starts with
+  those tools hidden again.
+
 ## 2.0.0-alpha.65
 
 - Tool rows no longer show two identical '懒加载' badges: the primary badge now reflects the

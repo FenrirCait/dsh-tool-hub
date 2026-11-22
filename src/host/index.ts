@@ -134,6 +134,19 @@ export class Runtime {
       this.lazyTimer.unref?.()
     }
     const on = (this.ctx as unknown as { on?: (event: string, callback: (payload: unknown) => void) => (() => void) | void }).on
+    on?.('agent/turn-stopping', payload => {
+      try {
+        if (this.state.settings['tools.lazyUnloadEachTurn'] !== true) return
+        const agent = payload !== null && typeof payload === 'object' ? (payload as { agent?: { id?: unknown; session?: { id?: unknown } } }).agent : undefined
+        const sessionId = typeof agent?.session?.id === 'string' ? agent.session.id : typeof agent?.id === 'string' ? agent.id : ''
+        if (sessionId === '' || !clearSessionLazy(this.state, sessionId)) return
+        void saveState(this.state, 'lazy-turn-unload')
+        refresh()
+      }
+      catch (error) {
+        logTo(this.ctx)('warn', '[tool-hub] lazy turn unload failed: ' + String((error as Error)?.message ?? error))
+      }
+    })
     on?.('agent/disposed', payload => {
       try {
         const agent = payload !== null && typeof payload === 'object' ? (payload as { agent?: { id?: unknown; session?: { id?: unknown } } }).agent : undefined
