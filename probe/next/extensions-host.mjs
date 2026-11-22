@@ -1143,7 +1143,93 @@ try {
     return '4 dropped packs unreachable, nothing escaped'
   })
 
-  // 37. the throw-away tree is removed, nothing outside it was touched
+  // 45. uninstall: payload gates, the confirm gate, and only an installed copy can go
+  await test('compat-uninstall-payloads', async () => {
+    const target = join(extRoot, 'compat-demo')
+    // The dispatcher's confirm gate runs before the handler, exactly as for compat.install.
+    const cases = [
+      [{}, 'confirm-required', 'no payload at all'],
+      [{ id: 'compat-demo' }, 'confirm-required', 'no confirmation'],
+      [{ confirm: true }, 'bad-payload', 'confirmed but no id'],
+      [{ id: 'Bad_Id', confirm: true }, 'bad-payload', 'uppercase id'],
+      [{ id: 'compat-extra', confirm: true }, 'not-installed', 'a pack that was never installed'],
+      [{ id: 'compat-nope', confirm: true }, 'not-installed', 'an id nothing installed'],
+    ]
+    for (const [payload, code, label] of cases) {
+      const outcome = await run(runtime, 'compat.uninstall', payload)
+      assertEqual(outcome.ok, false, label)
+      assertEqual(outcome.error.code, code, label + ' code')
+    }
+    assertEqual(await stat(join(target, 'host.mjs')).then(info => info.isFile(), () => false), true, 'a refused uninstall leaves the installed copy alone')
+    return 'confirm-required x2, bad-payload x2, not-installed x2; copy intact'
+  })
+
+  // 46. uninstall: backed up, removed, dropped from enabled, and the catalog row goes back to "not installed"
+  await test('compat-uninstall-pack', async () => {
+    const target = join(extRoot, 'compat-demo')
+    await writeFile(join(target, 'marker.txt'), 'local only', 'utf8')
+    const enabledBefore = JSON.parse(await readFile(statePath, 'utf8')).extensions.enabled
+    assert(enabledBefore.includes('compat-demo'), 'the pack is enabled before the uninstall: ' + JSON.stringify(enabledBefore))
+    const backupsBefore = (await readdir(join(stateDir, 'backups'))).filter(name => name.startsWith('extensions-compat-demo-')).length
+    const outcome = await run(runtime, 'compat.uninstall', { id: 'compat-demo', confirm: true })
+    assert(outcome.ok === true, 'compat.uninstall failed: ' + JSON.stringify(outcome.error))
+    assertEqual(outcome.data.id, 'compat-demo', 'uninstalled id')
+    const backup = outcome.data.backup
+    assert(backup.startsWith(join(stateDir, 'backups') + sep), 'the backup is under backupDir: ' + backup)
+    includes(basename(backup), 'extensions-compat-demo-', 'the backup folder is extensions-<id>-<stamp>')
+    assertEqual(await readFile(join(backup, 'marker.txt'), 'utf8'), 'local only', 'the backup kept the local file')
+    assertEqual(JSON.parse(await readFile(join(backup, 'manifest.json'), 'utf8')).version, '2.0.0', 'the backup kept the installed version')
+    const backupsAfter = (await readdir(join(stateDir, 'backups'))).filter(name => name.startsWith('extensions-compat-demo-')).length
+    assertEqual(backupsAfter, backupsBefore + 1, 'exactly one backup was added')
+    assertEqual(await stat(target).then(() => false).catch(() => true), true, 'the folder is gone')
+    const state = JSON.parse(await readFile(statePath, 'utf8'))
+    assertEqual(state.extensions.enabled.includes('compat-demo'), false, 'the id was dropped from the enabled list')
+    const rows = (await list(runtime)).extensions
+    assertEqual(rowsOf(rows, 'compat-demo').length, 0, 'no row for the removed pack (rows: ' + rows.map(row => row.id).join(',') + ')')
+    const gone = await run(runtime, 'compat-demo.status', {})
+    assertEqual(gone.ok, false, 'the pack op is gone')
+    assertEqual(gone.error.code, 'bad-op', 'op code')
+    const index = await run(runtime, 'compat.index', {})
+    const pack = oneRow(index.data.packs, 'compat-demo')
+    assertEqual(pack.installedVersion, '', 'the catalog row says not installed')
+    assertEqual(pack.installedDir, '', 'no installed dir')
+    assertEqual(pack.enabled, false, 'not enabled')
+    assertEqual(pack.updateAvailable, false, 'nothing to update')
+    const history = (await readFile(join(stateDir, 'history.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+    const removed = history.filter(entry => entry.op === 'compat.uninstall' && entry.ok === true)
+    assert(removed.length > 0, 'history has no successful compat.uninstall row')
+    assertEqual(removed[removed.length - 1].audit, true, 'the uninstall is audited')
+    assertEqual(await stat(join(profileDir, 'cordis.patch.yml')).then(() => false).catch(() => true), true, 'no patch file was created in the profile')
+    const again = await run(runtime, 'compat.uninstall', { id: 'compat-demo', confirm: true })
+    assertEqual(again.ok, false, 'a second uninstall must fail')
+    assertEqual(again.error.code, 'not-installed', 'second uninstall code')
+    return 'backup ' + basename(backup) + ', folder gone, enabled cleared, catalog row reset'
+  })
+
+  // 47. uninstall refuses a folder that is not this extension: no manifest, or another id inside it
+  await test('compat-uninstall-folder-guards', async () => {
+    const stray = join(extRoot, 'stray-folder')
+    await mkdir(stray, { recursive: true })
+    await writeFile(join(stray, 'notes.txt'), 'not an extension', 'utf8')
+    const strayOutcome = await run(runtime, 'compat.uninstall', { id: 'stray-folder', confirm: true })
+    assertEqual(strayOutcome.ok, false, 'a folder without a manifest is refused')
+    assertEqual(strayOutcome.error.code, 'not-extension', 'stray code')
+    includes(strayOutcome.error.message, 'manifest.json', 'the message names the missing manifest')
+    assertEqual(await stat(join(stray, 'notes.txt')).then(info => info.isFile(), () => false), true, 'the refused folder was not touched')
+    const aliased = join(extRoot, 'aliased')
+    await mkdir(aliased, { recursive: true })
+    await writeFile(join(aliased, 'manifest.json'), JSON.stringify(manifestOf('compat-alias'), null, 2) + '\n', 'utf8')
+    const aliasOutcome = await run(runtime, 'compat.uninstall', { id: 'aliased', confirm: true })
+    assertEqual(aliasOutcome.ok, false, 'a folder registered as another id is refused')
+    assertEqual(aliasOutcome.error.code, 'not-extension', 'alias code')
+    includes(aliasOutcome.error.message, 'compat-alias', 'the message names the registered id')
+    assertEqual(await stat(join(aliased, 'manifest.json')).then(info => info.isFile(), () => false), true, 'the refused folder still has its manifest')
+    const backups = (await readdir(join(stateDir, 'backups'))).filter(name => name.startsWith('extensions-stray-folder-') || name.startsWith('extensions-aliased-'))
+    sameList(backups, [], 'a refused uninstall makes no backup')
+    return 'no manifest and foreign manifest both refused, nothing written'
+  })
+
+  // 48. the throw-away tree is removed, nothing outside it was touched
   await test('temp-tree-cleaned', async () => {
     await rm(root, { recursive: true, force: true })
     const gone = await stat(root).then(() => false).catch(() => true)

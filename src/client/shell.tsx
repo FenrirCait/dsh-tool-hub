@@ -10,6 +10,7 @@ import { applyExtensionStyles } from './extension-style.js'
 import { getSnapshot, runOp, WRITE_TIMEOUT_MS } from './api.js'
 import type { ApiFail } from './api.js'
 import { Button, Callout, Loading } from './components.js'
+import { HelpButton } from './help.js'
 import { createT, detectLang, normalizeLang } from './i18n.js'
 import type { Lang } from './i18n.js'
 import { installStyles } from './theme.js'
@@ -305,6 +306,7 @@ export function Shell(props: ShellProps): React.ReactElement {
               <Button variant="ghost" onClick={refresh} busy={refreshing} label={t('top.refresh')}>
                 {refreshing ? t('top.refreshing') : t('top.refresh')}
               </Button>
+              <HelpButton lang={effectiveLang} />
             </div>
           </div>
           <div className="th-content">
@@ -355,6 +357,7 @@ export function Shell(props: ShellProps): React.ReactElement {
             <Button onClick={refresh} busy={refreshing} label={t('top.refresh')}>
               {refreshing ? t('top.refreshing') : t('top.refresh')}
             </Button>
+            <HelpButton lang={effectiveLang} />
           </div>
         </header>
         <div className="th-content" role="region" aria-label={t('a11y.content')} aria-live="polite">

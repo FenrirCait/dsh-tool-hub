@@ -380,7 +380,8 @@ check('compat-mounted', () => {
 check('compat-index-shape', () => {
   const api = requireCompat()
   for (const name of ['COMPAT', 'indexOf', 'compatActionOf', 'pendingActions', 'backupRootOf', 'installTargetOf',
-    'CompatManager', 'installLabel', 'updateLabel', 'batchLabel', 'updateHint', 'installHint', 'batchHint',
+    'CompatManager', 'installLabel', 'updateLabel', 'uninstallLabel', 'actionLabel', 'batchLabel',
+    'updateHint', 'installHint', 'uninstallHint', 'hintFor', 'batchHint', 'canUninstall',
     'statusLabel', 'sourceLabel', 'remoteVersionLabel', 'installedVersionLabel']) {
     assert(api[name] !== undefined, 'compat-manager.tsx does not export ' + name)
   }
@@ -416,6 +417,31 @@ check('compat-action-rules', () => {
   assert(JSON.stringify(pending) === JSON.stringify([{ id: 'a', action: 'install' }, { id: 'b', action: 'update' }]), 'ready work in catalog order: ' + JSON.stringify(pending))
   assert(api.pendingActions([]).length === 0, 'no rows is an empty batch')
   return 'install / update / nothing, batch in order'
+})
+
+check('compat-uninstall-rules', () => {
+  const api = requireCompat()
+  const row = extra => ({ id: 'a', name: { zh: 'a', en: 'a' }, version: '2.0.0', installedVersion: '2.0.0', installedDir: '/x/a', enabled: true, updateAvailable: false, fileCount: 1, ...extra })
+  const missing = row({ installedVersion: '', installedDir: '', enabled: false })
+  assert(api.COMPAT.uninstall === 'compat.uninstall', 'the uninstall op is compat.uninstall')
+  assert(api.canUninstall(row({})) === true, 'a row with a local copy can be uninstalled')
+  assert(api.canUninstall(missing) === false, 'a row with no local copy cannot')
+  assert(api.canUninstall({ installedVersion: '0.0.1' }) === true, 'the installed version alone decides')
+  const pending = api.pendingActions([row({}), missing])
+  assert(JSON.stringify(pending) === JSON.stringify([{ id: 'a', action: 'install' }]), 'an uninstall never joins the batch: ' + JSON.stringify(pending))
+  assert(api.actionLabel('zh', 'uninstall') === '卸载', 'the uninstall action is 卸载')
+  assert(api.actionLabel('en', 'uninstall') === 'Uninstall', 'the uninstall action is Uninstall')
+  assert(api.actionLabel('zh', 'install') === api.installLabel('zh') && api.actionLabel('zh', 'update') === api.updateLabel('zh'), 'the other actions keep their labels')
+  const zh = api.uninstallHint('zh', 'pack-a', '/state/backups')
+  const en = api.uninstallHint('en', 'pack-a', '/state/backups')
+  assert(zh.includes('/state/backups') && zh.includes('extensions-pack-a-'), 'the zh hint names the backup folder it creates')
+  assert(zh.includes('删除') && zh.includes('启用列表'), 'the zh hint says the folder is removed and the id disabled')
+  assert(zh !== en, 'the uninstall hint is bilingual')
+  assert(en.includes('/state/backups') && /remov/i.test(en) && /enabled list/i.test(en), 'the en hint says remove + disable')
+  assert(api.hintFor('zh', { id: 'pack-a', action: 'uninstall' }, '/state/backups') === zh, 'hintFor picks the uninstall copy')
+  assert(api.hintFor('zh', { id: 'pack-a', action: 'install' }, '/state/backups') === api.installHint('zh', 'pack-a'), 'hintFor picks the install copy')
+  assert(api.hintFor('zh', { id: 'pack-a', action: 'update' }, '/state/backups') === api.updateHint('zh', 'pack-a', '/state/backups'), 'hintFor picks the update copy')
+  return 'installed-only uninstall, never in a batch, bilingual copy, one sentence per action'
 })
 
 check('compat-labels', () => {
@@ -479,7 +505,11 @@ check('compat-row-render', () => {
   assert(compatBody.includes('busy={running}'), 'each action must report the batch state')
   assert(compatBody.includes('checked={row.enabled}'), 'the switch must follow the host state')
   assert(compatBody.includes('runDetailed(COMPAT.set, { id: row.id, enabled })'), 'the switch must send extension.set with the next state')
-  return 'name/id, target, description, both versions, status, per-row controls'
+  assert(compatBody.includes('{canUninstall(row) ? ('), 'only an installed row may offer the uninstall button')
+  assert(compatBody.includes("{ id: row.id, action: 'uninstall' }"), 'the uninstall button must queue exactly that row')
+  assert(compatBody.includes('title={uninstallHint(lang, row.id, backupRoot)}'), 'the uninstall button must explain the backup')
+  assert(compatBody.includes('{uninstallLabel(lang)}'), 'the uninstall button needs its label')
+  return 'name/id, target, description, both versions, status, uninstall, per-row controls'
 })
 
 check('compat-refresh', () => {
@@ -505,7 +535,8 @@ check('compat-batch', () => {
   assert(/setQueued\(null\)[\s\S]{0,120}runActions\(actions\)/.test(compatBody), 'the confirmation must close before the batch runs')
   assert(compatBody.includes('for (const action of actions) {'), 'the batch must run one action at a time')
   assert(!/Promise\.all/.test(compatBody), 'the batch must not fan out')
-  assert(compatBody.includes('runDetailed(COMPAT.install, { id: action.id, confirm: true })'), 'a confirmed install must carry confirm:true')
+  assert(compatBody.includes("const op = action.action === 'uninstall' ? COMPAT.uninstall : COMPAT.install"), 'a queued uninstall must take the uninstall op')
+  assert(compatBody.includes('runDetailed(op, { id: action.id, confirm: true })'), 'every confirmed action must carry confirm:true')
   assert(compatBody.includes('failed.push({ id: action.id, message: outcome.error'), 'a failed action must be recorded by id')
   assert(compatBody.includes('{report.failed.map(item => ('), 'every failure must be rendered')
   assert(compatBody.includes('{reportLine(lang, report.ok, report.failed.length)}'), 'the batch must report its counts')

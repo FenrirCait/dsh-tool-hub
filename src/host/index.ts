@@ -23,6 +23,7 @@ import {
   DEFAULT_INDEX_URL,
   DEFAULT_MIRROR_URL,
   installCompatPack,
+  uninstallCompatPack,
   type CompatPack,
 } from './compat-catalog.js'
 import { attachToolMask, knownToolNames, maskControl, surfacePort, type ToolMask } from './tool-mask.js'
@@ -335,6 +336,7 @@ export class Runtime {
         ops: [
           { id: 'compat.index', write: false, audit: false, note: 'Reads the official pack catalog from compat.indexUrl (then compat.mirrorUrl), reuses it for compat.cacheMinutes, and matches each pack against the local extension rows.' },
           { id: 'compat.install', write: true, audit: true, confirm: true, note: 'Downloads one pack from the official catalog, verifies every file byte count and sha256, backs up an existing local copy and rebuilds the runtime.' },
+          { id: 'compat.uninstall', write: true, audit: true, confirm: true, note: 'Backs up the installed copy of one official pack, removes it from the profile extension root, drops it from the enabled list, saves and rebuilds; the pack stays in the catalog.' },
         ],
         settings: COMPAT_SETTINGS,
       },
@@ -392,6 +394,29 @@ export class Runtime {
           // the reload the panel does next already carries the row the install created.
           await this.rebuild('compat-install')
           return installed
+        },
+        // Uninstalling has no catalog document to consult: the local folder is the whole subject,
+        // so the handler works from <stateDir>/extensions/<id> and the pack stays installable.
+        'compat.uninstall': async (payload, env) => {
+          const body = payload as { id?: unknown } | null
+          const id = typeof body?.id === 'string' ? body.id : ''
+          if (!EXTENSION_ID.test(id)) throw new Failure('bad-payload', 'compat.uninstall needs an id')
+          let removed
+          try {
+            removed = await uninstallCompatPack({ id, root: join(stateDir(), 'extensions'), backupRoot: backupDir() })
+          }
+          catch (error) {
+            throw compatFailure(error)
+          }
+          // An enabled id whose folder is gone would sit in state as a phantom entry the next
+          // build reports as an error row; drop it before the rebuild reads the list.
+          const enabled = this.state.extensions.enabled.filter(entry => entry !== id)
+          if (enabled.length !== this.state.extensions.enabled.length) {
+            this.state.extensions.enabled = enabled
+            await env.save('compat-uninstall')
+          }
+          await this.rebuild('compat-uninstall')
+          return removed
         },
       },
     }

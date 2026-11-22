@@ -9,6 +9,8 @@
  * Two derived rules carry the UI:
  *  - compatActionOf is the whole "what can I do" test: no local copy is an install, a local copy
  *    at another version is an update, a matching version has nothing to do;
+ *  - uninstalling is a row action only (canUninstall): it never joins a batch, and it backs the
+ *    copy up before the folder is removed;
  *  - compat.index computes installedVersion / enabled / updateAvailable from the live extension
  *    rows, so a cached catalog document never shows a stale install state.
  *
@@ -22,14 +24,16 @@ import type { CompatIndex, CompatPackRow, ViewProps } from '../types.js'
 
 // ── the ops this card sends ─────────────────────────────────────────────────
 
-/** The catalog read and the verified install; the switch stays extension.set. */
+/** The catalog read, the verified install and the row's uninstall; the switch stays extension.set. */
 export const COMPAT = {
   index: 'compat.index',
   install: 'compat.install',
+  uninstall: 'compat.uninstall',
   set: 'extension.set',
 } as const
 
-export type CompatAction = 'install' | 'update'
+/** What one queued action can be; uninstall is row-only and never comes from pendingActions. */
+export type CompatAction = 'install' | 'update' | 'uninstall'
 
 /** One queued action, as the confirmation and the batch runner carry it. */
 export interface CompatPending {
@@ -100,7 +104,12 @@ export function compatActionOf(row: CompatPackRow): CompatAction | null {
   return row.updateAvailable ? 'update' : null
 }
 
-/** Everything one batch press would do, in catalog order. */
+/** A row with a local copy can always be uninstalled; the catalog document is not involved. */
+export function canUninstall(row: CompatPackRow): boolean {
+  return row.installedVersion !== ''
+}
+
+/** Everything one batch press would do, in catalog order. Uninstalls are never in here. */
 export function pendingActions(rows: readonly CompatPackRow[]): CompatPending[] {
   const out: CompatPending[] = []
   for (const row of rows) {
@@ -183,6 +192,10 @@ export function updateLabel(lang: ViewProps['lang']): string {
   return zh(lang) ? '更新' : 'Update'
 }
 
+export function uninstallLabel(lang: ViewProps['lang']): string {
+  return zh(lang) ? '卸载' : 'Uninstall'
+}
+
 export function batchLabel(lang: ViewProps['lang']): string {
   return zh(lang) ? '全部安装/更新' : 'Install/update all'
 }
@@ -220,7 +233,8 @@ export function statusTone(row: CompatPackRow): 'neutral' | 'on' | 'brand' {
 }
 
 export function actionLabel(lang: ViewProps['lang'], action: CompatAction): string {
-  return action === 'install' ? installLabel(lang) : updateLabel(lang)
+  if (action === 'install') return installLabel(lang)
+  return action === 'update' ? updateLabel(lang) : uninstallLabel(lang)
 }
 
 export function noVersion(lang: ViewProps['lang']): string {
@@ -239,6 +253,19 @@ export function updateHint(lang: ViewProps['lang'], id: string, backupRoot: stri
   return zh(lang)
     ? '更新 ' + id + '：当前副本先整体备份到 ' + backupRoot + '/extensions-' + id + '-<时间戳>，校验通过后再用索引里的文件替换它。'
     : 'Updates ' + id + ': the current copy is backed up to ' + backupRoot + '/extensions-' + id + '-<stamp> first, then replaced by the verified files from the index.'
+}
+
+/** The uninstall confirmation: back the copy up, remove the folder, drop it from the enabled list. */
+export function uninstallHint(lang: ViewProps['lang'], id: string, backupRoot: string): string {
+  return zh(lang)
+    ? '卸载 ' + id + '：先把本地副本整体备份到 ' + backupRoot + '/extensions-' + id + '-<时间戳>，再删除本地目录并把它从启用列表里移除；官方索引里的配套不受影响，随时可以重装。'
+    : 'Uninstalls ' + id + ': the local copy is backed up to ' + backupRoot + '/extensions-' + id + '-<stamp> first, then the folder is removed and the id is dropped from the enabled list. The pack stays in the index and can be installed again.'
+}
+
+/** One confirmation sentence per action, shared by the row titles and the dialog. */
+export function hintFor(lang: ViewProps['lang'], item: CompatPending, backupRoot: string): string {
+  if (item.action === 'install') return installHint(lang, item.id)
+  return item.action === 'update' ? updateHint(lang, item.id, backupRoot) : uninstallHint(lang, item.id, backupRoot)
 }
 
 /** One confirmation for the whole batch, with the count and the same promise. */
@@ -345,7 +372,9 @@ export function CompatManager(props: CompatProps): React.ReactElement {
       // Sequential on purpose: every install rewrites one folder and rebuilds the host, and the
       // owner needs the first failure to be reportable before the next action starts.
       for (const action of actions) {
-        const outcome = await runDetailed(COMPAT.install, { id: action.id, confirm: true })
+        // The batch only ever queues installs and updates; a row's uninstall takes the other op.
+        const op = action.action === 'uninstall' ? COMPAT.uninstall : COMPAT.install
+        const outcome = await runDetailed(op, { id: action.id, confirm: true })
         if (outcome.ok) ok += 1
         else failed.push({ id: action.id, message: outcome.error ?? '' })
       }
@@ -370,13 +399,7 @@ export function CompatManager(props: CompatProps): React.ReactElement {
 
   const only = queued !== null && queued.length === 1 ? queued[0] ?? null : null
   const dialogTitle = queued === null ? '' : only === null ? batchLabel(lang) : actionLabel(lang, only.action)
-  const dialogHint = queued === null
-    ? ''
-    : only === null
-      ? batchHint(lang, queued.length, backupRoot)
-      : only.action === 'install'
-        ? installHint(lang, only.id)
-        : updateHint(lang, only.id, backupRoot)
+  const dialogHint = queued === null ? '' : only === null ? batchHint(lang, queued.length, backupRoot) : hintFor(lang, only, backupRoot)
 
   return (
     <Card label={cardTitle(lang)}>
@@ -440,7 +463,7 @@ export function CompatManager(props: CompatProps): React.ReactElement {
                       variant="ghost"
                       busy={running}
                       disabled={anyBusy}
-                      title={action === 'install' ? installHint(lang, row.id) : updateHint(lang, row.id, backupRoot)}
+                      title={hintFor(lang, { id: row.id, action }, backupRoot)}
                       onClick={() => {
                         setQueued([{ id: row.id, action }])
                       }}
@@ -448,6 +471,19 @@ export function CompatManager(props: CompatProps): React.ReactElement {
                       {actionLabel(lang, action)}
                     </Button>
                   )}
+                  {canUninstall(row) ? (
+                    <Button
+                      variant="ghost"
+                      busy={running}
+                      disabled={anyBusy}
+                      title={uninstallHint(lang, row.id, backupRoot)}
+                      onClick={() => {
+                        setQueued([{ id: row.id, action: 'uninstall' }])
+                      }}
+                    >
+                      {uninstallLabel(lang)}
+                    </Button>
+                  ) : null}
                   <Switch
                     checked={row.enabled}
                     busy={running}

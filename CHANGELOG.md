@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.0-alpha.70
+
+- Official packs can be uninstalled from the manager: `compat.uninstall` backs up the local
+  folder, removes it, drops the id from the enabled list and rebuilds; explicit confirmation.
+- Added a "?" usage guide in both topbars, covering plugins, skills, MCP/tools, groups, presets,
+  official packs, diagnostics and keyboard navigation.
+
 ## 2.0.0-alpha.69
 
 - Official compat packs moved out of the package into a separate GitHub catalog

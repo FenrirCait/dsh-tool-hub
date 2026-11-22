@@ -16,7 +16,7 @@
  *   swap, never silently overwritten.
  */
 import { createHash } from 'node:crypto'
-import { copyFile, mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import type { LocalizedText } from '../shared/types.js'
 
@@ -46,6 +46,8 @@ export type CompatFailureCode =
   | 'bad-path'
   | 'download-failed'
   | 'write-failed'
+  | 'not-installed'
+  | 'not-extension'
 
 export class CompatFailure extends Error {
   readonly code: CompatFailureCode
@@ -101,6 +103,12 @@ export interface CompatInstallResult {
   /** The backup folder an existing copy went to; '' when there was nothing to back up. */
   backup: string
   files: number
+}
+
+export interface CompatUninstallResult {
+  id: string
+  /** The backup folder the removed copy went to. */
+  backup: string
 }
 
 // ── URLs and paths ──────────────────────────────────────────────────────────
@@ -451,4 +459,63 @@ export async function installCompatPack(options: {
     await rm(staging, { recursive: true, force: true }).catch(() => undefined)
     throw error
   }
+}
+
+/** The id a folder's manifest.json declares; '' when the file cannot be read as one. */
+async function manifestIdOf(file: string): Promise<string> {
+  try {
+    const raw = JSON.parse(await readFile(file, 'utf8')) as unknown
+    return isRecord(raw) && typeof raw.id === 'string' ? raw.id.trim() : ''
+  }
+  catch {
+    return ''
+  }
+}
+
+/**
+ * Remove one installed pack from <root>/<id>, after backing it up.
+ *
+ * The order is the contract again: the copy is backed up first, and only then is the folder moved
+ * aside in one rename and deleted, so a failed backup or a failed move always leaves the installed
+ * copy where it was. The folder has to be an extension folder — a manifest.json, and if that
+ * manifest names another id the folder belongs to that extension and is refused — so this op can
+ * never delete whatever else happens to sit under the extension root. A copy whose manifest is
+ * broken is still removable: that is precisely the folder an owner needs to clean up. The catalog
+ * is only read here, and no patch file is touched.
+ */
+export async function uninstallCompatPack(options: {
+  id: string
+  root: string
+  backupRoot: string
+}): Promise<CompatUninstallResult> {
+  const { id } = options
+  if (!ID.test(id)) throw new CompatFailure('bad-path', 'id must match ^[a-z0-9][a-z0-9_-]{0,31}$')
+  const root = resolve(options.root)
+  const target = resolve(root, id)
+  assertInside(root, target)
+  const info = await stat(target).catch(() => null)
+  if (info === null || !info.isDirectory()) {
+    throw new CompatFailure('not-installed', 'no local copy of "' + id + '" under ' + root)
+  }
+  const manifestFile = join(target, 'manifest.json')
+  const hasManifest = await stat(manifestFile).then(entry => entry.isFile(), () => false)
+  if (!hasManifest) {
+    throw new CompatFailure('not-extension', '"' + id + '" is not an extension folder: no manifest.json')
+  }
+  const declared = await manifestIdOf(manifestFile)
+  if (declared !== '' && declared !== id) {
+    throw new CompatFailure('not-extension', 'the folder under "' + id + '" is registered as "' + declared + '"')
+  }
+  const backup = await backupCopy(id, target, options.backupRoot)
+  // Rename before deleting: the id is freed in one step, and a half-deleted folder can never be
+  // discovered again. A dot name is skipped by discovery, so a leftover retired folder is inert.
+  const retired = join(root, '.retired-' + id + '-' + stampOf(new Date()))
+  try {
+    await rename(target, retired)
+  }
+  catch (error) {
+    throw new CompatFailure('write-failed', 'could not remove the local copy: ' + errorText(error))
+  }
+  await rm(retired, { recursive: true, force: true }).catch(() => undefined)
+  return { id, backup }
 }
