@@ -534,7 +534,7 @@ check('file-length', () => {
 check('tool-row-fields', () => {
   const stripped = (bodies.view + '\n' + bodies.tree).replace(/'[^']*'/g, "''")
   const fields = new Set([...stripped.matchAll(/\btool\.([A-Za-z]+)/g)].map(match => match[1]))
-  const known = ['name', 'enabled', 'server', 'lazy', 'lazyHidden', 'fixed', 'denyReasons']
+  const known = ['name', 'enabled', 'server', 'lazy', 'lazyHidden', 'fixed', 'denyReasons', 'effective']
   for (const field of fields) assert(known.includes(field), 'ToolRow has no field ' + field)
   for (const field of known) assert(fields.has(field), 'the tools views never read tool.' + field)
   const entries = new Set([...bodies.view.replace(/'[^']*'/g, "''").matchAll(/\bentry\.([A-Za-z]+)/g)].map(match => match[1]))
@@ -711,10 +711,10 @@ check('deny-reasons-contract', () => {
 })
 
 check('deny-reasons-render', () => {
-  assert(includes(bodies.tree, '{reasonsOf(tool).map(reason => ('), 'the row must render one badge per reason')
+  assert(includes(bodies.tree, "{reasonsOf(tool).filter(reason => reason !== 'install' && reason !== 'lazy').map(reason => ("), 'the row must render one badge per non-primary reason')
   assert(/title=\{denyReasonHint\(lang, reason\)\}/.test(bodies.tree), 'each reason badge needs its tooltip')
   assert(includes(bodies.tree, '{denyReasonLabel(lang, reason)}'), 'each reason badge needs its bilingual label')
-  assert(/tone=\{reason === 'onDemand' \|\| reason === 'lazy' \? 'off' : 'warn'\}/.test(bodies.tree), 'the reason badges need a tone')
+  assert(/tone=\{reason === 'onDemand' \? 'off' : 'warn'\}/.test(bodies.tree), 'the reason badges need a tone')
   assert(/key=\{reason\}/.test(bodies.tree), 'reason badges need a stable key')
   assert(!includes(bodies.tree, 'lazy-hidden'), 'the lazy reason replaces the old lazy-hidden badge')
   return 'one badge per reason with tooltip, no duplicate lazy badge'

@@ -3,9 +3,7 @@
  *
  * Grouping, filtering and the parent write are pure functions so the probe can run them; the
  * component only spends them on the shared GroupTree. Keys are namespaced (mcp:/prefix:) because
- * one server and one prefix may carry the same name.
- *
- * Expansion is remembered under 'tool-hub-tree-tools' and starts empty, so every parent is
+ * one server and one prefix may carry the same name. Expansion is remembered under 'tool-hub-tree-tools' and starts empty, so every parent is
  * collapsed on a first visit; a non-empty search forces every rendered parent open, because a
  * match behind a collapsed row would read as a missing tool. A term that matches a parent label
  * keeps every child of that parent: searching a server name lists its tools, not nothing.
@@ -251,6 +249,8 @@ interface ToolLineProps {
 /** One tool row: name, its state badges, and the switch that edits the draft. */
 function ToolLine(props: ToolLineProps): React.ReactElement {
   const { tool, term, hidden, lang, t, costs, showCosts, onToggle } = props
+  const blocked = hidden || tool.effective === false
+  const primary = blocked ? (tool.lazyHidden === true ? copyLabel(lang, '懒加载隐藏', 'Lazy hidden') : t('tools.masked')) : t('tools.visible')
   return (
     <div className="th-row th-tool-row" tabIndex={-1} data-tool-row={tool.name}>
       <div className="th-row-body">
@@ -260,11 +260,11 @@ function ToolLine(props: ToolLineProps): React.ReactElement {
             : <React.Fragment key={index}>{part.text}</React.Fragment>)}
         </span>
         <span className="th-row-meta">
-          <Badge tone={hidden ? 'warn' : 'on'}>{hidden ? t('tools.masked') : t('tools.visible')}</Badge>
+          <Badge tone={blocked ? 'warn' : 'on'}>{primary}</Badge>
           {tool.lazy === true ? <Badge tone="off">{t('tools.lazy')}</Badge> : null}
           {tool.fixed === true ? <Badge tone="warn">{copyLabel(lang, '固定', 'fixed')}</Badge> : null}
-          {reasonsOf(tool).map(reason => (
-            <Badge key={reason} tone={reason === 'onDemand' || reason === 'lazy' ? 'off' : 'warn'} title={denyReasonHint(lang, reason)}>
+          {reasonsOf(tool).filter(reason => reason !== 'install' && reason !== 'lazy').map(reason => (
+            <Badge key={reason} tone={reason === 'onDemand' ? 'off' : 'warn'} title={denyReasonHint(lang, reason)}>
               {denyReasonLabel(lang, reason)}
             </Badge>
           ))}

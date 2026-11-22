@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.0-alpha.65
+
+- Tool rows no longer show two identical '懒加载' badges: the primary badge now reflects the
+  effective state (可见 / 已屏蔽 / 懒加载隐藏), while install/lazy reasons are not repeated as
+  separate reason badges. The server's lazy mode still shows once as '懒加载'.
+
 ## 2.0.0-alpha.64
 
 - Snapshot revision now ignores the audit history written by every read and each session's
