@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.0-alpha.64
+
+- Snapshot revision now ignores the audit history written by every read and each session's
+  moving `updatedAt`, so two reads of one state really return `unchanged`; real state changes
+  still move the fingerprint.
+
 ## 2.0.0-alpha.63
 
 - Extensions: detect local copies that shadow a bundled pack ('本地覆盖'), and add

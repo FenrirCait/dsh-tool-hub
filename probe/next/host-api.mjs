@@ -308,6 +308,10 @@ try {
     assertEqual(a, b, 'the fingerprint must not depend on fetchedAt or key order')
     assert(/^[0-9a-f]{16}$/.test(a), 'revision shape: ' + a)
     assert(a !== routes.snapshotRevision({ b: 1, nested: { x: 'v', y: [1, 3] } }), 'a changed payload must change the revision')
+    const quiet = routes.snapshotRevision({ history: [{ at: 'a' }], sessionList: [{ id: 's', updatedAt: 1 }], tools: [] })
+    const loud = routes.snapshotRevision({ history: [{ at: 'b' }, { at: 'c' }], sessionList: [{ id: 's', updatedAt: 2 }], tools: [] })
+    assertEqual(quiet, loud, 'history and session updatedAt are read noise')
+    assert(quiet !== routes.snapshotRevision({ history: [], sessionList: [{ id: 's', updatedAt: 2 }], tools: [{ name: 'x' }] }), 'a real state change still changes the revision')
     return a
   })
 

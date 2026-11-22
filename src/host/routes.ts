@@ -54,22 +54,31 @@ export const MAX_BODY = 256 * 1024
  * state, not the wire format.
  */
 export function snapshotRevision(payload: unknown): string {
-  const canonical = JSON.stringify(canonicalValue(payload)) ?? 'null'
+  const canonical = JSON.stringify(canonicalValue(payload, '')) ?? 'null'
   return createHash('sha256').update(canonical).digest('hex').slice(0, 16)
 }
 
-/** Fields that describe the read, not the state: left out of the fingerprint. */
-const REVISION_SKIP: ReadonlySet<string> = new Set(['fetchedAt'])
+/**
+ * Fields that describe the read, not the state. `history` is written by every snapshot read and
+ * would otherwise invalidate the revision on each request; a session's `updatedAt` moves with
+ * unrelated activity while its id/title stay the same.
+ */
+function revisionSkip(key: string, path: string): boolean {
+  if (path === '' && (key === 'fetchedAt' || key === 'history')) return true
+  if (key === 'updatedAt' && path.startsWith('sessionList.')) return true
+  return false
+}
 
 /** JSON with sorted object keys, for a fingerprint that does not depend on key order. */
-function canonicalValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(item => canonicalValue(item))
+function canonicalValue(value: unknown, path: string): unknown {
+  if (Array.isArray(value)) return value.map((item, index) => canonicalValue(item, path === '' ? String(index) : path + '.' + String(index)))
   if (value !== null && typeof value === 'object') {
     const source = value as Record<string, unknown>
     const sorted: Record<string, unknown> = {}
     for (const key of Object.keys(source).sort()) {
-      if (REVISION_SKIP.has(key)) continue
-      sorted[key] = canonicalValue(source[key])
+      if (revisionSkip(key, path)) continue
+      const childPath = path === '' ? key : path + '.' + key
+      sorted[key] = canonicalValue(source[key], childPath)
     }
     return sorted
   }
