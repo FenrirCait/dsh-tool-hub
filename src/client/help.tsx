@@ -4,7 +4,7 @@
  * public plugin and pack repositories.
  */
 import * as React from 'react'
-import { Button, Dialog } from './components.js'
+import { Button } from './components.js'
 import type { Lang } from './i18n.js'
 
 function copy(lang: Lang, zh: string, en: string): string {
@@ -98,22 +98,36 @@ export interface HelpButtonProps {
   lang: Lang
 }
 
-/** Topbar "?" with the usage guide. */
+/** Topbar "?" with the usage guide in a native top-layer dialog. */
 export function HelpButton(props: HelpButtonProps): React.ReactElement {
   const [open, setOpen] = React.useState(false)
+  const ref = React.useRef<HTMLDialogElement | null>(null)
   const zh = props.lang === 'zh'
   const list = sections(props.lang)
+
+  React.useEffect(() => {
+    const node = ref.current
+    if (node === null) return
+    if (open && !node.open) node.showModal()
+    else if (!open && node.open) node.close()
+  }, [open])
+
   return (
     <>
       <Button variant="ghost" onClick={() => setOpen(true)} label={zh ? '使用指引' : 'Usage guide'}>
         ?
       </Button>
-      <Dialog
-        open={open}
-        title={zh ? '工具总控台使用指引' : 'Tool Hub usage guide'}
+      <dialog
+        ref={ref}
+        className="th-help-dialog"
+        aria-labelledby="th-help-title"
+        onCancel={event => { event.preventDefault(); setOpen(false) }}
         onClose={() => setOpen(false)}
-        footer={<Button onClick={() => setOpen(false)}>{zh ? '知道了' : 'Got it'}</Button>}
       >
+        <div className="th-dialog-title" id="th-help-title" style={{ display: 'flex', alignItems: 'center' }}>
+          <span style={{ flex: 1 }}>{zh ? '工具总控台使用指引' : 'Tool Hub usage guide'}</span>
+          <Button variant="ghost" onClick={() => setOpen(false)} label={zh ? '关闭' : 'Close'}>×</Button>
+        </div>
         <div style={{ maxHeight: '58vh', overflowY: 'auto', paddingRight: 4 }}>
           <p style={{ marginTop: 0, fontSize: 12, color: 'var(--dsw-alias-label-secondary, rgba(127,127,127,.96))' }}>
             {zh ? '从左侧栏选择功能；下面按页面说明常用操作。' : 'Pick a view on the left; the notes below cover the common actions.'}
@@ -133,7 +147,10 @@ export function HelpButton(props: HelpButtonProps): React.ReactElement {
             <a href="https://github.com/FenrirCait/dsh-tool-hub-packs" target="_blank" rel="noreferrer">dsh-tool-hub-packs</a>
           </p>
         </div>
-      </Dialog>
+        <div className="th-dialog-foot">
+          <Button onClick={() => setOpen(false)}>{zh ? '知道了' : 'Got it'}</Button>
+        </div>
+      </dialog>
     </>
   )
 }

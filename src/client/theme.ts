@@ -394,6 +394,9 @@ const CSS = `
   /* A shell without the elevated token still gets readable text in either theme. */
   .th-dialog { background: var(--dsw-alias-bg-elevated, rgb(28, 28, 30)); color: var(--dsw-alias-label-primary, rgb(242, 242, 247)); }
 }
+.th-help-dialog { width: min(560px, 92vw); max-height: 86vh; margin: auto; padding: 16px 18px; border: 1px solid var(--dsw-alias-border-l2, rgba(127,127,127,0.24)); border-radius: 14px; background: var(--dsw-alias-bg-elevated, rgb(255,255,255)); color: var(--dsw-alias-label-primary, rgb(27,27,31)); box-shadow: 0 18px 44px var(--dsw-alias-shadow-popover, rgba(0,0,0,0.28)); overflow: auto; }
+.th-help-dialog::backdrop { background: var(--dsw-alias-bg-overlay, rgba(0,0,0,0.42)); }
+.th-help-dialog .th-dialog-title { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
 .th-dialog-title { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
 .th-dialog-body { font-size: 12px; color: var(--dsw-alias-label-secondary, rgba(127, 127, 127, 0.96)); }
 .th-dialog-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }

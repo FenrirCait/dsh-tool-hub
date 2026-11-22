@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.0-alpha.71
+
+- The usage guide now uses a native top-layer `<dialog>`, so it opens centered with a readable
+  backdrop even inside the host's transformed/glass containers.
+
 ## 2.0.0-alpha.70
 
 - Official packs can be uninstalled from the manager: `compat.uninstall` backs up the local
