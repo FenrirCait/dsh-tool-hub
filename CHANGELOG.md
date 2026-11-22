@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.0-alpha.67
+
+- A lazy-hidden row shows only '懒加载隐藏' + '固定'; the server's '懒加载' badge is not
+  repeated when the primary badge already explains why the row is hidden.
+
 ## 2.0.0-alpha.66
 
 - New setting `tools.lazyUnloadEachTurn` (off by default): at `agent/turn-stopping`, clear the

@@ -261,7 +261,7 @@ function ToolLine(props: ToolLineProps): React.ReactElement {
         </span>
         <span className="th-row-meta">
           <Badge tone={blocked ? 'warn' : 'on'}>{primary}</Badge>
-          {tool.lazy === true ? <Badge tone="off">{t('tools.lazy')}</Badge> : null}
+          {tool.lazy === true && tool.lazyHidden !== true ? <Badge tone="off">{t('tools.lazy')}</Badge> : null}
           {tool.fixed === true ? <Badge tone="warn">{copyLabel(lang, '固定', 'fixed')}</Badge> : null}
           {reasonsOf(tool).filter(reason => reason !== 'install' && reason !== 'lazy').map(reason => (
             <Badge key={reason} tone={reason === 'onDemand' ? 'off' : 'warn'} title={denyReasonHint(lang, reason)}>
