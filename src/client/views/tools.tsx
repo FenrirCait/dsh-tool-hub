@@ -17,7 +17,7 @@ import type { ToolRow, ViewProps } from '../types.js'
 import type { TreeGroup } from './package-tree.js'
 import { ScopeCard } from './scope-card.js'
 import { OnDemandCard } from './on-demand-card.js'
-import { ToolsTree, buildToolTree, copyLabel, denyOf, nextDeny } from './tools-tree.js'
+import { ToolsTree, buildToolTree, copyLabel, denyOf, nextDeny, rowElements } from './tools-tree.js'
 
 /** Op ids this view sends; the tool-surface domain owns their payloads. */
 const SAVE = 'tool.save'
@@ -92,6 +92,8 @@ export function ToolsView(props: ViewProps): React.ReactElement {
   const [lazySession, setLazySession] = React.useState('')
   const [costs, setCosts] = React.useState<Record<string, number>>({})
   const showCosts = snapshot.settings['tools.showTokenEstimate'] !== false
+  const searchHost = React.useRef<HTMLSpanElement>(null)
+  const treeHost = React.useRef<HTMLDivElement>(null)
 
   React.useEffect(() => {
     if (!showCosts) return
@@ -124,6 +126,18 @@ export function ToolsView(props: ViewProps): React.ReactElement {
   /* The tree owns grouping and filtering; its rows feed the toolbar count and the empty branch. */
   const tree = React.useMemo(() => buildToolTree(snapshot.tools, term, t), [snapshot.tools, term, t])
   const rows = tree.rows
+
+  const focusSearch = React.useCallback(() => {
+    searchHost.current?.querySelector<HTMLInputElement>('input')?.focus()
+  }, [])
+
+  /* Arrow keys from the search box enter the painted rows: down from the top, up from the bottom. */
+  const enterRows = React.useCallback((event: React.KeyboardEvent<HTMLSpanElement>) => {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+    const painted = rowElements(treeHost.current)
+    event.preventDefault()
+    painted[event.key === 'ArrowDown' ? 0 : painted.length - 1]?.focus()
+  }, [])
 
   const loadAll = lang === 'zh' ? '全部加载' : 'Load all'
   const unloadAll = lang === 'zh' ? '全部卸载' : 'Unload all'
@@ -232,14 +246,16 @@ export function ToolsView(props: ViewProps): React.ReactElement {
   return (
     <div>
       <Toolbar>
-        <SearchBox
-          value={query}
-          onChange={setQuery}
-          placeholder={t('tools.search')}
-          label={t('tools.search')}
-          onClear={() => { setQuery('') }}
-          clearLabel={t('action.clear')}
-        />
+        <span className="th-search-host" ref={searchHost} onKeyDown={enterRows}>
+          <SearchBox
+            value={query}
+            onChange={setQuery}
+            placeholder={t('tools.search')}
+            label={t('tools.search')}
+            onClear={() => { setQuery('') }}
+            clearLabel={t('action.clear')}
+          />
+        </span>
         <Badge tone="brand">{t('tools.count', { n: rows.length })}</Badge>
         {showCosts && costTotal > 0 ? <Badge tone="neutral">{lang === 'zh' ? `合计 ~${costTotal} tok` : `~${costTotal} tok total`}</Badge> : null}
         <Badge tone={dirty ? 'warn' : 'neutral'}>
@@ -307,6 +323,8 @@ export function ToolsView(props: ViewProps): React.ReactElement {
               forceOpen={term !== ''}
               term={term}
               busyKey={bulkBusy}
+              hostRef={treeHost}
+              onEscapeSearch={focusSearch}
               onToggle={toggleMask}
               onBulk={bulkGroup}
             />

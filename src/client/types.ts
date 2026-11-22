@@ -156,6 +156,8 @@ export interface ExtensionStatus {
   css?: string[]
   /** True when the extension comes from the plugin package's compat/ directory. */
   bundled?: boolean
+  /** True when this local copy shadows a bundled pack with the same id. */
+  overridesBundled?: boolean
 }
 
 export interface HistoryEntry {

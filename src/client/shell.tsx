@@ -140,9 +140,13 @@ export function Shell(props: ShellProps): React.ReactElement {
     if (snapshot !== null) applyExtensionStyles(snapshot.extensions)
   }, [snapshot])
 
-  const load = React.useCallback(async (silent: boolean) => {
+  /**
+   * Read the snapshot. A silent load rides the revision cache (the host answers `unchanged` when
+   * nothing moved); a forced load asks the host to rebuild and skips it.
+   */
+  const load = React.useCallback(async (silent: boolean, fresh = false) => {
     if (!silent) setPhase(current => (current === 'ready' ? 'ready' : 'loading'))
-    const result = await getSnapshot()
+    const result = await getSnapshot(fresh ? { fresh: true } : undefined)
     if (!result.ok) {
       setFailure(result)
       setPhase('error')
@@ -200,7 +204,9 @@ export function Shell(props: ShellProps): React.ReactElement {
 
   const refresh = React.useCallback(() => {
     setRefreshing(true)
-    void load(true).finally(() => {
+    // The refresh button is the user asking the host to look again, so it must never be answered
+    // from the revision cache.
+    void load(true, true).finally(() => {
       setRefreshing(false)
     })
   }, [load])

@@ -2,11 +2,12 @@
  * Extensions: what is installed, whether it loaded, its hot switch, the views it declares, and
  * one console for the ops it registers.
  *
- * Three host calls, and the difference between them is deliberate:
+ * Four host calls, and the difference between them is deliberate:
  *   - a declared view's read goes through runOp, because the page renders the payload and run()
  *     reports success instead of keeping it;
- *   - the panel's own two writes (extension.set, extension.reload) go through run, so the shell
- *     owns busy and the failure notice, and the snapshot reload after a write comes for free;
+ *   - the panel's own three writes (extension.set, extension.reload, extension.installBundled) go
+ *     through run, so the shell owns busy and the failure notice, and the snapshot reload after a
+ *     write comes for free;
  *   - the console's ops go through runDetailed, because the host's answer is what the operator
  *     came for and a failure has to stay readable under the form.
  *
@@ -22,10 +23,10 @@ import { Badge, Button, Callout, Card, Dialog, Empty, Field, Select, Switch, Too
 import { FONT, R, SP, T } from '../theme.js'
 import type { ExtensionStatus, ExtensionViewRow, ViewProps } from '../types.js'
 
-// ── the two ops this panel sends ─────────────────────────────────────────────
+// ── the ops this panel sends ─────────────────────────────────────────────────
 
 /** The panel's own writes; an extension's ops arrive in the snapshot and are never spelled here. */
-export const EXT = { set: 'extension.set', reload: 'extension.reload' } as const
+export const EXT = { set: 'extension.set', reload: 'extension.reload', installBundled: 'extension.installBundled' } as const
 
 // ── source filter: the plugin package's compat/ directory vs a local folder ──
 
@@ -75,6 +76,30 @@ export function sourceHeading(lang: ViewProps['lang']): string {
 /** Shown when the chosen source has no rows although the installation does. */
 export function sourceEmptyLabel(lang: ViewProps['lang']): string {
   return lang === 'zh' ? '该来源没有扩展' : 'No extensions from this source'
+}
+
+// ── a local copy over a bundled pack ────────────────────────────────────────
+
+/** The badge a local copy carries when a bundled pack of the same id exists. */
+export function overrideLabel(lang: ViewProps['lang']): string {
+  return lang === 'zh' ? '本地覆盖' : 'Local override'
+}
+
+/** The copy action's label; the confirm dialog reuses it as its title. */
+export function copyLabel(lang: ViewProps['lang']): string {
+  return lang === 'zh' ? '复制到本地' : 'Copy to local'
+}
+
+/** What the confirm dialog says the copy will do, naming the pack it reads. */
+export function copyHint(lang: ViewProps['lang'], id: string): string {
+  return lang === 'zh'
+    ? '把插件包中的 compat/' + id + ' 复制到本机扩展目录，之后可以编辑它；已有的同名本地扩展不会被覆盖。'
+    : 'Copies compat/' + id + ' from the plugin package into the local extensions folder so you can edit it; an existing local copy is never overwritten.'
+}
+
+/** Only a bundled row that no local copy shadows can be copied; a shadowing row is already local. */
+export function canCopyToLocal(entry: ExtensionStatus): boolean {
+  return entry.bundled === true && entry.overridesBundled !== true
 }
 
 // ── normalising helpers ─────────────────────────────────────────────────────
@@ -403,7 +428,7 @@ interface PanelProps {
  *
  * The panel owns its own hooks, so several extensions can sit on one page without the parent
  * keeping a record of per-extension state. A view read and a console run each carry their own
- * busy flag: the shell's busy only knows the panel's own two ops.
+ * busy flag: the shell's busy only knows the panel's own three ops.
  */
 function ExtensionPanel(props: PanelProps): React.ReactElement {
   const { entry, lang, t, busy, run, runDetailed } = props
@@ -414,6 +439,7 @@ function ExtensionPanel(props: PanelProps): React.ReactElement {
   const [failure, setFailure] = React.useState('')
   const [pending, setPending] = React.useState<unknown>(null)
   const [asking, setAsking] = React.useState(false)
+  const [copyAsk, setCopyAsk] = React.useState(false)
   const [running, setRunning] = React.useState(false)
   const alive = React.useRef(true)
 
@@ -429,8 +455,11 @@ function ExtensionPanel(props: PanelProps): React.ReactElement {
   const parsed = parsePayload(payload)
   const toggleKey = EXT.set + ':' + entry.id
   const reloadKey = EXT.reload + ':' + entry.id
+  const copyKey = EXT.installBundled + ':' + entry.id
   const toggleBusy = busy === toggleKey
   const reloadBusy = busy === reloadKey
+  const copyBusy = busy === copyKey
+  const copyable = canCopyToLocal(entry)
   const anyBusy = busy !== null
   const name = nameOf(entry, lang)
   const options = entry.ops.map(id => ({ value: id, label: id }))
@@ -565,6 +594,7 @@ function ExtensionPanel(props: PanelProps): React.ReactElement {
               <Badge title={t('extensions.version')}>{t('extensions.version') + ' ' + entry.version}</Badge>
             )}
             {entry.bundled === true ? <Badge tone="neutral">{t('extensions.bundled')}</Badge> : null}
+            {entry.overridesBundled === true ? <Badge tone="brand">{overrideLabel(lang)}</Badge> : null}
             <Badge tone={entry.enabled ? 'on' : 'off'}>
               {entry.enabled ? t('extensions.enabled') : t('extensions.disabled')}
             </Badge>
@@ -576,6 +606,19 @@ function ExtensionPanel(props: PanelProps): React.ReactElement {
             )}
           </span>
         </div>
+        {copyable ? (
+          <Button
+            variant="ghost"
+            busy={copyBusy}
+            disabled={anyBusy}
+            title={copyHint(lang, entry.id)}
+            onClick={() => {
+              setCopyAsk(true)
+            }}
+          >
+            {copyLabel(lang)}
+          </Button>
+        ) : null}
         <Button
           variant="ghost"
           busy={reloadBusy}
@@ -634,6 +677,40 @@ function ExtensionPanel(props: PanelProps): React.ReactElement {
         <pre style={BOX} aria-label={t('extensions.payload')}>
           {jsonText(pending)}
         </pre>
+      </Dialog>
+      <Dialog
+        open={copyAsk}
+        title={copyLabel(lang)}
+        onClose={() => {
+          if (!copyBusy) setCopyAsk(false)
+        }}
+        footer={
+          <>
+            <Button
+              variant="ghost"
+              disabled={copyBusy}
+              onClick={() => {
+                setCopyAsk(false)
+              }}
+            >
+              {t('action.cancel')}
+            </Button>
+            <Button
+              variant="primary"
+              busy={copyBusy}
+              onClick={() => {
+                setCopyAsk(false)
+                void run(EXT.installBundled, { id: entry.id })
+              }}
+            >
+              {t('action.confirm')}
+            </Button>
+          </>
+        }
+      >
+        <p className="th-field-hint" style={{ marginTop: 0 }}>
+          {copyHint(lang, entry.id)}
+        </p>
       </Dialog>
     </Card>
   )

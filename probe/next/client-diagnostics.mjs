@@ -21,7 +21,13 @@
  *  13. copy puts the current report on the clipboard and shows success or failure;
  *  14. a failed extension row offers one explicit extension.reload, and one bulk action reloads
  *      every failed row; both report their result and neither invents a repair op;
- *  15. extension failures come from the snapshot payload, not from a new host field.
+ *  15. extension failures come from the snapshot payload, not from a new host field;
+ *  16. a failing stale-lock check offers one explicit repair: a confirmation dialog naming the
+ *      lock path, then doctor.clearLock through the write path with the confirm token, the
+ *      host's backup path reported back, and the checks re-run afterwards — never automatically;
+ *  17. a failing patch check (parse / managed blocks) offers locate + copy only: the page shows
+ *      the patch path and the offending rows, copies an issue-ready block, and never rewrites
+ *      the patch (C7) — no repair op is invented for it.
  *
  * No third-party libraries. Every line is PASS or FAIL; exit 1 when any check fails.
  */
@@ -176,6 +182,7 @@ check('doctor-op-readonly', () => {
   assert(!body.includes('props.run'), 'the view must not call the shell run(): it drops the report')
   assert(!body.includes('run(OPS.doctor'), 'doctor must never go through the write path')
   assert(!body.includes('runOp(RELOAD_OP'), 'extension.reload must go through the shell write path, not runOp')
+  assert(!body.includes('runOp(CLEAR_LOCK_OP'), 'the lock repair must go through the shell write path, not runOp')
   return 'runOp(OPS.doctor, {}), one read; extension.reload goes through runDetailed'
 })
 
@@ -262,6 +269,8 @@ check('no-auto-run', () => {
   assert(numberOf('void runDoctor()') === 3, 'three explicit entry points expected (toolbar, error retry, empty state), found ' + numberOf('void runDoctor()'))
   assert(numberOf('void reloadFailed()') === 1, 'exactly one bulk reload entry point expected, found ' + numberOf('void reloadFailed()'))
   assert(numberOf('void reloadOne(entry.id)') === 1, 'exactly one per-row reload entry point expected, found ' + numberOf('void reloadOne(entry.id)'))
+  assert(numberOf('void clearLock()') === 1, 'exactly one explicit lock-repair entry point expected, found ' + numberOf('void clearLock()'))
+  assert(source.includes('onClick={() => { void clearLock() }}'), 'the repair must stay behind the dialog button, not on a timer')
   return 'explicit click only'
 })
 
@@ -399,6 +408,55 @@ check('extension-payload-exposed', () => {
   return 'snapshot.extensions already exposes failures; no host field added'
 })
 
+// -- task-48: safe repair, never a rewrite --------------------------------
+
+check('clear-lock-action', () => {
+  assert(source.includes("const CLEAR_LOCK_OP = 'doctor.clearLock'"), 'the lock repair must call the host op doctor.clearLock')
+  assert(source.includes('const [confirmClear, setConfirmClear] = React.useState(false)'), 'clearing a lock needs an explicit confirmation state')
+  assert(source.includes('const [clearing, setClearing] = React.useState(false)'), 'the dialog button needs its own busy flag')
+  assert(source.includes('const clearLock = React.useCallback'), 'one handler owns the repair')
+  assert(source.includes('await runDetailed(CLEAR_LOCK_OP, { confirm: true })'), 'the repair must go through the write path with the confirm token')
+  assert(!source.includes('runOp(CLEAR_LOCK_OP'), 'the repair must never go through the read path')
+  assert(source.includes("label(lang, '清理锁', 'Clear lock')"), 'the button needs a bilingual label')
+  assert(source.includes("label(lang, '清理锁文件', 'Clear the lock file')"), 'the button needs an accessible name')
+  assert(source.includes("label(lang, '清理陈旧锁文件', 'Clear the stale lock file')"), 'the confirmation dialog needs a title')
+  assert(source.includes("label(lang, '锁文件', 'Lock file')"), 'the dialog must name the lock file it will remove')
+  assert(source.includes("patchPath + '.panel.lock'"), 'the dialog must show the exact lock path')
+  assert(source.includes("label(lang, '先把锁文件备份到备份目录，再删除它；补丁文件本身不会被读写。'"), 'the dialog must promise the backup and the untouched patch')
+  assert(source.includes('const backup = textOf(data?.backup)'), 'the result must read the backup path the host returned')
+  assert(source.includes("label(lang, '已备份锁文件到 ' + backup + ' 并删除'"), 'success must name the backup')
+  assert(source.includes("label(lang, '锁文件已清理（没有需要备份的锁）'"), 'a no-op repair must say so instead of claiming a backup')
+  assert(source.includes("label(lang, '清理锁失败：'"), 'a failed repair must report the host error')
+  assert(source.includes('await runDoctor()'), 'the repair must re-run the checks afterwards')
+  assert(source.includes("row.id === 'stale-lock' ? ("), 'the button appears only on the stale-lock row')
+  assert(source.includes('{row.ok ? null : row.id ==='), 'a green report offers no repair at all')
+  assert(!source.includes('autoRepair'), 'nothing repairs itself')
+  return 'stale-lock row -> confirm dialog -> runDetailed(doctor.clearLock) -> re-run doctor'
+})
+
+check('patch-locate-actions', () => {
+  assert(source.includes("const PATCH_CHECK_IDS: readonly string[] = ['patch-parse', 'patch-managed']"), 'the patch checks must be named once')
+  assert(source.includes('const [locateId, setLocateId] = React.useState<string | null>(null)'), 'locating is view state, not a host op')
+  assert(source.includes('const locateRow = locateId === null ? null : checks.find(row => row.id === locateId) ?? null'), 'the locate panel must read the failing row it was opened for')
+  assert(source.includes("label(lang, '定位问题', 'Locate')"), 'the locate button needs a bilingual label')
+  assert(source.includes("label(lang, '复制详情', 'Copy detail')"), 'the copy button needs a bilingual label')
+  assert(source.includes("label(lang, '补丁文件', 'Patch file')"), 'the locate panel must show the patch path')
+  assert(source.includes("label(lang, '未闭合块', 'Unclosed block')"), 'an unclosed block must be named in place')
+  assert(source.includes("label(lang, '外来行', 'Foreign rows')"), 'foreign rows must be listed next to their block')
+  assert(source.includes('unclosedBlocks.map'), 'the panel must render every unclosed block')
+  assert(source.includes('foreignBlocks.map'), 'the panel must render blocks with foreign rows')
+  assert(source.includes("label(lang, '只读定位：补丁文件不会被改写；要改内容请到配置页。'"), 'the panel must say the patch is not rewritten (C7)')
+  assert(source.includes('const copyCheckDetail = React.useCallback'), 'one handler copies the check detail')
+  assert(source.includes("'dsh-tool-hub check: ' + row.id"), 'the copied detail must name the check')
+  assert(source.includes("'path: ' + (patch === '' ? 'none' : patch)"), 'the copied detail must carry the patch path')
+  assert(source.includes("'detail: ' + (row.detail === '' ? 'no detail' : row.detail)"), 'the copied detail must carry the host detail verbatim')
+  assert(source.includes("label(lang, '已复制 ' + row.id + ' 的详情'"), 'copying must report success')
+  for (const invented of ['patch.repair', 'patch.fix', 'patch.rewrite', 'patch.clear', 'patch.save']) {
+    assert(!source.includes(invented), 'the view invents the patch write ' + invented)
+  }
+  return 'locate panel (path + offending rows) + copy detail; patch never rewritten'
+})
+
 // -- contracts with the rest of the panel ----------------------------------
 
 check('i18n-keys-exist', () => {
@@ -494,8 +552,10 @@ check('bilingual-oneoff', () => {
 
 check('file-length', () => {
   const bytes = statSync(VIEW).size
-  assert(lines.length < 760, 'the view has ' + lines.length + ' lines (limit 760)')
-  assert(bytes < 70 * 1024, 'the view is ' + bytes + ' bytes (limit 70 KB)')
+  // task-48 added two repair affordances (confirm dialog + locate panel), so the ratchet moved
+  // once, deliberately: the file stays far below the repo's 1500-line / 80 KiB soft line.
+  assert(lines.length < 900, 'the view has ' + lines.length + ' lines (limit 900)')
+  assert(bytes < 80 * 1024, 'the view is ' + bytes + ' bytes (limit 80 KB)')
   return lines.length + ' lines, ' + bytes + ' bytes'
 })
 

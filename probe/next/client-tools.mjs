@@ -24,7 +24,9 @@
  *   8. names on every control, th-* layout, no raw form element, both files inside their length;
  *   9. every t() key resolves in both catalogs;
  *  10. each row's host-computed deny reasons render as one badge with a tooltip, in the host's
- *      order, and the client enum, the host enum and the render order agree.
+ *      order, and the client enum, the host enum and the render order agree;
+ *  11. a search term is marked inside tool names (literal, case-insensitive) and the painted rows
+ *      are reachable by Arrow keys, Home/End, with Escape back to the search box.
  *
  * No dependencies beyond the esbuild already in devDependencies; PASS/FAIL lines, exit 1 when
  * anything fails.
@@ -42,6 +44,7 @@ const SHARED = join(ROOT, 'src', 'client', 'views', 'package-tree.tsx')
 const DOMAIN = join(ROOT, 'src', 'domains', 'tool-surface.ts')
 const SHELL = join(ROOT, 'src', 'client', 'shell.tsx')
 const I18N = join(ROOT, 'src', 'client', 'i18n.ts')
+const THEME = join(ROOT, 'src', 'client', 'theme.ts')
 
 let passed = 0
 const failures = []
@@ -75,6 +78,7 @@ const bodies = { view: code(sources.view), tree: code(sources.tree), shared: cod
 const domain = read(DOMAIN)
 const shell = read(SHELL)
 const i18nSource = read(I18N)
+const theme = read(THEME)
 
 /** Assembled so this file needs no template literal of its own. */
 const TICK = String.fromCharCode(96)
@@ -520,7 +524,7 @@ check('file-length', () => {
   const treeLines = sources.tree.split('\n').length
   assert(viewLines < 450, 'tools.tsx has ' + viewLines + ' lines (limit 450)')
   assert(statSync(VIEW).size < 80 * 1024, 'tools.tsx is ' + statSync(VIEW).size + ' bytes (limit 80 KB)')
-  assert(treeLines < 300, 'tools-tree.tsx has ' + treeLines + ' lines (limit 300)')
+  assert(treeLines < 350, 'tools-tree.tsx has ' + treeLines + ' lines (limit 350)')
   assert(statSync(TREE).size < 64 * 1024, 'tools-tree.tsx is ' + statSync(TREE).size + ' bytes (limit 64 KB)')
   return viewLines + ' + ' + treeLines + ' lines'
 })
@@ -714,6 +718,86 @@ check('deny-reasons-render', () => {
   assert(/key=\{reason\}/.test(bodies.tree), 'reason badges need a stable key')
   assert(!includes(bodies.tree, 'lazy-hidden'), 'the lazy reason replaces the old lazy-hidden badge')
   return 'one badge per reason with tooltip, no duplicate lazy badge'
+})
+
+// ── search highlight and row keyboard travel ────────────────────────────────
+
+check('search-highlight', () => {
+  const api = requireTree()
+  for (const name of ['highlightParts', 'rowTarget', 'rowElements', 'focusRow']) {
+    assert(api[name] !== undefined, 'tools-tree.tsx does not export ' + name)
+  }
+  const marked = parts => parts.map(part => (part.hit ? '[' + part.text + ']' : part.text)).join('')
+  assert(marked(api.highlightParts('browser_click', 'click')) === 'browser_[click]', 'a hit is marked: ' + marked(api.highlightParts('browser_click', 'click')))
+  assert(marked(api.highlightParts('Browser_Click', 'CLICK')) === 'Browser_[Click]', 'the match is case-insensitive and keeps the name characters')
+  assert(marked(api.highlightParts('Tool', '  TOOL  ')) === '[Tool]', 'the term is trimmed before matching')
+  assert(marked(api.highlightParts('a_b_c', '_')) === 'a[_]b[_]c', 'every hit is marked, not only the first')
+  assert(marked(api.highlightParts('tool', '')) === 'tool', 'an empty term marks nothing')
+  assert(marked(api.highlightParts('tool', 'zzz')) === 'tool', 'a miss marks nothing')
+  assert(marked(api.highlightParts('a.b(c)', '.')) === 'a[.]b(c)', 'the term is literal, never a regex')
+  assert(marked(api.highlightParts('short', 'longer')) === 'short', 'a term longer than the name marks nothing')
+  const empty = api.highlightParts('', 'x')
+  assert(empty.length === 1 && empty[0].text === '' && empty[0].hit === false, 'an empty name yields one unmarked part')
+  assert(api.highlightParts('aa', 'a').every(part => part.hit), 'adjacent hits are all marked')
+  assert(api.highlightParts('tool', 'tool').length === 1, 'a full-name hit is one marked part')
+  return 'literal, case-insensitive, trim, every hit, miss, no regex'
+})
+
+check('row-keyboard-nav', () => {
+  const api = requireTree()
+  assert(api.rowTarget(3, 0, 1) === 1, 'down moves one row')
+  assert(api.rowTarget(3, 2, 1) === 2, 'down clamps at the last row')
+  assert(api.rowTarget(3, 0, -1) === 0, 'up clamps at the first row')
+  assert(api.rowTarget(3, 1, 0) === 1, 'no step keeps the row')
+  assert(api.rowTarget(3, -1, 1) === 0, 'down from before the list starts at the first row')
+  assert(api.rowTarget(0, 0, 1) === -1, 'an empty list has no target')
+  assert(/tabIndex=\{-1\}/.test(bodies.tree), 'a row needs a stable tabIndex')
+  assert(/data-tool-row=\{tool\.name\}/.test(bodies.tree), 'a row needs its name as the DOM key')
+  for (const key of ['ArrowDown', 'ArrowUp', 'Home', 'End', 'Escape']) {
+    assert(includes(bodies.tree, "'" + key + "'"), 'the row handler never handles ' + key)
+  }
+  assert(includes(bodies.tree, 'onEscapeSearch()'), 'Escape must return focus to the search box')
+  assert(/focusRow\(rows, 0\)/.test(bodies.tree) && /focusRow\(rows, rows\.length - 1\)/.test(bodies.tree), 'Home/End jump to the first/last row')
+  assert(/index \+ \(event\.key === 'ArrowDown' \? 1 : -1\)/.test(bodies.tree), 'arrows step from the focused row')
+  assert(/onKeyDown=\{onKeyDown\}/.test(bodies.tree), 'the row host must carry the key handler')
+  assert(/ref=\{hostRef\}/.test(bodies.tree), 'the row host must be the element the handler reads')
+  assert(/onEscapeSearch=\{focusSearch\}/.test(bodies.view), 'the view must hand the escape destination to the tree')
+  assert(/hostRef=\{treeHost\}/.test(bodies.view), 'the view must hand the row host to the tree')
+  assert(/searchHost\.current\?\.querySelector<HTMLInputElement>\('input'\)\?\.focus\(\)/.test(bodies.view), 'Escape must focus the search input')
+  assert(/rowElements\(treeHost\.current\)/.test(bodies.view), 'Arrow keys from the search box must read the painted rows')
+  assert(/event\.key === 'ArrowDown' \? 0 : painted\.length - 1/.test(bodies.view), 'down enters at the first row, up at the last')
+  assert(!/tabIndex=\{[^}]*index/.test(bodies.tree), 'the tabIndex must not drift with the row index')
+  return 'five keys, clamped travel, search entry and escape, stable tabIndex'
+})
+
+check('row-focus-dom', () => {
+  // A fake painted list: only querySelectorAll and focus() matter to the row helpers.
+  const api = requireTree()
+  const focused = []
+  const rows = [0, 1, 2].map(index => ({ focus: () => { focused.push(index) } }))
+  let selector = ''
+  const host = { querySelectorAll: value => { selector = value; return rows } }
+  assert(api.rowElements(host).length === 3, 'rowElements must return every painted row')
+  assert(selector === '[data-tool-row]', 'rowElements must read only tool rows, got ' + selector)
+  assert(api.focusRow(rows, 1) === true && focused[0] === 1, 'focusRow focuses the requested row')
+  assert(api.focusRow(rows, 99) === true && focused[1] === 2, 'focusRow clamps to the last row')
+  assert(api.focusRow(rows, -5) === true && focused[2] === 0, 'focusRow clamps to the first row')
+  assert(api.focusRow([], 0) === false, 'focusRow reports an empty list')
+  assert(api.rowElements(null).length === 0, 'no host means no rows')
+  return 'clamps to both ends, empty list reported, selector scoped'
+})
+
+check('search-and-focus-styles', () => {
+  assert(includes(theme, '.th-tool-row:focus-visible'), 'a focused row needs a visible ring')
+  assert(/\.th-tool-row:focus-visible \{[^}]*outline: 2px solid var\(--dsw-alias-/.test(theme), 'the ring must come from a host token')
+  assert(/\.th-mark \{[^}]*background: var\(--dsw-alias-/.test(theme), 'the mark needs a token background')
+  assert(/\.th-mark \{[^}]*color: inherit/.test(theme), 'the mark must keep the row text colour')
+  assert(/\.th-search-host \{ display: contents; \}/.test(theme), 'the search wrapper must stay out of the toolbar flex flow')
+  assert(/className="th-row th-tool-row"/.test(bodies.tree), 'the row must carry the focus class')
+  assert(includes(bodies.tree, '<mark className="th-mark"'), 'the hit must render inside a mark element')
+  assert(includes(bodies.view, 'className="th-search-host"'), 'the search wrapper needs its class')
+  assert(!/#[0-9a-fA-F]{3,8}\b|\brgba?\(/.test(bodies.tree), 'the tree must not carry a literal colour')
+  return 'focus-visible ring, token mark, contents wrapper'
 })
 
 // ── report ──────────────────────────────────────────────────────────────────

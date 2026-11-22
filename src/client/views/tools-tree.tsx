@@ -31,6 +31,7 @@ import type { TreeGroup } from './package-tree.js'
 
 /** localStorage key holding the open parents of the tools tree. */
 export const TREE_STORAGE_KEY = 'tool-hub-tree-tools'
+const KEY_NAV = ['ArrowDown', 'ArrowUp', 'Home', 'End', 'Escape'] // keys the painted rows handle
 
 /** Parent keys are namespaced: one server and one built-in prefix may share a name. */
 const MCP_KEY = 'mcp:'
@@ -136,6 +137,44 @@ export function groupSwitchable(rows: readonly ToolRow[]): boolean {
   return rows.length > 0 && rows.every(tool => tool.fixed !== true)
 }
 
+/** One piece of a name around a search hit; hit pieces render inside <mark>. */
+export interface NamePart { text: string; hit: boolean }
+
+/** Split a name around a case-insensitive, literal term: no regex, no HTML, exact characters. */
+export function highlightParts(name: string, term: string): NamePart[] {
+  const needle = term.trim().toLowerCase()
+  if (needle === '') return [{ text: name, hit: false }]
+  const hay = name.toLowerCase()
+  const parts: NamePart[] = []
+  let at = 0
+  for (let hit = hay.indexOf(needle); hit !== -1; hit = hay.indexOf(needle, at)) {
+    if (hit > at) parts.push({ text: name.slice(at, hit), hit: false })
+    parts.push({ text: name.slice(hit, hit + needle.length), hit: true })
+    at = hit + needle.length
+  }
+  if (at < name.length) parts.push({ text: name.slice(at), hit: false })
+  return parts.length === 0 ? [{ text: name, hit: false }] : parts
+}
+
+/** The clamped index `step` rows from `current`; -1 when the render painted no row. */
+export function rowTarget(count: number, current: number, step: number): number {
+  if (count <= 0) return -1
+  return Math.max(0, Math.min(count - 1, current + step))
+}
+
+/** The rows a render painted, in document order: collapsed parents and later pages are absent. */
+export function rowElements(host: ParentNode | null): HTMLElement[] {
+  return host === null ? [] : Array.from(host.querySelectorAll<HTMLElement>('[data-tool-row]'))
+}
+
+/** Focus one row of the painted list; false when the list is empty. */
+export function focusRow(rows: readonly HTMLElement[], index: number): boolean {
+  const row = rows[rowTarget(rows.length, index, 0)]
+  if (row === undefined) return false
+  row.focus()
+  return true
+}
+
 /** A row is visible on its own name or on its server; the parent label is checked separately. */
 function toolMatches(tool: ToolRow, needle: string): boolean {
   if (needle === '') return true
@@ -200,6 +239,7 @@ export function buildToolTree(tools: readonly ToolRow[], term: string, t: TFunct
 
 interface ToolLineProps {
   tool: ToolRow
+  term: string
   hidden: boolean
   lang: Lang
   t: TFunction
@@ -210,11 +250,15 @@ interface ToolLineProps {
 
 /** One tool row: name, its state badges, and the switch that edits the draft. */
 function ToolLine(props: ToolLineProps): React.ReactElement {
-  const { tool, hidden, lang, t, costs, showCosts, onToggle } = props
+  const { tool, term, hidden, lang, t, costs, showCosts, onToggle } = props
   return (
-    <div className="th-row">
+    <div className="th-row th-tool-row" tabIndex={-1} data-tool-row={tool.name}>
       <div className="th-row-body">
-        <span className="th-row-name th-mono">{tool.name}</span>
+        <span className="th-row-name th-mono">
+          {highlightParts(tool.name, term).map((part, index) => part.hit
+            ? <mark className="th-mark" key={index}>{part.text}</mark>
+            : <React.Fragment key={index}>{part.text}</React.Fragment>)}
+        </span>
         <span className="th-row-meta">
           <Badge tone={hidden ? 'warn' : 'on'}>{hidden ? t('tools.masked') : t('tools.visible')}</Badge>
           {tool.lazy === true ? <Badge tone="off">{t('tools.lazy')}</Badge> : null}
@@ -250,35 +294,55 @@ export interface ToolsTreeProps {
   term: string
   /** 'tool.save:<group key>' in flight, so the shared busy state reaches the parent switch. */
   busyKey: string | null
+  /** The wrapper around the painted rows; keyboard travel walks this subtree only. */
+  hostRef: React.RefObject<HTMLDivElement>
+  /** Escape on a row hands focus back to the search box. */
+  onEscapeSearch: () => void
   onToggle: (name: string, hide: boolean) => void
   onBulk: (group: TreeGroup<ToolRow>, next: boolean) => void
 }
 
 /** The tree itself: expansion memory plus the shared GroupTree, one row per tool. */
 export function ToolsTree(props: ToolsTreeProps): React.ReactElement {
-  const { groups, lang, t, masked, costs, showCosts, forceOpen, term, busyKey, onToggle, onBulk } = props
+  const { groups, lang, t, masked, costs, showCosts, forceOpen, term, busyKey, onToggle, onBulk, hostRef, onEscapeSearch } = props
   const expansion = useTreeExpansion(TREE_STORAGE_KEY)
+  /* Arrow keys travel the rows this render painted, Home/End jump, Escape goes back to search. */
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    const row = (event.target as HTMLElement).closest('[data-tool-row]')
+    if (row === null) return
+    const rows = rowElements(event.currentTarget)
+    const index = rows.indexOf(row as HTMLElement)
+    if (index === -1 || KEY_NAV.indexOf(event.key) === -1) return
+    event.preventDefault()
+    if (event.key === 'Escape') onEscapeSearch()
+    else if (event.key === 'Home') focusRow(rows, 0)
+    else if (event.key === 'End') focusRow(rows, rows.length - 1)
+    else focusRow(rows, index + (event.key === 'ArrowDown' ? 1 : -1))
+  }
   return (
-    <GroupTree
-      groups={groups}
-      lang={lang}
-      forceOpen={forceOpen}
-      resetKey={term}
-      expansion={expansion}
-      busyKey={busyKey}
-      onBulk={onBulk}
-      renderRow={tool => (
-        <ToolLine
-          key={tool.name}
-          tool={tool}
-          hidden={masked.has(tool.name)}
-          lang={lang}
-          t={t}
-          costs={costs}
-          showCosts={showCosts}
-          onToggle={onToggle}
-        />
-      )}
-    />
+    <div className="th-tools-tree" ref={hostRef} onKeyDown={onKeyDown}>
+      <GroupTree
+        groups={groups}
+        lang={lang}
+        forceOpen={forceOpen}
+        resetKey={term}
+        expansion={expansion}
+        busyKey={busyKey}
+        onBulk={onBulk}
+        renderRow={tool => (
+          <ToolLine
+            key={tool.name}
+            tool={tool}
+            term={term}
+            hidden={masked.has(tool.name)}
+            lang={lang}
+            t={t}
+            costs={costs}
+            showCosts={showCosts}
+            onToggle={onToggle}
+          />
+        )}
+      />
+    </div>
   )
 }

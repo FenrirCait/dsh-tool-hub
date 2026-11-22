@@ -95,20 +95,75 @@ function unwrap(answer: RawAnswer): ApiResult<unknown> {
  * During the cutover a host may only have the old routes mounted; a 404 on v1 is not an error
  * the user should see, it is a fallback.
  */
-async function call(path: string, init: RequestInit, timeoutMs = TIMEOUT_MS): Promise<ApiResult<unknown>> {
+async function callAnswer(path: string, init: RequestInit, timeoutMs = TIMEOUT_MS): Promise<ApiResult<RawAnswer>> {
   const first = await send(BASE + '/v1' + path, init, timeoutMs)
   if (!first.ok) return first
-  if (first.data.status !== 404) return unwrap(first.data)
+  if (first.data.status !== 404) return first
   const legacy = await send(BASE + path, init, timeoutMs)
   if (!legacy.ok) return legacy
-  return unwrap(legacy.data)
+  return legacy
 }
 
-/** Read the snapshot and normalise it; a partial host answer still yields renderable arrays. */
-export async function getSnapshot(): Promise<ApiResult<HubSnapshot>> {
-  const result = await call('/snapshot', { method: 'GET', headers: { accept: 'application/json' } })
-  if (!result.ok) return result
-  return { ok: true, data: normalizeSnapshot(result.data) }
+async function call(path: string, init: RequestInit, timeoutMs = TIMEOUT_MS): Promise<ApiResult<unknown>> {
+  const answer = await callAnswer(path, init, timeoutMs)
+  if (!answer.ok) return answer
+  return unwrap(answer.data)
+}
+
+/**
+ * The snapshot the host last handed over and the revision it stamped on it.
+ *
+ * Module memory is the right scope: the panel has one shell, a reload rebuilds the page, and a
+ * cached body must never outlive the host that produced it.
+ */
+interface SnapshotCache {
+  revision: string
+  snapshot: HubSnapshot
+}
+
+let snapshotCache: SnapshotCache | null = null
+
+/** Forget the remembered revision and snapshot; the next read is a full one. */
+export function resetSnapshotCache(): void {
+  snapshotCache = null
+}
+
+/**
+ * Read the snapshot.
+ *
+ * The host fingerprints every snapshot it builds. We keep the last fingerprint and send it as
+ * `since`, so a panel that has not changed costs one small `unchanged` body instead of the whole
+ * JSON; on that answer the cached, already-normalised snapshot is returned as-is. `fresh: true`
+ * (the refresh and retry buttons) asks the host to rebuild and deliberately skips `since`.
+ *
+ * A host that predates revisions simply never sends one: no fingerprint is cached, so no `since`
+ * is ever sent to it.
+ */
+export async function getSnapshot(options: { fresh?: boolean } = {}): Promise<ApiResult<HubSnapshot>> {
+  const fresh = options.fresh === true
+  const since = fresh ? null : snapshotCache?.revision ?? null
+  const query = fresh ? '?fresh=1' : since === null ? '' : '?since=' + encodeURIComponent(since)
+  const answer = await callAnswer('/snapshot' + query, { method: 'GET', headers: { accept: 'application/json' } })
+  if (!answer.ok) return answer
+  const raw = answer.data
+  if (raw.status === 401 || raw.status === 403) return fail('forbidden', 'the host refused this request', raw.status)
+  const body = asRecord(raw.payload)
+  if (body.ok !== true) {
+    const error = asRecord(body.error)
+    const code = asString(error.code, raw.status >= 400 ? 'http' : 'envelope')
+    const message = asString(error.message, raw.status >= 400 ? 'request rejected' : 'unexpected response')
+    return fail(code, message, raw.status)
+  }
+  const revision = asStringOrNull(body.revision) ?? ''
+  if (body.unchanged === true) {
+    // We only ask with `since` when a snapshot is cached, so this branch normally reuses it.
+    if (snapshotCache === null) return fail('stale-snapshot', 'the host reported no change but no snapshot is cached', raw.status)
+    if (revision !== '') snapshotCache = { revision, snapshot: snapshotCache.snapshot }
+    return { ok: true, data: snapshotCache.snapshot }
+  }
+  const snapshot = normalizeSnapshot(body.data)
+  snapshotCache = revision === '' ? null : { revision, snapshot }
+  return { ok: true, data: snapshot }
 }
 
 /** Send one op. The host is the only writer; the caller re-reads the snapshot afterwards. */
@@ -298,6 +353,7 @@ function extensionOf(row: Record<string, unknown>): ExtensionStatus | null {
     styles: asStringList(row.styles),
     css: asStringList(row.css),
     bundled: row.bundled === true,
+    overridesBundled: row.overridesBundled === true,
   }
 }
 

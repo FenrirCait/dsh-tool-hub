@@ -20,13 +20,19 @@
  */
 import * as React from 'react'
 import { OPS, runOp } from '../api.js'
-import { Badge, Button, Callout, Card, Empty } from '../components.js'
+import { Badge, Button, Callout, Card, Dialog, Empty } from '../components.js'
 import { MaintenanceCards } from './maintenance.js'
 import { DiagnosticsHistory } from './diagnostics-history.js'
 import type { ExtensionStatus, SnapshotPaths, ViewProps } from '../types.js'
 
 /** The host op the extensions view also sends; named once here so a rename is one line. */
 const RELOAD_OP = 'extension.reload'
+
+/** The host's one repair write: back the stale panel lock up, then remove it. */
+const CLEAR_LOCK_OP = 'doctor.clearLock'
+
+/** Checks whose failure points at the patch file itself, which this page locates but never rewrites (C7). */
+const PATCH_CHECK_IDS: readonly string[] = ['patch-parse', 'patch-managed']
 
 /** One doctor row as the page renders it; the host contract lives in src/host/diagnostics.ts. */
 interface CheckRow {
@@ -283,6 +289,10 @@ export function DiagnosticsView(props: ViewProps): React.ReactElement {
   const [lastRun, setLastRun] = React.useState<string | null>(null)
   const [copyState, setCopyState] = React.useState<'idle' | 'copying' | 'ok' | 'fail'>('idle')
   const [actionNote, setActionNote] = React.useState<ActionNote | null>(null)
+  const [confirmClear, setConfirmClear] = React.useState(false)
+  const [clearing, setClearing] = React.useState(false)
+  /** The failing patch check whose path and rows the page is showing, or null. */
+  const [locateId, setLocateId] = React.useState<string | null>(null)
   // A ref, not the state flag: two clicks in one tick both see the old render's state.
   const inFlight = React.useRef(false)
   const copyInFlight = React.useRef(false)
@@ -345,8 +355,52 @@ export function DiagnosticsView(props: ViewProps): React.ReactElement {
       : { ok: false, text: label(lang, '已重新加载 ' + done + '/' + failedIds.length + ' 个；失败：' + errors.join('; '), 'Reloaded ' + done + '/' + failedIds.length + '; failed: ' + errors.join('; ')) })
   }, [snapshot.extensions, lang, runDetailed])
 
+  /**
+   * Clear the stale panel lock through the host's repair op. The host backs the lock up before
+   * deleting it and refuses a lock its holder may still own; this page only asks and reports.
+   */
+  const clearLock = React.useCallback(async (): Promise<void> => {
+    if (clearing) return
+    setClearing(true)
+    const outcome = await runDetailed(CLEAR_LOCK_OP, { confirm: true })
+    setClearing(false)
+    setConfirmClear(false)
+    if (!outcome.ok) {
+      setActionNote({
+        ok: false,
+        text: label(lang, '清理锁失败：' + (outcome.error ?? 'unknown error'), 'Clearing the lock failed: ' + (outcome.error ?? 'unknown error')),
+      })
+      return
+    }
+    const data = recordOf(outcome.data)
+    const backup = textOf(data?.backup)
+    setActionNote(backup === ''
+      ? { ok: true, text: label(lang, '锁文件已清理（没有需要备份的锁）', 'The lock file was cleared (none needed a backup)') }
+      : { ok: true, text: label(lang, '已备份锁文件到 ' + backup + ' 并删除', 'Backed the lock file up to ' + backup + ' and removed it') })
+    // The point of the repair is the next verdict, so re-run the checks instead of only refreshing.
+    await runDoctor()
+  }, [clearing, lang, runDetailed, runDoctor])
+
+  /** Copy one failing check as an issue-ready block: id, path and verbatim detail. */
+  const copyCheckDetail = React.useCallback(async (row: CheckRow): Promise<void> => {
+    const patch = snapshot.paths.patch ?? ''
+    const text = [
+      'dsh-tool-hub check: ' + row.id,
+      'path: ' + (patch === '' ? 'none' : patch),
+      'detail: ' + (row.detail === '' ? 'no detail' : row.detail),
+    ].join('\n') + '\n'
+    const copied = await copyToClipboard(text)
+    setActionNote(copied
+      ? { ok: true, text: label(lang, '已复制 ' + row.id + ' 的详情', 'Copied the detail of ' + row.id) }
+      : { ok: false, text: label(lang, '复制详情失败：浏览器不允许访问剪贴板', 'Copy failed: the browser denied clipboard access') })
+  }, [snapshot.paths.patch, lang])
+
   const checks = report === null ? [] : report.checks
   const failing = checks.filter(row => !row.ok)
+  const locateRow = locateId === null ? null : checks.find(row => row.id === locateId) ?? null
+  const patchPath = snapshot.paths.patch ?? ''
+  const unclosedBlocks = snapshot.patchInfo.unclosed
+  const foreignBlocks = snapshot.patchInfo.blocks.filter(block => block.foreign.length > 0)
   const capabilities = report === null ? null : report.capabilities
   const pathRows = pathRowsOf(snapshot.paths, t, lang)
   // What the host is, straight off the snapshot: its build version and the runtime under it.
@@ -434,6 +488,10 @@ export function DiagnosticsView(props: ViewProps): React.ReactElement {
         </Callout>
       )}
 
+      {actionNote === null ? null : (actionNote.ok
+        ? <div className="th-row-meta">{actionNote.text}</div>
+        : <Callout tone="error">{actionNote.text}</Callout>)}
+
       {extensions.length === 0 ? null : (
         <div className="th-section" role="region" aria-label={extensionsLabel}>
           <div className="th-section-title">{extensionsLabel}</div>
@@ -487,9 +545,6 @@ export function DiagnosticsView(props: ViewProps): React.ReactElement {
                 )
               })}
             </div>
-            {actionNote === null ? null : (actionNote.ok
-              ? <div className="th-row-meta">{actionNote.text}</div>
-              : <Callout tone="error">{actionNote.text}</Callout>)}
           </Card>
         </div>
       )}
@@ -600,9 +655,58 @@ export function DiagnosticsView(props: ViewProps): React.ReactElement {
                   <Badge tone={row.ok ? 'on' : 'danger'}>
                     {row.ok ? t('diagnostics.ok') : t('diagnostics.fail')}
                   </Badge>
+                  {row.ok ? null : row.id === 'stale-lock' ? (
+                    <Button variant="ghost" onClick={() => { setConfirmClear(true) }} label={label(lang, '清理锁文件', 'Clear the lock file')}>
+                      {label(lang, '清理锁', 'Clear lock')}
+                    </Button>
+                  ) : PATCH_CHECK_IDS.includes(row.id) ? (
+                    <>
+                      <Button variant="ghost" onClick={() => { setLocateId(current => (current === row.id ? null : row.id)) }} label={label(lang, '定位 ' + row.id, 'Locate ' + row.id)}>
+                        {label(lang, '定位问题', 'Locate')}
+                      </Button>
+                      <Button variant="ghost" onClick={() => { void copyCheckDetail(row) }} label={label(lang, '复制 ' + row.id + ' 的详情', 'Copy the detail of ' + row.id)}>
+                        {label(lang, '复制详情', 'Copy detail')}
+                      </Button>
+                    </>
+                  ) : null}
                 </div>
               ))}
             </div>
+            {locateRow === null ? null : (
+              <div className="th-list">
+                <div className="th-row">
+                  <div className="th-row-body">
+                    <span className="th-row-name">{label(lang, '补丁文件', 'Patch file')}</span>
+                    <span className="th-row-meta th-mono">{patchPath === '' ? label(lang, '未配置', 'not configured') : patchPath}</span>
+                  </div>
+                </div>
+                <div className="th-row">
+                  <div className="th-row-body">
+                    <span className="th-row-name th-mono">{locateRow.id}</span>
+                    <span className="th-row-meta">{locateRow.detail === '' ? label(lang, '没有详情', 'No detail') : locateRow.detail}</span>
+                  </div>
+                </div>
+                {unclosedBlocks.map(name => (
+                  <div className="th-row" key={'unclosed-' + name}>
+                    <div className="th-row-body">
+                      <span className="th-row-name">{label(lang, '未闭合块', 'Unclosed block')}</span>
+                      <span className="th-row-meta th-mono">{name}</span>
+                    </div>
+                  </div>
+                ))}
+                {foreignBlocks.map(block => (
+                  <div className="th-row" key={'foreign-' + block.name}>
+                    <div className="th-row-body">
+                      <span className="th-row-name">{label(lang, '外来行', 'Foreign rows')}</span>
+                      <span className="th-row-meta"><span className="th-mono">{block.name}</span>{' · ' + block.foreign.join(', ')}</span>
+                    </div>
+                  </div>
+                ))}
+                <div className="th-row-meta">
+                  {label(lang, '只读定位：补丁文件不会被改写；要改内容请到配置页。', 'Read-only location: the patch file is never rewritten; edit its content in the Config view.')}
+                </div>
+              </div>
+            )}
           </Card>
         )}
       </div>
@@ -692,6 +796,32 @@ export function DiagnosticsView(props: ViewProps): React.ReactElement {
           </div>
         </Card>
       </div>
+
+      <Dialog
+        open={confirmClear}
+        title={label(lang, '清理陈旧锁文件', 'Clear the stale lock file')}
+        onClose={() => { setConfirmClear(false) }}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => { setConfirmClear(false) }}>{t('action.cancel')}</Button>
+            <Button variant="danger" busy={clearing} onClick={() => { void clearLock() }} label={label(lang, '清理锁', 'Clear lock')}>
+              {label(lang, '清理锁', 'Clear lock')}
+            </Button>
+          </>
+        }
+      >
+        <div className="th-list">
+          <div className="th-row">
+            <div className="th-row-body">
+              <span className="th-row-name">{label(lang, '锁文件', 'Lock file')}</span>
+              <span className="th-row-meta th-mono">{patchPath === '' ? label(lang, '未配置', 'not configured') : patchPath + '.panel.lock'}</span>
+            </div>
+          </div>
+          <div className="th-row-meta">
+            {label(lang, '先把锁文件备份到备份目录，再删除它；补丁文件本身不会被读写。', 'The lock file is backed up before removal; the patch file itself is never read or written.')}
+          </div>
+        </div>
+      </Dialog>
     </div>
   )
 }

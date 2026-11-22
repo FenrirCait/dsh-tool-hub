@@ -10,8 +10,10 @@
  * No dependencies: PASS/FAIL lines, exit 1 when anything fails.
  */
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const CLIENT = join(ROOT, 'src', 'client')
@@ -270,6 +272,18 @@ check('api-structured-errors', () => {
   return 'structured results, normalised snapshot'
 })
 
+check('snapshot-cache-wiring', () => {
+  const api = byName('api.ts')
+  assert(/let snapshotCache/.test(api), 'api.ts must keep the last snapshot in module memory')
+  assert(/unchanged === true/.test(api), 'api.ts must understand the unchanged answer')
+  assert(/since=/.test(api), 'api.ts must send the remembered revision as since')
+  assert(/export function resetSnapshotCache/.test(api), 'api.ts must expose a cache reset')
+  const shell = byName('shell.tsx')
+  assert(/getSnapshot\(fresh \? \{ fresh: true \} : undefined\)/.test(shell), 'the shell must forward the forced flag')
+  assert(/load\(true, true\)/.test(shell), 'the refresh button must force a full read')
+  return 'revision cache + forced refresh wired'
+})
+
 check('file-size', () => {
   const limits = { lines: 3000, bytes: 150 * 1024 }
   let biggest = { path: '', lines: 0 }
@@ -307,6 +321,140 @@ check('select-options-themed', () => {
   }
   return 'option popups have declared colours in both forced themes'
 })
+
+// ── executable: the snapshot cache in api.ts ────────────────────────────────
+
+/**
+ * The cache lives inside api.ts, so reading the source cannot prove it works. With esbuild (the
+ * build's own dev dependency) the module is compiled to a temp .mjs and run against a stubbed
+ * fetch; every request URL is recorded, which is exactly the protocol a host would see.
+ */
+let transformSync = null
+try {
+  ({ transformSync } = await import('esbuild'))
+}
+catch {
+  transformSync = null
+}
+
+async function loadApiModule() {
+  const dir = await mkdtemp(join(tmpdir(), 'tool-hub-client-api-'))
+  try {
+    const result = transformSync(readFileSync(join(CLIENT, 'api.ts'), 'utf8'), {
+      loader: 'ts',
+      format: 'esm',
+      target: 'es2022',
+    })
+    assert(!/^import /m.test(result.code), 'api.ts must have no runtime imports; compile with a stub')
+    const file = join(dir, 'api.mjs')
+    await writeFile(file, result.code, 'utf8')
+    return await import(pathToFileURL(file).href)
+  }
+  finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+}
+
+async function snapshotCacheChecks() {
+  const api = await loadApiModule()
+  const requests = []
+  let responder = null
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async url => {
+    const href = String(url)
+    requests.push(href)
+    const answer = responder(href)
+    const text = answer.body === undefined ? '' : JSON.stringify(answer.body)
+    return { status: answer.status, text: async () => text }
+  }
+  const versioned = revision => ({
+    ok: true,
+    revision,
+    data: { plugins: [{ id: 'p1', enabled: true }], paths: { home: '/h' } },
+  })
+  try {
+    // 1. a cold read sends no since and normalises the payload
+    responder = () => ({ status: 200, body: versioned('rev-1') })
+    const first = await api.getSnapshot()
+    assert(first.ok, 'a cold read must succeed')
+    assert(first.data.plugins.length === 1 && first.data.plugins[0].id === 'p1', 'the payload must be normalised')
+    assert(!requests[0].includes('?'), 'a cold read must not send since: ' + requests[0])
+
+    // 2. the next read sends the remembered revision and reuses the cached snapshot object
+    responder = () => ({ status: 200, body: { ok: true, unchanged: true, revision: 'rev-1' } })
+    const second = await api.getSnapshot()
+    assert(second.ok && second.data === first.data, 'an unchanged answer must return the cached snapshot object')
+    assert(requests[1].includes('since=rev-1'), 'the second read must send since: ' + requests[1])
+
+    // 3. a moved revision returns full data and replaces the cache
+    responder = () => ({ status: 200, body: { ok: true, revision: 'rev-2', data: { plugins: [{ id: 'p1' }, { id: 'p2' }] } } })
+    const third = await api.getSnapshot()
+    assert(third.ok && third.data.plugins.length === 2, 'a moved revision must return the new payload')
+    assert(third.data !== first.data, 'a moved revision must not reuse the cached object')
+    assert(requests[2].includes('since=rev-1'), 'the third read must send the previous revision: ' + requests[2])
+
+    // 4. fresh=1 ignores since and is a single request; the new revision is then remembered
+    responder = () => ({ status: 200, body: versioned('rev-3') })
+    const forced = await api.getSnapshot({ fresh: true })
+    assert(forced.ok, 'a forced read must succeed')
+    assert(requests[3].includes('fresh=1') && !requests[3].includes('since='), 'a forced read must ignore since: ' + requests[3])
+    assert(requests[4] === undefined, 'a forced read must not be retried')
+    responder = () => ({ status: 200, body: { ok: true, unchanged: true, revision: 'rev-3' } })
+    await api.getSnapshot()
+    assert(requests[4].includes('since=rev-3'), 'after a forced read the new revision is remembered: ' + requests[4])
+
+    // 5. a 1.x host sends no revision: never send it a since
+    api.resetSnapshotCache()
+    requests.length = 0
+    responder = () => ({ status: 200, body: { ok: true, data: { plugins: [{ id: 'legacy' }] } } })
+    await api.getSnapshot()
+    await api.getSnapshot()
+    assert(requests.length === 2 && !requests[1].includes('since='), 'a host without revisions must not receive since: ' + requests[1])
+
+    // 6. unchanged with no cache is a protocol error, reported as one
+    api.resetSnapshotCache()
+    requests.length = 0
+    responder = () => ({ status: 200, body: { ok: true, unchanged: true, revision: 'rev-9' } })
+    const orphan = await api.getSnapshot()
+    assert(!orphan.ok && orphan.code === 'stale-snapshot', 'unchanged without a cache must fail as stale-snapshot')
+
+    // 7. the 404 fallback keeps the revision on the legacy path
+    api.resetSnapshotCache()
+    requests.length = 0
+    responder = url => url.includes('/v1/snapshot') && url.includes('?')
+      ? { status: 404, body: { ok: false, error: { code: 'not-found', message: 'no v1 route' } } }
+      : { status: 200, body: versioned('rev-4') }
+    const cold = await api.getSnapshot()
+    const viaLegacy = await api.getSnapshot()
+    assert(cold.ok && viaLegacy.ok, 'both reads must succeed')
+    assert(requests.length === 3, 'expected v1 miss, legacy hit, then legacy reuse: ' + requests.join(', '))
+    assert(requests[2].includes('/tool-hub/api/snapshot') && requests[2].includes('since=rev-4'), 'the fallback must keep since on the legacy path: ' + requests[2])
+
+    // 8. an error envelope is still a structured failure
+    api.resetSnapshotCache()
+    responder = () => ({ status: 200, body: { ok: false, error: { code: 'internal', message: 'boom' } } })
+    const failedRead = await api.getSnapshot()
+    assert(!failedRead.ok && failedRead.code === 'internal' && failedRead.message === 'boom', 'the error envelope must survive')
+
+    return '8 scenarios, ' + requests.length + ' requests'
+  }
+  finally {
+    globalThis.fetch = realFetch
+  }
+}
+
+if (transformSync === null) {
+  skip('snapshot-cache-runtime', 'esbuild is unavailable; npm install brings the dev dependency back')
+}
+else {
+  try {
+    const detail = await snapshotCacheChecks()
+    results.push({ name: 'snapshot-cache-runtime', ok: true, detail })
+  }
+  catch (error) {
+    results.push({ name: 'snapshot-cache-runtime', ok: false, detail: error instanceof Error ? error.message : String(error) })
+  }
+}
 
 // ── report ───────────────────────────────────────────────────────────────────
 

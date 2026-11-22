@@ -17,6 +17,7 @@
  * be read answers 400, and only an unexpected internal error answers 500. Nothing throws out of a
  * handler.
  */
+import { createHash } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { HubContext } from '../shared/types.js'
 import { Failure, failureOf, isRecord, type DispatchOutcome } from './dispatch.js'
@@ -37,6 +38,61 @@ export const API_PATHS = [SNAPSHOT_PATH, OP_PATH, V1_SNAPSHOT_PATH, V1_OP_PATH] 
 
 /** 1.x refused anything larger; the client never sends more than a scene or an imported config. */
 export const MAX_BODY = 256 * 1024
+
+// ── revision ─────────────────────────────────────────────────────────────────
+
+/**
+ * A stable fingerprint of one snapshot payload.
+ *
+ * The client keeps the fingerprint it last saw and sends it back as `since`; when the next build
+ * agrees, the route answers a small `unchanged` body instead of the whole JSON. `fetchedAt` is the
+ * one field that moves on every build by design, so it is excluded; object keys are sorted so two
+ * builds of the same state agree even when their insertion order differs. Sixteen hex characters
+ * are ample for change detection — a collision costs one stale panel until the next forced refresh.
+ *
+ * The payload here is the snapshot itself, never the response envelope: the revision describes the
+ * state, not the wire format.
+ */
+export function snapshotRevision(payload: unknown): string {
+  const canonical = JSON.stringify(canonicalValue(payload)) ?? 'null'
+  return createHash('sha256').update(canonical).digest('hex').slice(0, 16)
+}
+
+/** Fields that describe the read, not the state: left out of the fingerprint. */
+const REVISION_SKIP: ReadonlySet<string> = new Set(['fetchedAt'])
+
+/** JSON with sorted object keys, for a fingerprint that does not depend on key order. */
+function canonicalValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(item => canonicalValue(item))
+  if (value !== null && typeof value === 'object') {
+    const source = value as Record<string, unknown>
+    const sorted: Record<string, unknown> = {}
+    for (const key of Object.keys(source).sort()) {
+      if (REVISION_SKIP.has(key)) continue
+      sorted[key] = canonicalValue(source[key])
+    }
+    return sorted
+  }
+  return value === undefined ? null : value
+}
+
+/**
+ * The snapshot query, read once: `fresh=1` asks the builder to skip its caches, and `since` is the
+ * revision the caller already holds. Every other parameter is ignored, and a malformed query is
+ * simply an empty one — a bad URL never fails the request.
+ */
+export function snapshotQuery(url: string | undefined): { fresh: boolean; since: string | null } {
+  const text = url ?? ''
+  const index = text.indexOf('?')
+  let query: URLSearchParams
+  try {
+    query = new URLSearchParams(index === -1 ? '' : text.slice(index + 1))
+  }
+  catch {
+    query = new URLSearchParams()
+  }
+  return { fresh: query.get('fresh') === '1', since: query.get('since') }
+}
 
 // ── host shapes ──────────────────────────────────────────────────────────────
 
@@ -185,11 +241,20 @@ async function handleSnapshot(options: ApiOptions, request: IncomingMessage, res
     refuseOrigin(response)
     return
   }
-  const fresh = /(?:^|[?&])fresh=1(?:&|$)/.test(request.url ?? '')
+  const { fresh, since } = snapshotQuery(request.url)
   const build = options.snapshot ?? defaultSnapshot(options)
   try {
     const data = await build({ fresh })
-    sendJson(response, 200, { ok: true, data })
+    const revision = snapshotRevision(data)
+    // A forced rebuild (fresh=1) is always answered in full: the caller asked the host to look
+    // again, and that is also the one path that refreshes the builder's own caches.
+    if (!fresh && since !== null && since === revision) {
+      sendJson(response, 200, { ok: true, unchanged: true, revision })
+      return
+    }
+    // `revision` sits beside `data`, never inside it: the snapshot content stays what the host op
+    // returned, so an older client reading `data` sees byte-identical JSON.
+    sendJson(response, 200, { ok: true, data, revision })
   }
   catch (error) {
     sendJson(response, 200, { ok: false, error: failureOf(error) })

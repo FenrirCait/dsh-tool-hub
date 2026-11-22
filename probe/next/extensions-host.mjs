@@ -15,11 +15,13 @@
  *   4. extension.reload picks up changed host code with no host restart;
  *   5. one broken extension never takes the host down - extension.list / snapshot keep working;
  *   6. the namespace, reserved-id, view-op and host-path rules reject at load time;
- *   7. a declared settings field appears in the snapshot schema with its default.
+ *   7. a declared settings field appears in the snapshot schema with its default;
+ *   8. extension.installBundled copies a compat pack into the profile, the copy wins discovery and
+ *      carries overridesBundled, and a second install refuses without touching the existing copy.
  *
  * Exit 1 when any check fails. dist/host/index.js must be current; no third-party libraries.
  */
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -326,6 +328,16 @@ async function setExtension(runtime, id, enabled) {
   return await run(runtime, 'extension.set', { id, enabled })
 }
 
+/** Regular files under a folder, so the copy can be compared with its source tree. */
+async function countFiles(dir) {
+  let files = 0
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    if (entry.isDirectory()) files += await countFiles(join(dir, entry.name))
+    else if (entry.isFile()) files += 1
+  }
+  return files
+}
+
 // -- checks ------------------------------------------------------------------
 
 let runtime = null
@@ -408,7 +420,7 @@ try {
       const current = data.extensions[index].id
       assert(previous.localeCompare(current) <= 0, 'rows are not sorted: ' + previous + ' > ' + current)
     }
-    for (const key of ['id', 'name', 'version', 'apiVersion', 'dir', 'enabled', 'loaded', 'error', 'ops', 'views']) {
+    for (const key of ['id', 'name', 'version', 'apiVersion', 'dir', 'enabled', 'loaded', 'error', 'ops', 'views', 'bundled', 'overridesBundled']) {
       assert(key in data.extensions[0], 'status row is missing ' + key)
     }
     return data.extensions.length + ' rows, enabled ' + JSON.stringify(data.enabled)
@@ -704,7 +716,69 @@ try {
     return data.enabled.length + ' enabled, snapshot ok, hello v2'
   })
 
-  // 30. the throw-away tree is removed, nothing outside it was touched
+  // 30. copying a bundled pack into the profile: the copy wins discovery and is marked as the override
+  await test('install-bundled', async () => {
+    const bundledPack = oneRow((await list(runtime)).extensions, 'codex-ui-glass')
+    assertEqual(bundledPack.bundled, true, 'bundled row before install')
+    assertEqual(bundledPack.overridesBundled, false, 'overridesBundled before install')
+    const target = join(extRoot, 'codex-ui-glass')
+    const outcome = await run(runtime, 'extension.installBundled', { id: 'codex-ui-glass' })
+    assert(outcome.ok === true, 'extension.installBundled failed: ' + JSON.stringify(outcome.error))
+    assertEqual(outcome.data.id, 'codex-ui-glass', 'installed id')
+    assertEqual(outcome.data.dir, target, 'returned dir')
+    assertEqual(outcome.data.files, await countFiles(join(repoRoot, 'compat', 'codex-ui-glass')), 'copied file count')
+    const manifest = JSON.parse(await readFile(join(target, 'manifest.json'), 'utf8'))
+    assertEqual(manifest.id, 'codex-ui-glass', 'copied manifest id')
+    for (const file of ['host.mjs', 'style.css']) {
+      const info = await stat(join(target, file))
+      assert(info.isFile(), 'copied file missing: ' + file)
+    }
+    const rows = (await list(runtime)).extensions
+    assertEqual(rowsOf(rows, 'codex-ui-glass').length, 1, 'one row per id after the copy')
+    const localRow = oneRow(rows, 'codex-ui-glass')
+    assertEqual(localRow.bundled, false, 'the copy is the row that wins')
+    assertEqual(localRow.overridesBundled, true, 'the copy is marked as the local override')
+    assertEqual(localRow.dir, target, 'the row points at the copy')
+    const snapshot = await run(runtime, 'snapshot', { fresh: true })
+    assertEqual(oneRow(snapshot.data.extensions, 'codex-ui-glass').overridesBundled, true, 'snapshot carries overridesBundled')
+    const history = (await readFile(join(stateDir, 'history.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+    const installed = history.filter(row => row.op === 'extension.installBundled' && row.ok === true)
+    assert(installed.length > 0, 'history has no successful extension.installBundled row')
+    assertEqual(installed[installed.length - 1].audit, true, 'the install is audited')
+    return 'copied ' + outcome.data.files + ' files, local row overrides the pack'
+  })
+
+  // 31. a second copy is refused and the existing folder is left exactly as it was
+  await test('install-refuses-existing', async () => {
+    const target = join(extRoot, 'codex-ui-glass')
+    await writeFile(join(target, 'marker.txt'), 'keep me', 'utf8')
+    const again = await run(runtime, 'extension.installBundled', { id: 'codex-ui-glass' })
+    assertEqual(again.ok, false, 'second install must fail')
+    assertEqual(again.error.code, 'already-installed', 'error code')
+    includes(again.error.message, 'codex-ui-glass', 'message names the id')
+    assertEqual(await readFile(join(target, 'marker.txt'), 'utf8'), 'keep me', 'existing copy untouched')
+    sameList((await list(runtime)).enabled, ['broken', 'core', 'dangling', 'foreign', 'hello', 'idle', 'refuse', 'writeview'], 'install does not change the enabled list')
+    return 'refused with already-installed, marker intact'
+  })
+
+  // 32. the op validates its payload and only copies a pack the package really ships
+  await test('install-bad-payloads', async () => {
+    const cases = [
+      [{}, 'bad-payload', 'no id'],
+      [{ id: 'Bad_Id' }, 'bad-payload', 'uppercase id'],
+      [{ id: 'no-such-pack' }, 'missing-bundled', 'unknown pack'],
+    ]
+    for (const [payload, code, label] of cases) {
+      const outcome = await run(runtime, 'extension.installBundled', payload)
+      assertEqual(outcome.ok, false, label)
+      assertEqual(outcome.error.code, code, label + ' code')
+    }
+    const ghost = await stat(join(extRoot, 'no-such-pack')).then(() => false).catch(() => true)
+    assertEqual(ghost, true, 'a refused install writes nothing')
+    return 'bad-payload x2, missing-bundled x1, no folder written'
+  })
+
+  // 33. the throw-away tree is removed, nothing outside it was touched
   await test('temp-tree-cleaned', async () => {
     await rm(root, { recursive: true, force: true })
     const gone = await stat(root).then(() => false).catch(() => true)

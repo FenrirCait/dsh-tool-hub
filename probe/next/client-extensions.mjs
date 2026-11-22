@@ -36,7 +36,11 @@
  *  25. the toolbar renders that rule as one radio group with per-source counts, defaulting to
  *      all, and labels the group in the page's language;
  *  26. the cards render the filtered rows, an empty source has its own state, and the bundled
- *      badge stays on every bundled card.
+ *      badge stays on every bundled card;
+ *  27. a local copy over a bundled pack carries the 本地覆盖 badge in the page's language, and only
+ *      a bundled row without a local copy offers 复制到本地;
+ *  28. that copy action confirms first, sends extension.installBundled with the row id through the
+ *      shell's write path, and the shell reloads the snapshot afterwards.
  *
  * The source rules are transpiled with the esbuild devDependency and imported against stubs, so
  * checks 24-26 are measured on a fixture instead of matched as text. PASS/FAIL lines, exit 1
@@ -206,13 +210,13 @@ check('shell-wiring', () => {
 // ── the panel's own two ops ────────────────────────────────────────────────
 
 check('op-constants', () => {
-  assert(/export const EXT = \{ set: 'extension\.set', reload: 'extension\.reload' \} as const/.test(body), 'both panel ops must live in one constant')
-  assert((body.match(/['"]extension\./g) ?? []).length === 2, 'an extension op is spelled outside the constant')
+  assert(/export const EXT = \{ set: 'extension\.set', reload: 'extension\.reload', installBundled: 'extension\.installBundled' \} as const/.test(body), 'every panel op must live in one constant')
+  assert((body.match(/['"]extension\./g) ?? []).length === 3, 'an extension op is spelled outside the constant')
   assert(count('runOp(') === 1, 'the view may read through runOp exactly once, found ' + count('runOp('))
   assert(body.includes('runOp(view.op, {})'), 'a view read must send the declared op, not a hardcoded one')
-  assert(count('void run(') === 2, 'only the two panel writes may go through run, found ' + count('void run('))
+  assert(count('void run(') === 3, 'only the three panel writes may go through run, found ' + count('void run('))
   assert(count('runDetailed(') === 1, 'the console must have one send site, found ' + count('runDetailed('))
-  return 'EXT constant, one runOp site, two run sites, one runDetailed site'
+  return 'EXT constant, one runOp site, three run sites, one runDetailed site'
 })
 
 check('hot-toggle', () => {
@@ -423,6 +427,65 @@ check('source-hooks-order', () => {
   return 'useState before the empty return (rules of hooks)'
 })
 
+// ── a local copy over a bundled pack ──────────────────────────────────────
+
+check('override-module', () => {
+  const api = requireView()
+  for (const name of ['overrideLabel', 'copyLabel', 'copyHint', 'canCopyToLocal']) {
+    assert(api[name] !== undefined, 'extensions.tsx does not export ' + name)
+  }
+  assert(api.overrideLabel('zh') === '本地覆盖', 'zh override label')
+  assert(api.overrideLabel('en') === 'Local override', 'en override label')
+  assert(api.copyLabel('zh') === '复制到本地', 'zh copy label')
+  assert(api.copyLabel('en') === 'Copy to local', 'en copy label')
+  assert(api.copyHint('zh', 'pack-a').includes('compat/pack-a'), 'the zh hint must name the bundled folder')
+  assert(api.copyHint('en', 'pack-a').includes('compat/pack-a'), 'the en hint must name the bundled folder')
+  assert(api.copyHint('zh', 'pack-a') !== api.copyHint('en', 'pack-a'), 'the hint must be bilingual')
+  return 'bilingual override/copy copy naming compat/<id>'
+})
+
+check('override-runtime', () => {
+  const api = requireView()
+  assert(api.canCopyToLocal({ bundled: true }) === true, 'a bundled row with no local copy can be copied')
+  assert(api.canCopyToLocal({ bundled: true, overridesBundled: false }) === true, 'an explicit false is still copyable')
+  assert(api.canCopyToLocal({ bundled: true, overridesBundled: true }) === false, 'a shadowed bundled row is never offered')
+  assert(api.canCopyToLocal({ bundled: false, overridesBundled: true }) === false, 'the local override row is already local')
+  assert(api.canCopyToLocal({ bundled: false }) === false, 'a plain local row is not a bundled pack')
+  return 'only a bundled row without a local copy is copyable'
+})
+
+check('override-badge', () => {
+  assert(body.includes('{entry.overridesBundled === true ? <Badge tone="brand">{overrideLabel(lang)}</Badge> : null}'), 'a local copy must carry the override badge')
+  const card = body.slice(body.indexOf('<Card label={name}>'))
+  const bundledAt = card.indexOf("t('extensions.bundled')")
+  const overrideAt = card.indexOf('{overrideLabel(lang)}')
+  assert(bundledAt !== -1 && overrideAt !== -1 && bundledAt < overrideAt, 'the override badge must sit beside the bundled badge')
+  assert(card.includes('{entry.overridesBundled === true ?'), 'the badge must follow the host flag alone')
+  return '本地覆盖 badge beside the bundled badge'
+})
+
+check('copy-to-profile', () => {
+  const card = body.slice(body.indexOf('<Card label={name}>'))
+  const buttonAt = card.indexOf('{copyable ? (')
+  assert(buttonAt !== -1, 'the copy action must be conditional on canCopyToLocal')
+  const button = card.slice(buttonAt, card.indexOf(') : null}', buttonAt))
+  assert(button.includes('setCopyAsk(true)'), 'the copy button must open the confirm dialog')
+  assert(!/void run\(/.test(button), 'the copy button must not send before confirmation')
+  assert(button.includes('busy={copyBusy}') && button.includes('disabled={anyBusy}'), 'the copy button reports its own busy state')
+  assert(button.includes('{copyLabel(lang)}'), 'the copy button needs its label')
+  const dialogAt = card.indexOf('open={copyAsk}')
+  assert(dialogAt !== -1, 'the copy confirm dialog is missing')
+  const dialog = card.slice(dialogAt, card.indexOf('</Dialog>', dialogAt))
+  assert(dialog.includes('title={copyLabel(lang)}'), 'the copy dialog must name the action')
+  assert(dialog.includes("{t('action.cancel')}") && dialog.includes("{t('action.confirm')}"), 'the copy dialog needs cancel and confirm')
+  assert(dialog.includes('{copyHint(lang, entry.id)}'), 'the copy dialog must say what will be copied')
+  const runAt = dialog.indexOf('void run(EXT.installBundled, { id: entry.id })')
+  assert(runAt !== -1, 'the copy confirm must call the op with the row id')
+  assert(dialog.lastIndexOf('setCopyAsk(false)', runAt) !== -1, 'the copy dialog must close before the op is sent')
+  assert(/const result = await runOp\(op, payload, WRITE_TIMEOUT_MS\)[\s\S]*?await load\(true\)/.test(shell), 'the shell must reload the snapshot after a write')
+  return 'confirm first, extension.installBundled with the id, reload after the write'
+})
+
 // ── the op console ─────────────────────────────────────────────────────────
 
 check('console-select', () => {
@@ -550,7 +613,7 @@ check('imports', () => {
 check('file-length', () => {
   const lines = source.split('\n').length
   const bytes = statSync(VIEW).size
-  assert(lines < 760, 'extensions.tsx has ' + lines + ' lines (limit 760)')
+  assert(lines < 840, 'extensions.tsx has ' + lines + ' lines (limit 840)')
   assert(bytes < 60 * 1024, 'extensions.tsx is ' + bytes + ' bytes (limit 60 KB)')
   return lines + ' lines, ' + bytes + ' bytes'
 })

@@ -168,6 +168,8 @@ const CSS = `
 .th-top-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 .th-content { flex: 1 1 auto; overflow-y: auto; padding: 16px 18px 28px; min-height: 0; }
 .th-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+/* The search wrapper stays out of the toolbar's flex flow: contents keeps the inner box the item. */
+.th-search-host { display: contents; }
 .th-list { display: flex; flex-direction: column; gap: 8px; }
 .th-groups { display: flex; flex-direction: column; gap: 10px; }
 /* A group head pins to the top of the scroller, so a long group keeps its name and its switch in
@@ -205,6 +207,11 @@ const CSS = `
 }
 .th-row:first-child { border-top: 0; }
 .th-row:hover { background: var(--dsw-alias-card-fill-hover, rgba(127, 127, 127, 0.12)); }
+/* A tool row is reached by keyboard travel, not by Tab, so the ring must be visible on the row. */
+.th-tool-row { outline-offset: -2px; }
+.th-tool-row:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, rgba(76, 111, 255, 1)); }
+/* A search hit inside a tool name: the host's warn colour with the theme's own text colour. */
+.th-mark { background: var(--dsw-alias-state-warn-primary, rgba(224, 163, 58, 0.32)); color: inherit; border-radius: 3px; padding: 0 1px; }
 .th-row-body { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: 3px; }
 .th-row-name {
   font-weight: 600;

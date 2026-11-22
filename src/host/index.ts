@@ -1,5 +1,5 @@
 import { Registry } from '../core/registry.js'
-import { loadState, saveState, stateDir } from '../core/io.js'
+import { backupDir, loadState, saveState, stateDir } from '../core/io.js'
 import { applySettingsDefaults, normalizeSettings } from '../core/settings.js'
 import { registerAll } from '../domains/index.js'
 import { cleanupTrash } from '../domains/skills.js'
@@ -9,12 +9,12 @@ import type { HubContext } from '../shared/types.js'
 import type { StateV2 } from '../core/state.js'
 import { Dispatcher, Failure, failureOf, historyFile } from './dispatch.js'
 import { writeFileAtomic } from '../core/atomic.js'
-import { HEARTBEAT_INJECTS, runDoctor, writeMountHeartbeat } from './diagnostics.js'
+import { clearStalePanelLock, HEARTBEAT_INJECTS, patchPathFor, runDoctor, writeMountHeartbeat } from './diagnostics.js'
 import { installApi } from './routes.js'
 import { installEntryPoints, type EntryPointCtx } from './entrypoints.js'
 import { PORTABILITY_OPS, portabilityHandlers } from './portability.js'
 import { buildSnapshot } from './snapshot.js'
-import { ExtensionManager, extensionRoots, type ExtensionStatus } from './extensions.js'
+import { ExtensionManager, extensionRoots, installBundledExtension, type ExtensionStatus } from './extensions.js'
 import { attachToolMask, knownToolNames, maskControl, surfacePort, type ToolMask } from './tool-mask.js'
 import { applySurface, clearSessionLazy, pruneLazy, readLazy, readOpen } from '../domains/tool-surface.js'
 import { normalizeGroups } from '../domains/groups.js'
@@ -234,6 +234,7 @@ export class Runtime {
           { id: 'extension.list', write: false, audit: false, note: 'Lists installed local extensions with their load state and views.' },
           { id: 'extension.set', write: true, audit: true, note: 'Switches one extension on or off, saves the enabled list and rebuilds the runtime.' },
           { id: 'extension.reload', write: true, audit: true, note: 'Re-imports extension code and rebuilds the runtime; no host restart.' },
+          { id: 'extension.installBundled', write: true, audit: true, note: 'Copies one bundled compat pack into this profile so it can be edited; an existing local copy is never overwritten.' },
         ],
       },
       handlers: {
@@ -260,6 +261,17 @@ export class Runtime {
           await this.rebuild('extension-reload')
           return { extensions: this.statuses, reloaded: id ?? '*' }
         },
+        'extension.installBundled': async (payload) => {
+          const body = payload as { id?: unknown } | null
+          const id = typeof body?.id === 'string' ? body.id : ''
+          if (!EXTENSION_ID.test(id)) throw new Failure('bad-payload', 'extension.installBundled needs an id')
+          const copied = await installBundledExtension(id)
+          if (!copied.ok) throw new Failure(copied.reason === 'invalid-id' ? 'bad-payload' : copied.reason, copied.message)
+          // The new folder only shows up in a snapshot after a build, so rebuild before answering:
+          // the reload the panel does next already carries the local row the copy created.
+          await this.rebuild('extension-install-bundled')
+          return { id, dir: copied.dir, files: copied.files }
+        },
       },
     }
 
@@ -272,6 +284,11 @@ export class Runtime {
         extensions: holder.statuses,
       }),
       doctor: async () => runDoctor({ ctx: this.ctx, stateDir: stateDir(), expectedInjects: HEARTBEAT_INJECTS }),
+      clearLock: async (payload) => clearStalePanelLock({
+        patchPath: patchPathFor(this.ctx),
+        backupDir: backupDir(),
+        confirm: (payload as { confirm?: unknown } | null)?.confirm === true,
+      }),
     })
     const core: DomainRegistration = {
       module: { ...coreBase.module, ops: [...coreBase.module.ops, ...extensionOps.module.ops] },
@@ -319,7 +336,7 @@ export class Runtime {
 }
 
 /** The core domain: snapshot/doctor plus the portability ops (dshmarket, third-party). */
-export function createCoreDomain(handlers: { snapshot: OpHandler; doctor: OpHandler }): DomainRegistration {
+export function createCoreDomain(handlers: { snapshot: OpHandler; doctor: OpHandler; clearLock: OpHandler }): DomainRegistration {
   return {
     module: {
       id: 'core',
@@ -327,6 +344,7 @@ export function createCoreDomain(handlers: { snapshot: OpHandler; doctor: OpHand
       ops: [
         { id: 'snapshot', write: false, audit: false, note: 'Builds the panel snapshot from the registered domains.' },
         { id: 'doctor', write: false, audit: false, note: 'Runs the diagnostics against the live host.' },
+        { id: 'doctor.clearLock', write: true, audit: true, confirm: true, note: 'Backs up a stale profile patch lock to the backups folder, then removes it; the patch file is never touched.' },
         { id: 'history.clear', write: true, audit: true, note: 'Truncates this profile audit log; the clear itself is recorded afterwards.' },
         ...PORTABILITY_OPS,
       ],
@@ -334,6 +352,7 @@ export function createCoreDomain(handlers: { snapshot: OpHandler; doctor: OpHand
     handlers: {
       snapshot: handlers.snapshot,
       doctor: handlers.doctor,
+      'doctor.clearLock': handlers.clearLock,
       'history.clear': async () => {
         await writeFileAtomic(historyFile(), '')
         return { cleared: true }

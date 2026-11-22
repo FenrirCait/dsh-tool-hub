@@ -286,10 +286,11 @@ check('rollback-normalize-record', normalizeRollback(null) === null && normalize
 
 // ---- 5. registration -------------------------------------------------------
 
-const core = createCoreDomain({ snapshot: async () => ({}), doctor: async () => ({}) })
+const core = createCoreDomain({ snapshot: async () => ({}), doctor: async () => ({}), clearLock: async () => ({ removed: false }) })
 check('registration-op-order', equal(core.module.ops.map(op => op.id), [
   'snapshot',
   'doctor',
+  'doctor.clearLock',
   'history.clear',
   'market.status',
   'market.import',

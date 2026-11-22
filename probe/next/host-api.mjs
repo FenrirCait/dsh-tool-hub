@@ -268,10 +268,12 @@ dispatcher.bind({
 
 const web = fakeWebServer()
 services.webServer = web.service
+// The revision tests move this on purpose: a changed payload must change the fingerprint.
+let fixtureTick = 0
 const disposeApi = routes.mountApi({
   ctx,
   run: (op, payload) => dispatcher.run(op, payload),
-  snapshot: async ({ fresh }) => ({ modules: registry.list().length, ops: registry.ops().length, fresh, state: 'fixture' }),
+  snapshot: async ({ fresh }) => ({ modules: registry.list().length, ops: registry.ops().length, fresh, tick: fixtureTick, state: 'fixture' }),
 })
 const { server, port } = await serve(web.handlers)
 
@@ -298,6 +300,65 @@ try {
     assertEqual(v1.status, 200, 'status')
     assertEqual(JSON.stringify(v1.body), JSON.stringify(legacy.body), 'body')
     return V1_SNAPSHOT
+  })
+
+  await test('snapshot revision ignores fetchedAt and key order', () => {
+    const a = routes.snapshotRevision({ b: 1, fetchedAt: 1, nested: { y: [1, 2], x: 'v' } })
+    const b = routes.snapshotRevision({ nested: { x: 'v', y: [1, 2] }, fetchedAt: 2, b: 1 })
+    assertEqual(a, b, 'the fingerprint must not depend on fetchedAt or key order')
+    assert(/^[0-9a-f]{16}$/.test(a), 'revision shape: ' + a)
+    assert(a !== routes.snapshotRevision({ b: 1, nested: { x: 'v', y: [1, 3] } }), 'a changed payload must change the revision')
+    return a
+  })
+
+  await test('a full snapshot carries a stable revision beside data', async () => {
+    const first = await request(port, SNAPSHOT)
+    const second = await request(port, SNAPSHOT)
+    assertEqual(first.body.ok, true, 'ok')
+    assertEqual(typeof first.body.revision, 'string', 'revision type')
+    assertEqual(first.body.revision.length, 16, 'revision length')
+    assertEqual(second.body.revision, first.body.revision, 'two builds of one state must agree')
+    assert(first.body.data !== undefined, 'a full answer carries data')
+    assert(!('revision' in first.body.data), 'revision belongs beside data, not inside it')
+    return 'revision ' + first.body.revision
+  })
+
+  await test('since matching the revision answers unchanged without data', async () => {
+    const full = await request(port, SNAPSHOT)
+    const res = await request(port, SNAPSHOT + '?since=' + full.body.revision)
+    assertEqual(res.status, 200, 'status')
+    assertEqual(res.body.ok, true, 'ok')
+    assertEqual(res.body.unchanged, true, 'unchanged')
+    assertEqual(res.body.revision, full.body.revision, 'revision')
+    assert(!('data' in res.body), 'an unchanged answer must not carry data')
+    return 'unchanged at ' + res.body.revision
+  })
+
+  await test('a changed payload defeats since and returns the full snapshot', async () => {
+    const before = await request(port, SNAPSHOT)
+    fixtureTick += 1
+    const res = await request(port, SNAPSHOT + '?since=' + before.body.revision)
+    assertEqual(res.body.unchanged, undefined, 'must not report unchanged')
+    assert(res.body.data !== undefined && res.body.data.tick === fixtureTick, 'data.tick must be ' + fixtureTick)
+    assert(res.body.revision !== before.body.revision, 'a changed payload needs a new revision')
+    return 'revision moved ' + before.body.revision + ' -> ' + res.body.revision
+  })
+
+  await test('fresh=1 ignores since and rebuilds', async () => {
+    const full = await request(port, SNAPSHOT)
+    const res = await request(port, SNAPSHOT + '?fresh=1&since=' + full.body.revision)
+    assertEqual(res.body.unchanged, undefined, 'a forced read is always answered in full')
+    assertEqual(res.body.data.fresh, true, 'the builder must see fresh')
+    assert(/^[0-9a-f]{16}$/.test(res.body.revision), 'a full answer still carries a revision: ' + res.body.revision)
+    return 'fresh answered in full (' + full.body.revision + ' -> ' + res.body.revision + ')'
+  })
+
+  await test('an unknown since is answered in full', async () => {
+    const res = await request(port, SNAPSHOT + '?since=deadbeefdeadbeef')
+    assertEqual(res.body.ok, true, 'ok')
+    assertEqual(res.body.unchanged, undefined, 'not unchanged')
+    assert(res.body.data !== undefined, 'data present')
+    return 'unknown revision ignored'
   })
 
   await test('401 gate uses the 1.x body shape', async () => {

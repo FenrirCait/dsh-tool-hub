@@ -15,7 +15,7 @@
  */
 import { createHash, randomBytes } from 'node:crypto'
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
-import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { reportCapabilities, type CapabilityReport } from '../core/capabilities.js'
@@ -661,6 +661,110 @@ function insideDir(parent: string, candidate: string): boolean {
   return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
 }
 
+// ── panel lock repair ──────────────────────────────────────────────────────
+
+/** The panel lock as it sits on disk right now; null when this profile has no patch file. */
+export interface PanelLockFacts {
+  /** Absolute path of `<patch>.panel.lock`. */
+  lock: string
+  exists: boolean
+  /** Age measured from the file's mtime — the same clock the stale-lock check reads. */
+  ageMs: number | null
+  /** Older than PANEL_LOCK_STALE_MS: the panel already calls this one abandoned. */
+  stale: boolean
+}
+
+/** Read the lock without deciding what to do about it; never throws on a missing file. */
+export async function inspectPanelLock(patchPath: string | null, now: () => number = Date.now): Promise<PanelLockFacts | null> {
+  if (patchPath === null) return null
+  const lock = patchPath + '.panel.lock'
+  const info = await stat(lock).catch(() => null)
+  if (info === null) return { lock, exists: false, ageMs: null, stale: false }
+  const ageMs = now() - info.mtimeMs
+  return { lock, exists: true, ageMs, stale: ageMs > PANEL_LOCK_STALE_MS }
+}
+
+export interface ClearLockOutcome {
+  removed: boolean
+  /** The lock path the caller asked about. */
+  lock: string
+  /** Where the lock file was copied before removal; null when nothing had to be backed up. */
+  backup: string | null
+  ageMs: number | null
+  detail: string
+}
+
+/**
+ * Back a stale panel lock up and remove it — the one write the diagnostics page offers.
+ *
+ * The patch document is never read or rewritten (C7): a parse failure is diagnosed, not patched,
+ * and clearing a lock must not become the side door to a rewrite. Three refusals keep it safe:
+ * no confirm token, no patch file, or a lock younger than the panel's own stale threshold (its
+ * holder may still be mid-write) each throw instead of deleting.
+ *
+ * Removal renames the lock aside first, exactly like core/atomic's breakLock: if two repairs race,
+ * only one rename wins, and a lock that was re-taken between the stat and the rename is put back.
+ */
+export async function clearStalePanelLock(options: {
+  patchPath: string | null
+  /** Where the copy lands; the caller passes core/io's backupDir() so Maintenance lists it too. */
+  backupDir: string
+  now?: () => number
+  confirm: boolean
+}): Promise<ClearLockOutcome> {
+  if (options.confirm !== true) throw new Error('clearStalePanelLock requires confirm:true')
+  if (options.patchPath === null) throw new Error('this profile has no cordis.patch.yml')
+  const now = options.now ?? Date.now
+  const facts = await inspectPanelLock(options.patchPath, now)
+  if (facts === null || !facts.exists) {
+    return { removed: false, lock: options.patchPath + '.panel.lock', backup: null, ageMs: null, detail: 'no lock file to clear' }
+  }
+  if (!facts.stale) {
+    throw new Error(`refusing to clear ${facts.lock}: held for ${Math.round((facts.ageMs ?? 0) / 1000)}s, not stale`)
+  }
+  const aside = `${facts.lock}.clear-${process.pid}-${randomBytes(4).toString('hex')}`
+  try {
+    await rename(facts.lock, aside)
+  }
+  catch (error) {
+    // ENOENT: another writer released or broke it first — nothing left to repair.
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { removed: false, lock: facts.lock, backup: null, ageMs: facts.ageMs, detail: 'the lock was already gone when the repair ran' }
+    }
+    throw error
+  }
+  const moved = await stat(aside).catch(() => null)
+  const age = moved === null ? facts.ageMs : now() - moved.mtimeMs
+  if (age !== null && age <= PANEL_LOCK_STALE_MS) {
+    // A fresh holder slipped in between the check and the rename: put its lock back untouched.
+    await rename(aside, facts.lock).catch(() => {})
+    throw new Error(`refusing to clear ${facts.lock}: a fresh holder took it (${Math.round(age / 1000)}s)`)
+  }
+  const stamp = new Date(now()).toISOString().replace(/[:.]/g, '-')
+  const backup = join(options.backupDir, `${basename(facts.lock)}.${stamp}.bak`)
+  try {
+    // mkdir is inside the guard too: a backup folder that cannot be created must restore the lock,
+    // not leave it renamed aside with no copy.
+    await mkdir(options.backupDir, { recursive: true })
+    await copyFile(aside, backup)
+    await rm(aside, { force: true })
+  }
+  catch (error) {
+    // A failed backup must not cost the only record of the lock: put the original back.
+    await rename(aside, facts.lock).catch(() => {})
+    await rm(backup, { force: true }).catch(() => {})
+    throw error
+  }
+  const seconds = Math.round((age ?? 0) / 1000)
+  return {
+    removed: true,
+    lock: facts.lock,
+    backup,
+    ageMs: age,
+    detail: `${basename(facts.lock)} was ${seconds}s old; backed up to ${backup} and removed`,
+  }
+}
+
 /**
  * The table. Eleven rows, each independent; `needs` names the capability that has to be there for the
  * check to mean anything, so an upgrade that dropped a member answers with the table's fallback.
@@ -722,15 +826,13 @@ export const DOCTOR_CHECKS: readonly DoctorCheck[] = [
     id: 'stale-lock',
     needs: [],
     async run(context) {
-      const patch = context.patchPath
-      if (patch === null) return { ok: true, detail: 'no lock file' }
-      const lock = `${patch}.panel.lock`
-      const info = await stat(lock).catch(() => null)
-      if (info === null) return { ok: true, detail: 'no lock file' }
-      const age = context.now() - info.mtimeMs
-      return age <= PANEL_LOCK_STALE_MS
-        ? { ok: true, detail: `held for ${Math.round(age / 1000)}s` }
-        : { ok: false, detail: `${lock} is ${Math.round(age / 1000)}s old (stale)` }
+      // One read for the check and the repair: a second implementation would drift on the clock.
+      const facts = await inspectPanelLock(context.patchPath, context.now)
+      if (facts === null || !facts.exists) return { ok: true, detail: 'no lock file' }
+      const seconds = Math.round((facts.ageMs ?? 0) / 1000)
+      return facts.stale
+        ? { ok: false, detail: `${facts.lock} is ${seconds}s old (stale)` }
+        : { ok: true, detail: `held for ${seconds}s` }
     },
   },
   {

@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.0.0-alpha.63
+
+- Extensions: detect local copies that shadow a bundled pack ('本地覆盖'), and add
+  `extension.installBundled` + '复制到本地' (copy compat/<id> into the profile; never overwrite).
+- Tools: search-term highlighting and keyboard navigation (arrow/home/end/escape) over rows.
+- Snapshot: revision + GET `?since=` returns `unchanged` without a body; the client reuses its
+  cached snapshot, while fresh refreshes stay full.
+- Diagnostics: back up and clear a stale panel lock (`doctor.clearLock`, explicit confirm;
+  the patch is never read or written), plus locate/copy details for patch-check failures.
+
 ## 2.0.0-alpha.62
 
 - Extensions: source filter (all / from package / local) with counts; the bundled badge stays.
