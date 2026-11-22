@@ -267,7 +267,6 @@ export function Shell(props: ShellProps): React.ReactElement {
   const nav = (
     <nav className="th-side" role="navigation" aria-label={t('a11y.nav')}>
       <div className="th-side-brand">
-        <span className="th-dot" aria-hidden="true" />
         <span>{t('app.brand')}</span>
       </div>
       {NAV.map(item => (

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.0-alpha.72
+
+- Remove the panel's brand dot; it read as a stray black blob in the sidebar.
+- Glass compat pack 1.0.1: transparent panel background (the DSH wallpaper shows through),
+  no painted sidebar-entry chip.
+
 ## 2.0.0-alpha.71
 
 - The usage guide now uses a native top-layer `<dialog>`, so it opens centered with a readable
