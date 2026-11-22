@@ -5,12 +5,16 @@
  * own id namespace, nothing else. It cannot replace a built-in op, and a broken extension is a
  * status row with an error, never a host failure. Extensions are trusted local code (same process,
  * full file access); the panel only switches them on for their owner.
+ *
+ * Discovery reads two folders only: the profile root and the shared home root. The package ships
+ * no pack — official packs are installed from the remote catalog (compat-catalog.ts), so every
+ * folder found here is a local one the owner can read and edit.
  */
-import { constants, copyFile, mkdir, readFile, readdir, rm, stat } from 'node:fs/promises'
+import { readFile, readdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
-import { backupDir, stateDir } from '../core/io.js'
+import { isAbsolute, join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { stateDir } from '../core/io.js'
 import type { DomainRegistration } from '../shared/contract.js'
 import type { DomainModule, LocalizedText } from '../shared/types.js'
 
@@ -18,7 +22,7 @@ export const EXTENSION_API_VERSION = 1
 
 const ID = /^[a-z0-9][a-z0-9_-]{0,31}$/
 const RESERVED = new Set([
-  'core', 'extension', 'extensions', 'plugins', 'skills', 'mcp', 'groups', 'presets',
+  'core', 'extension', 'extensions', 'compat', 'plugins', 'skills', 'mcp', 'groups', 'presets',
   'scenes', 'sessions', 'settings', 'tool-surface', 'config',
 ])
 const VIEW_KINDS = new Set(['table', 'list', 'json'])
@@ -62,16 +66,6 @@ export interface ExtensionStatus {
   styles: string[]
   /** CSS text of the declared styles, loaded only while enabled. */
   css: string[]
-  /** True when the folder comes from the plugin package's own compat/ directory. */
-  bundled: boolean
-  /** True when this local copy shadows a bundled pack with the same id; a bundled row is false. */
-  overridesBundled: boolean
-  /**
-   * The version the package ships for this id, recorded even when a local copy wins discovery;
-   * '' when the package ships no pack under this id. The card compares it with version to decide
-   * whether the local copy is behind the pack.
-   */
-  bundledVersion: string
   /** The manifest's description, when it declared one. */
   description?: LocalizedText
 }
@@ -80,11 +74,6 @@ export interface ExtensionDiscovered {
   manifest: ExtensionManifest
   dir: string
   hostFile: string
-  bundled: boolean
-  /** Set when a later bundled root carried the same id: this copy is the one that won. */
-  overridesBundled?: boolean
-  /** The bundled copy's version; '' for a local folder no pack shadows. */
-  bundledVersion: string
 }
 
 export interface ExtensionLoadResult {
@@ -99,175 +88,13 @@ export interface ExtensionManagerOptions {
 }
 
 /**
- * Profile-scoped first, then the shared home folder, then the packs bundled with the package.
- * A profile copy wins on an id clash; bundled packs are read-only until the owner enables them,
- * so they appear in the Extensions page without being copied into the profile.
+ * Profile-scoped first, then the shared home folder. A profile copy wins on an id clash, so the
+ * profile is the place an official pack lands and the home folder stays a shared, read-only-by-
+ * convention shelf for the same loader.
  */
-const BUNDLED_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'compat')
-
 export function extensionRoots(): string[] {
-  const roots = [join(stateDir(), 'extensions'), join(homedir(), '.dsh', 'tool-hub', 'extensions'), BUNDLED_ROOT]
+  const roots = [join(stateDir(), 'extensions'), join(homedir(), '.dsh', 'tool-hub', 'extensions')]
   return [...new Set(roots.map(root => resolve(root)))]
-}
-
-/** Where the package's own compat pack for an id lives. */
-function bundledExtensionDir(id: string): string {
-  return join(BUNDLED_ROOT, id)
-}
-
-/** What the panel's "copy to local" op answers: the folder it made, or why it made none. */
-export type InstallBundledResult =
-  | { ok: true; dir: string; files: number }
-  | { ok: false; reason: 'invalid-id' | 'missing-bundled' | 'already-installed' | 'copy-failed'; message: string }
-
-/**
- * Regular files only: a link inside a pack is skipped rather than followed out of the folder.
- *
- * An install claims a fresh folder, so its copies are exclusive and can never overwrite a file
- * even in a race. An update copies back into a folder that has just been emptied from the pack's
- * own tree, so there it overwrites — which is exactly what "replace the local copy" means.
- */
-async function copyTree(source: string, target: string, overwrite = false): Promise<number> {
-  let files = 0
-  for (const entry of await readdir(source, { withFileTypes: true })) {
-    const from = join(source, entry.name)
-    const to = join(target, entry.name)
-    if (entry.isDirectory()) {
-      await mkdir(to)
-      files += await copyTree(from, to, overwrite)
-    }
-    else if (entry.isFile()) {
-      await copyFile(from, to, overwrite ? 0 : constants.COPYFILE_EXCL)
-      files += 1
-    }
-  }
-  return files
-}
-
-/**
- * Copy one bundled compat pack into the profile extension root, so the owner can edit it.
- *
- * The profile root is first in extensionRoots(), so the copy wins discovery and the page shows it
- * as a local override. Never overwrites: the target folder is claimed with a non-recursive mkdir
- * (an existing folder is refused before anything is written) and a half-written copy is removed
- * again. Returns the target dir, or a reason the caller turns into a failure code.
- */
-export async function installBundledExtension(id: string): Promise<InstallBundledResult> {
-  if (!ID.test(id)) return { ok: false, reason: 'invalid-id', message: 'id must match ^[a-z0-9][a-z0-9_-]{0,31}$' }
-  const source = bundledExtensionDir(id)
-  const info = await stat(source).catch(() => null)
-  if (info === null || !info.isDirectory()) {
-    return { ok: false, reason: 'missing-bundled', message: `no bundled extension "${id}"` }
-  }
-  const parent = join(stateDir(), 'extensions')
-  const target = join(parent, id)
-  await mkdir(parent, { recursive: true })
-  try {
-    // Non-recursive on purpose: EEXIST is the refusal, and it is atomic against another copy.
-    await mkdir(target)
-  }
-  catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-      return { ok: false, reason: 'already-installed', message: `a local extension "${id}" already exists` }
-    }
-    throw error
-  }
-  try {
-    const files = await copyTree(source, target)
-    return { ok: true, dir: target, files }
-  }
-  catch (error) {
-    await rm(target, { recursive: true, force: true })
-    return { ok: false, reason: 'copy-failed', message: errorText(error) }
-  }
-}
-
-/** What the panel's "update the local copy" op answers: where it wrote, and what it installed. */
-export type UpdateBundledResult =
-  | { ok: true; dir: string; backup: string; version: string }
-  | { ok: false; reason: 'invalid-id' | 'missing-bundled' | 'missing-local' | 'copy-failed'; message: string }
-
-/** The version a pack's manifest declares; '' when it cannot be read, which the caller treats as unknown. */
-async function packVersion(dir: string): Promise<string> {
-  try {
-    const raw = JSON.parse(await readFile(join(dir, 'manifest.json'), 'utf8')) as unknown
-    return isRecord(raw) && typeof raw.version === 'string' ? raw.version.trim() : ''
-  }
-  catch {
-    return ''
-  }
-}
-
-/** One backup folder, claimed with a non-recursive mkdir so two updates cannot share a name. */
-async function claimBackupFolder(id: string): Promise<string> {
-  const dir = backupDir()
-  await mkdir(dir, { recursive: true })
-  const base = 'extensions-' + id + '-' + new Date().toISOString().replace(/[:.]/g, '-')
-  for (let index = 1; index <= 50; index += 1) {
-    const candidate = join(dir, index === 1 ? base : base + '-' + String(index))
-    try {
-      await mkdir(candidate)
-      return candidate
-    }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-    }
-  }
-  throw new Error('could not claim a backup folder for ' + id)
-}
-
-/**
- * Replace a local copy of a bundled pack with the copy the package ships.
- *
- * The order is the whole contract: the current local folder is copied (never moved) into
- * backupDir()/extensions-<id>-<stamp> first, and only then is it rebuilt from compat/<id>. A
- * failed overwrite puts the backup back, so the row never points at a half-written folder.
- * Nothing else is written: the pack is only read, and no patch file is ever touched.
- */
-export async function updateBundledExtension(id: string): Promise<UpdateBundledResult> {
-  if (!ID.test(id)) return { ok: false, reason: 'invalid-id', message: 'id must match ^[a-z0-9][a-z0-9_-]{0,31}$' }
-  const source = bundledExtensionDir(id)
-  const bundledInfo = await stat(source).catch(() => null)
-  if (bundledInfo === null || !bundledInfo.isDirectory()) {
-    return { ok: false, reason: 'missing-bundled', message: `no bundled extension "${id}"` }
-  }
-  const target = join(stateDir(), 'extensions', id)
-  const localInfo = await stat(target).catch(() => null)
-  if (localInfo === null || !localInfo.isDirectory()) {
-    return { ok: false, reason: 'missing-local', message: `no local extension "${id}" under ${join(stateDir(), 'extensions')}` }
-  }
-  const version = await packVersion(source)
-  let backup = ''
-  try {
-    backup = await claimBackupFolder(id)
-    await copyTree(target, backup)
-  }
-  catch (error) {
-    return { ok: false, reason: 'copy-failed', message: 'backup: ' + errorText(error) }
-  }
-  try {
-    await rm(target, { recursive: true, force: true })
-    await mkdir(target, { recursive: true })
-    await copyTree(source, target)
-  }
-  catch (error) {
-    let restored = false
-    try {
-      await rm(target, { recursive: true, force: true })
-      await mkdir(target, { recursive: true })
-      await copyTree(backup, target)
-      restored = true
-    }
-    catch {
-      restored = false
-    }
-    return {
-      ok: false,
-      reason: 'copy-failed',
-      message: `${errorText(error)}; backup in ${backup}${restored ? ' (the local copy was restored)' : ' (restore failed, copy it back by hand)'}`,
-    }
-  }
-  return { ok: true, dir: target, backup, version }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -355,11 +182,9 @@ export class ExtensionManager {
   private async discover(): Promise<{ entries: ExtensionDiscovered[]; problems: ExtensionStatus[] }> {
     const entries: ExtensionDiscovered[] = []
     const problems: ExtensionStatus[] = []
-    // First root wins on an id clash; the map keeps the winner so a later bundled folder with the
-    // same id can mark it as the local copy that shadows the pack.
+    // First root wins on an id clash, so the profile copy shadows the shared-home copy.
     const seen = new Map<string, ExtensionDiscovered>()
     for (const root of this.options.roots) {
-      const bundled = resolve(root) === BUNDLED_ROOT
       let names: string[] = []
       try {
         names = await readdir(root)
@@ -382,7 +207,7 @@ export class ExtensionManager {
         catch (error) {
           problems.push({
             id: name, name: fallbackName(name), version: '', apiVersion: EXTENSION_API_VERSION,
-            dir: extDir, enabled: false, loaded: false, error: 'manifest.json: ' + errorText(error), ops: [], views: [], styles: [], css: [], bundled, overridesBundled: false, bundledVersion: '',
+            dir: extDir, enabled: false, loaded: false, error: 'manifest.json: ' + errorText(error), ops: [], views: [], styles: [], css: [],
           })
           continue
         }
@@ -393,7 +218,7 @@ export class ExtensionManager {
         catch (error) {
           problems.push({
             id: name, name: fallbackName(name), version: '', apiVersion: EXTENSION_API_VERSION,
-            dir: extDir, enabled: false, loaded: false, error: 'manifest.json is not JSON: ' + errorText(error), ops: [], views: [], styles: [], css: [], bundled, overridesBundled: false, bundledVersion: '',
+            dir: extDir, enabled: false, loaded: false, error: 'manifest.json is not JSON: ' + errorText(error), ops: [], views: [], styles: [], css: [],
           })
           continue
         }
@@ -401,25 +226,14 @@ export class ExtensionManager {
         if (!normalized.ok) {
           problems.push({
             id: name, name: fallbackName(name), version: '', apiVersion: EXTENSION_API_VERSION,
-            dir: extDir, enabled: false, loaded: false, error: normalized.error, ops: [], views: [], styles: [], css: [], bundled, overridesBundled: false, bundledVersion: '',
+            dir: extDir, enabled: false, loaded: false, error: normalized.error, ops: [], views: [], styles: [], css: [],
           })
           continue
         }
         const manifest = normalized.manifest
-        const winner = seen.get(manifest.id)
-        if (winner !== undefined) {
-          // extensionRoots() lists the bundled root last, so a local copy always wins the id; this
-          // is the one shadow the page has to explain, and the bundled duplicate stays hidden —
-          // but its version is kept on the winner, which is how the page knows the copy is behind.
-          if (bundled && !winner.bundled) {
-            winner.overridesBundled = true
-            winner.bundledVersion = manifest.version
-          }
-          continue
-        }
+        if (seen.has(manifest.id)) continue
         const entry: ExtensionDiscovered = {
-          manifest, dir: extDir, hostFile: resolve(extDir, manifest.host), bundled,
-          bundledVersion: bundled ? manifest.version : '',
+          manifest, dir: extDir, hostFile: resolve(extDir, manifest.host),
         }
         seen.set(manifest.id, entry)
         entries.push(entry)
@@ -443,8 +257,7 @@ export class ExtensionManager {
         statuses.push({
           id: manifest.id, name: manifest.name, version: manifest.version, apiVersion: manifest.apiVersion,
           dir, enabled: false, loaded: false, error: null, ops: [], views: manifest.views,
-          styles: manifest.styles, css: [], bundled: entry.bundled, overridesBundled: entry.overridesBundled === true,
-          bundledVersion: entry.bundledVersion,
+          styles: manifest.styles, css: [],
           ...(manifest.description === undefined ? {} : { description: manifest.description }),
         })
         continue
@@ -458,7 +271,7 @@ export class ExtensionManager {
       statuses.push({
         id, name: fallbackName(id), version: '', apiVersion: EXTENSION_API_VERSION,
         dir: '', enabled: true, loaded: false, error: 'extension folder not found', ops: [], views: [],
-        styles: [], css: [], bundled: false, overridesBundled: false, bundledVersion: '',
+        styles: [], css: [],
       })
     }
     statuses.sort((left, right) => left.id.localeCompare(right.id))
@@ -469,8 +282,7 @@ export class ExtensionManager {
     const { manifest, dir, hostFile } = entry
     const base = {
       id: manifest.id, name: manifest.name, version: manifest.version, apiVersion: manifest.apiVersion,
-      dir, enabled: true, views: manifest.views, styles: manifest.styles, bundled: entry.bundled,
-      overridesBundled: entry.overridesBundled === true, bundledVersion: entry.bundledVersion,
+      dir, enabled: true, views: manifest.views, styles: manifest.styles,
       ...(manifest.description === undefined ? {} : { description: manifest.description }),
     }
     let key = ''

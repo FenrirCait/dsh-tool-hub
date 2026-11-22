@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import { Registry } from '../core/registry.js'
 import { backupDir, loadState, saveState, stateDir } from '../core/io.js'
 import { applySettingsDefaults, normalizeSettings } from '../core/settings.js'
@@ -5,7 +6,7 @@ import { registerAll } from '../domains/index.js'
 import { cleanupTrash } from '../domains/skills.js'
 import { createCatalogTool } from './catalog-tool.js'
 import type { DomainRegistration, OpHandler } from '../shared/contract.js'
-import type { HubContext } from '../shared/types.js'
+import type { HubContext, SettingsField } from '../shared/types.js'
 import type { StateV2 } from '../core/state.js'
 import { Dispatcher, Failure, failureOf, historyFile } from './dispatch.js'
 import { writeFileAtomic } from '../core/atomic.js'
@@ -14,7 +15,16 @@ import { installApi } from './routes.js'
 import { installEntryPoints, type EntryPointCtx } from './entrypoints.js'
 import { PORTABILITY_OPS, portabilityHandlers } from './portability.js'
 import { buildSnapshot } from './snapshot.js'
-import { ExtensionManager, extensionRoots, installBundledExtension, updateBundledExtension, type ExtensionStatus } from './extensions.js'
+import { ExtensionManager, extensionRoots, type ExtensionStatus } from './extensions.js'
+import {
+  CompatCatalog,
+  CompatFailure,
+  DEFAULT_CACHE_MINUTES,
+  DEFAULT_INDEX_URL,
+  DEFAULT_MIRROR_URL,
+  installCompatPack,
+  type CompatPack,
+} from './compat-catalog.js'
 import { attachToolMask, knownToolNames, maskControl, surfacePort, type ToolMask } from './tool-mask.js'
 import { applySurface, clearSessionLazy, pruneLazy, readLazy, readOpen } from '../domains/tool-surface.js'
 import { normalizeGroups } from '../domains/groups.js'
@@ -41,6 +51,29 @@ interface Build {
 const EXTENSION_ID = /^[a-z0-9][a-z0-9_-]{0,31}$/
 
 /**
+ * The official pack catalog's settings, declared under the "compat" module id so the stored keys
+ * are exactly compat.indexUrl / compat.mirrorUrl / compat.cacheMinutes. The two URLs default to the
+ * constants the catalog itself falls back to, so the published contract lives in one place.
+ */
+const COMPAT_SETTINGS: SettingsField[] = [
+  {
+    key: 'indexUrl', type: 'string', default: DEFAULT_INDEX_URL,
+    label: { zh: '官方配套索引', en: 'Official pack index' },
+    hint: { zh: '只接受 https，或本机回环 http（本地镜像 / 测试用）。', en: 'https only, or http on loopback for a local mirror or a fixture.' },
+  },
+  {
+    key: 'mirrorUrl', type: 'string', default: DEFAULT_MIRROR_URL,
+    label: { zh: '官方配套镜像', en: 'Official pack mirror' },
+    hint: { zh: '索引读不到时才会尝试；留空表示不设镜像。', en: 'Tried only when the index cannot be read; empty disables it.' },
+  },
+  {
+    key: 'cacheMinutes', type: 'number', default: DEFAULT_CACHE_MINUTES, min: 0, max: 1440,
+    label: { zh: '配套索引缓存（分钟）', en: 'Cache the pack index (minutes)' },
+    hint: { zh: '0 = 每次都读网络；面板的「刷新索引」始终强制读取。', en: '0 reads the network every time; the panel refresh always bypasses the cache.' },
+  },
+]
+
+/**
  * The live host: one state document, a build (registry + dispatcher + extension statuses) that
  * can be replaced atomically. Routes and the catalog tool hold this object, not a dispatcher, so
  * enabling an extension swaps the build without remounting anything.
@@ -51,6 +84,7 @@ export class Runtime {
   private lazyTimer: ReturnType<typeof setInterval> | null = null
   private chain: Promise<void> = Promise.resolve()
   private readonly manager: ExtensionManager
+  private readonly catalog = new CompatCatalog()
 
   private constructor(private readonly ctx: HubContext, private readonly state: StateV2) {
     this.manager = new ExtensionManager({
@@ -215,6 +249,21 @@ export class Runtime {
     })
   }
 
+  /** The three catalog settings; an absent or non-string key falls back to its default. */
+  private catalogSettings(): { indexUrl: string; mirrorUrl: string; cacheMinutes: number } {
+    const settings = this.state.settings
+    const text = (key: string, fallback: string): string => {
+      const value = settings[key]
+      return typeof value === 'string' ? value.trim() : fallback
+    }
+    const minutes = Number(settings['compat.cacheMinutes'])
+    return {
+      indexUrl: text('compat.indexUrl', DEFAULT_INDEX_URL),
+      mirrorUrl: text('compat.mirrorUrl', DEFAULT_MIRROR_URL),
+      cacheMinutes: Number.isFinite(minutes) && minutes >= 0 ? minutes : DEFAULT_CACHE_MINUTES,
+    }
+  }
+
   private async buildOnce(): Promise<Build> {
     const registry = new Registry()
     const builtins = registerAll(registry)
@@ -247,8 +296,6 @@ export class Runtime {
           { id: 'extension.list', write: false, audit: false, note: 'Lists installed local extensions with their load state and views.' },
           { id: 'extension.set', write: true, audit: true, note: 'Switches one extension on or off, saves the enabled list and rebuilds the runtime.' },
           { id: 'extension.reload', write: true, audit: true, note: 'Re-imports extension code and rebuilds the runtime; no host restart.' },
-          { id: 'extension.installBundled', write: true, audit: true, note: 'Copies one bundled compat pack into this profile so it can be edited; an existing local copy is never overwritten.' },
-          { id: 'extension.updateBundled', write: true, audit: true, note: 'Backs up the local copy into the backups folder, then overwrites it from the bundled compat pack of the same id; the pack is only read and no patch file is touched.' },
         ],
       },
       handlers: {
@@ -275,27 +322,76 @@ export class Runtime {
           await this.rebuild('extension-reload')
           return { extensions: this.statuses, reloaded: id ?? '*' }
         },
-        'extension.installBundled': async (payload) => {
-          const body = payload as { id?: unknown } | null
-          const id = typeof body?.id === 'string' ? body.id : ''
-          if (!EXTENSION_ID.test(id)) throw new Failure('bad-payload', 'extension.installBundled needs an id')
-          const copied = await installBundledExtension(id)
-          if (!copied.ok) throw new Failure(copied.reason === 'invalid-id' ? 'bad-payload' : copied.reason, copied.message)
-          // The new folder only shows up in a snapshot after a build, so rebuild before answering:
-          // the reload the panel does next already carries the local row the copy created.
-          await this.rebuild('extension-install-bundled')
-          return { id, dir: copied.dir, files: copied.files }
+      },
+    }
+
+    // Official packs: a remote catalog plus a verified installer. The module id gives the settings
+    // their stored keys (compat.indexUrl / compat.mirrorUrl / compat.cacheMinutes) and keeps the
+    // two ops out of the extensions namespace.
+    const compatOps: DomainRegistration = {
+      module: {
+        id: 'compat',
+        title: { zh: '官方配套', en: 'Official packs' },
+        ops: [
+          { id: 'compat.index', write: false, audit: false, note: 'Reads the official pack catalog from compat.indexUrl (then compat.mirrorUrl), reuses it for compat.cacheMinutes, and matches each pack against the local extension rows.' },
+          { id: 'compat.install', write: true, audit: true, confirm: true, note: 'Downloads one pack from the official catalog, verifies every file byte count and sha256, backs up an existing local copy and rebuilds the runtime.' },
+        ],
+        settings: COMPAT_SETTINGS,
+      },
+      handlers: {
+        // The catalog read is the card's refresh: no audit line, and a cache hit is the normal
+        // answer right after a write. Every row is matched against the live rows above, so
+        // installedVersion / enabled / updateAvailable are current even on a cached document.
+        'compat.index': async (payload) => {
+          const force = (payload as { force?: unknown } | null)?.force === true
+          let loaded
+          try {
+            loaded = await this.catalog.load(this.catalogSettings(), force)
+          }
+          catch (error) {
+            throw compatFailure(error)
+          }
+          const packs = loaded.index.packs.map(pack => {
+            const status = holder.statuses.find(entry => entry.id === pack.id)
+            const installedVersion = status === undefined ? '' : status.version
+            return {
+              id: pack.id,
+              name: pack.name,
+              version: pack.version,
+              ...(pack.description === undefined ? {} : { description: pack.description }),
+              fileCount: pack.files.length,
+              installedVersion,
+              installedDir: status === undefined ? '' : status.dir,
+              enabled: status !== undefined && status.enabled,
+              updateAvailable: installedVersion !== '' && installedVersion !== pack.version,
+            }
+          })
+          return { packs, source: loaded.source, fetchedAt: loaded.fetchedAt, warnings: loaded.warnings }
         },
-        'extension.updateBundled': async (payload) => {
+        'compat.install': async (payload) => {
           const body = payload as { id?: unknown } | null
           const id = typeof body?.id === 'string' ? body.id : ''
-          if (!EXTENSION_ID.test(id)) throw new Failure('bad-payload', 'extension.updateBundled needs an id')
-          const updated = await updateBundledExtension(id)
-          if (!updated.ok) throw new Failure(updated.reason === 'invalid-id' ? 'bad-payload' : updated.reason, updated.message)
-          // The row's version and the file list both change, so rebuild before answering: the
-          // reload the panel does next already sees the pack's version on the local copy.
-          await this.rebuild('extension-update-bundled')
-          return { id, dir: updated.dir, backup: updated.backup, version: updated.version }
+          if (!EXTENSION_ID.test(id)) throw new Failure('bad-payload', 'compat.install needs an id')
+          let pack: CompatPack | undefined
+          try {
+            const loaded = await this.catalog.load(this.catalogSettings())
+            pack = loaded.index.packs.find(entry => entry.id === id)
+          }
+          catch (error) {
+            throw compatFailure(error)
+          }
+          if (pack === undefined) throw new Failure('unknown-pack', `the official catalog has no pack "${id}"`)
+          let installed
+          try {
+            installed = await installCompatPack({ pack, root: join(stateDir(), 'extensions'), backupRoot: backupDir() })
+          }
+          catch (error) {
+            throw compatFailure(error)
+          }
+          // The new folder only shows up in a snapshot after a build, so rebuild before answering:
+          // the reload the panel does next already carries the row the install created.
+          await this.rebuild('compat-install')
+          return installed
         },
       },
     }
@@ -320,6 +416,7 @@ export class Runtime {
       handlers: { ...coreBase.handlers, ...extensionOps.handlers },
     }
     registry.register(core.module)
+    registry.register(compatOps.module)
 
     const dispatcher = new Dispatcher({
       registry,
@@ -345,6 +442,7 @@ export class Runtime {
       }
     }
     dispatcher.bind(core)
+    dispatcher.bind(compatOps)
 
     // Settings fields a new extension declares become visible with their defaults immediately;
     // the next settings save persists them.
@@ -358,6 +456,12 @@ export class Runtime {
 
     return { registry, dispatcher, statuses: holder.statuses, modules: registry.list().length, ops: registry.ops().length }
   }
+}
+
+/** A catalog failure keeps its stable code; anything else is reported as one compat failure. */
+function compatFailure(error: unknown): Failure {
+  if (error instanceof CompatFailure) return new Failure(error.code, error.message)
+  return new Failure('compat-failed', String((error as Error)?.message ?? error).slice(0, 300))
 }
 
 /** The core domain: snapshot/doctor plus the portability ops (dshmarket, third-party). */

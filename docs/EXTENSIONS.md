@@ -165,7 +165,7 @@ export default function activate(api) {
 - 还有第二道闸：注册通过后仍要进 Registry。重复 module id / op id 在那里抛错，同样落到
   `status.error`，并把该模块从注册表移除——不会留下「声明了但没 handler」的半绑定状态。
 
-官方兼容包放在仓库的 `compat/` 下（随发布包一起分发），不是 `examples/`；`compat/` 本身是一个扩展根，安装后官方包会直接出现在扩展页，不需要复制；当前有 `compat/codex-ui-glass`，默认关闭。
+官方兼容包不随主包分发，放在独立仓库（默认 `FenrirCait/dsh-tool-hub-packs`）。扩展页的「官方配套」卡片通过 `compat.index` 读取索引，`compat.install` 下载并逐文件校验 SHA-256 后安装；索引地址、镜像和缓存时间在设置里配置。包内 `compat/` 目录已移除。
 
 ## 5. 样式（styles）
 

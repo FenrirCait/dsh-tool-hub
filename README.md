@@ -31,9 +31,11 @@ dsh plugin install ./dsh-tool-hub
 Then open **Plugins → Hub**, or the **Tool Hub** entry in the sidebar. A restart is not required;
 the plugin hot-loads.
 
-The package also ships the official `compat/codex-ui-glass/` compatibility pack. The **Official packs** card at the top of Extensions lists it for install/update/batch sync; enable it there
-to make the panel, dock button and sidebar entry follow codex-ui's mica/flat glass settings. It is
-off until you turn it on.
+Official compatibility packs live in a separate repository and are never bundled with the plugin.
+The **Official packs** card in Extensions reads that GitHub catalog, shows pack and installed
+versions, and installs or updates a pack only after an explicit confirmation; every file is
+checked against its catalog SHA-256 before it is written. Configure the catalog URL and mirror in
+Settings (defaults point at `FenrirCait/dsh-tool-hub-packs`).
 
 ## What it does
 

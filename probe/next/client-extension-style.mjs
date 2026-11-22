@@ -33,9 +33,6 @@ check('dock button has a stable hook', dock.includes('className="th-dock-btn"'))
 check('sidebar entry has a stable hook', entry.includes("className: 'th-sidebar-entry'"))
 check('button forwards className', components.includes("props.className") && components.includes('className?: string'))
 
-check('the extension row shows the bundled badge', view.includes("entry.bundled === true") && view.includes("t('extensions.bundled')"))
-check('the snapshot carries the bundled flag', types.includes('bundled?: boolean') && api.includes('bundled: row.bundled === true'))
-
 const styleTag = 'data-extension-style'
 check('style tags are identified', style.includes("const STYLE_ATTR = '" + styleTag + "'"))
 

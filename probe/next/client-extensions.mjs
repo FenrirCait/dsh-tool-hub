@@ -31,25 +31,19 @@
  *  22. no HTML injection, no TODO marker, no import outside the client modules, and the file
  *      stays inside the view budget;
  *  23. every t() key resolves in both catalogs, and the extensions catalogs agree;
- *  24. the source filter is one exported pure rule: all / bundled / local, a missing bundled
- *      flag is local, snapshot order is kept and the input is never mutated;
- *  25. the toolbar renders that rule as one radio group with per-source counts, defaulting to
- *      all, and labels the group in the page's language;
- *  26. the cards render the filtered rows, an empty source has its own state, and the bundled
- *      badge stays on every bundled card;
- *  27. a local copy over a bundled pack carries the 本地覆盖 badge in the page's language, and only
- *      a bundled row without a local copy offers 复制到本地;
- *  28. that copy action confirms first, sends extension.installBundled with the row id through the
- *      shell's write path, and the shell reloads the snapshot afterwards;
- *  29. the 官方配套 card sits above the list, lists only official packs (a bundled row or the local
- *      copy shadowing one) and shows both versions, the origin status and the row's controls;
- *  30. install is offered for a bundled row with no local copy, update exactly while the local copy
- *      is behind bundledVersion, and the switch sends extension.set with the next state;
- *  31. the update confirmation names the backup folder and the overwrite, and the batch button
- *      computes the pending actions, confirms once with the count and runs them one at a time,
- *      keeping a per-action failure;
- *  32. the card never acts on mount, its copy is bilingual local text, and it adds no catalog key;
- *  33. compat-manager.tsx stays inside the allowed imports, themed styles and the view budget.
+ *  24. the 官方配套 card sits above the extension list and before the empty-installation state,
+ *      and mounts through runDetailed with the state path the backup folder is derived from;
+ *  25. the card's catalog answer is normalised: a row needs an id and a name, unusable rows are
+ *      dropped, source / fetchedAt / warnings survive, and a non-catalog answer is null;
+ *  26. install is offered with no local copy, update exactly while the host says updateAvailable,
+ *      the switch sends extension.set with the next state, and the labels/status words are local;
+ *  27. refresh forces compat.index while an ordinary read accepts the cache, and source, loading,
+ *      error, empty and parser-warning states all render;
+ *  28. the batch button computes the pending actions, confirms once with the count, runs them one
+ *      at a time with confirm:true and keeps a per-action failure;
+ *  29. the card reads the catalog on mount but never installs, queues or switches from an effect;
+ *  30. compat-manager.tsx stays inside the allowed imports, themed styles, catalog keys and the
+ *      view budget, and the panel's own writes are exactly extension.set and extension.reload.
  *
  * The source rules are transpiled with the esbuild devDependency and imported against stubs, so
  * checks 24-26 are measured on a fixture instead of matched as text. PASS/FAIL lines, exit 1
@@ -182,14 +176,6 @@ function requireCompat() {
   return compatModule
 }
 
-/** Rows as the snapshot reports them: two bundled, one local without the flag, one local false. */
-const SOURCE_ROWS = [
-  { id: 'bundled-a', bundled: true },
-  { id: 'local-a', bundled: false },
-  { id: 'legacy-no-flag' },
-  { id: 'bundled-b', bundled: true },
-]
-
 const count = needle => body.split(needle).length - 1
 
 /** One function body between two anchors, used to prove a handler does or does not send. */
@@ -234,13 +220,13 @@ check('shell-wiring', () => {
 // ── the panel's own two ops ────────────────────────────────────────────────
 
 check('op-constants', () => {
-  assert(/export const EXT = \{ set: 'extension\.set', reload: 'extension\.reload', installBundled: 'extension\.installBundled' \} as const/.test(body), 'every panel op must live in one constant')
-  assert((body.match(/['"]extension\./g) ?? []).length === 3, 'an extension op is spelled outside the constant')
+  assert(/export const EXT = \{ set: 'extension\.set', reload: 'extension\.reload' \} as const/.test(body), 'every panel op must live in one constant')
+  assert((body.match(/['"]extension\./g) ?? []).length === 2, 'an extension op is spelled outside the constant')
   assert(count('runOp(') === 1, 'the view may read through runOp exactly once, found ' + count('runOp('))
   assert(body.includes('runOp(view.op, {})'), 'a view read must send the declared op, not a hardcoded one')
-  assert(count('void run(') === 3, 'only the three panel writes may go through run, found ' + count('void run('))
+  assert(count('void run(') === 2, 'only the two panel writes may go through run, found ' + count('void run('))
   assert(count('runDetailed(') === 1, 'the console must have one send site, found ' + count('runDetailed('))
-  return 'EXT constant, one runOp site, three run sites, one runDetailed site'
+  return 'EXT constant, one runOp site, two run sites, one runDetailed site'
 })
 
 check('hot-toggle', () => {
@@ -373,271 +359,153 @@ check('empty-view', () => {
   return 'empty => viewEmpty, wrong shape => json'
 })
 
-// ── the source filter ─────────────────────────────────────────────────────
-
-check('source-module', () => {
-  const api = requireView()
-  for (const name of ['EXTENSION_SOURCES', 'extensionSourceOf', 'filterExtensions', 'extensionSourceCounts',
-    'sourceLabel', 'sourceHeading', 'sourceEmptyLabel']) {
-    assert(api[name] !== undefined, 'extensions.tsx does not export ' + name)
-  }
-  assert(api.EXTENSION_SOURCES.join(',') === 'all,bundled,local', 'the chips must be all, bundled, local in that order')
-  return 'esbuild transpile + stub import, seven source exports'
-})
-
-check('source-runtime', () => {
-  const api = requireView()
-  const rows = SOURCE_ROWS.map(row => ({ ...row }))
-  const before = JSON.stringify(rows)
-  const all = api.filterExtensions(rows, 'all')
-  assert(all.length === 4, 'all must keep every row')
-  assert(all !== rows, 'all must return a new array')
-  assert(all.map(row => row.id).join(',') === 'bundled-a,local-a,legacy-no-flag,bundled-b', 'all must keep snapshot order')
-  assert(api.filterExtensions(rows, 'bundled').map(row => row.id).join(',') === 'bundled-a,bundled-b', 'bundled must keep only bundled rows')
-  assert(api.filterExtensions(rows, 'local').map(row => row.id).join(',') === 'local-a,legacy-no-flag', 'local must keep rows without the bundled flag')
-  assert(JSON.stringify(rows) === before, 'filtering must not mutate the snapshot')
-  assert(api.extensionSourceOf({ bundled: true }) === 'bundled', 'bundled:true is the bundled source')
-  assert(api.extensionSourceOf({ bundled: false }) === 'local', 'bundled:false is local')
-  assert(api.extensionSourceOf({}) === 'local', 'a missing flag is local')
-  const counts = api.extensionSourceCounts(rows)
-  assert(counts.all === 4 && counts.bundled === 2 && counts.local === 2, 'counts must add up: ' + JSON.stringify(counts))
-  const empty = api.extensionSourceCounts([])
-  assert(empty.all === 0 && empty.bundled === 0 && empty.local === 0, 'an empty snapshot counts zero')
-  return 'all/bundled/local, missing flag local, order kept, no mutation, counts'
-})
-
-check('source-labels', () => {
-  const api = requireView()
-  const t = key => key
-  assert(api.sourceLabel('all', 'zh', t) === '全部', 'zh all label')
-  assert(api.sourceLabel('all', 'en', t) === 'All', 'en all label')
-  assert(api.sourceLabel('local', 'zh', t) === '本地', 'zh local label')
-  assert(api.sourceLabel('local', 'en', t) === 'Local', 'en local label')
-  assert(api.sourceLabel('bundled', 'zh', t) === 'extensions.bundled', 'the bundled chip must reuse the catalog key, not add copy')
-  assert(api.sourceHeading('zh') !== api.sourceHeading('en'), 'the radio group needs a name in both languages')
-  assert(api.sourceEmptyLabel('zh') !== api.sourceEmptyLabel('en'), 'the filtered empty state needs copy in both languages')
-  return 'bilingual local copy, bundled reuses extensions.bundled'
-})
-
-check('source-toolbar', () => {
-  assert(body.includes("const [source, setSource] = React.useState<ExtensionSource>('all')"), 'the filter must default to all')
-  assert(body.includes('role="radiogroup"'), 'the chips must be one radio group')
-  assert(body.includes('aria-label={sourceHeading(lang)}'), 'the radio group needs an accessible name')
-  assert(body.includes('{EXTENSION_SOURCES.map(item => {'), 'the chips must follow the exported order')
-  assert((body.match(/type="radio"/g) ?? []).length === 1, 'one radio declaration inside the map')
-  assert(body.includes("className={'th-btn' + (active ? ' th-btn--primary' : ' th-btn--ghost')}"), 'the active chip must take the primary style')
-  assert(body.includes('checked={active}'), 'a chip must follow the chosen source')
-  assert(body.includes('setSource(item)'), 'a chip must set the source')
-  assert(body.includes("sourceLabel(item, lang, t) + ' (' + counts[item] + ')'"), 'each chip must show its count')
-  assert(body.includes('const counts = extensionSourceCounts(snapshot.extensions)'), 'counts must cover the whole snapshot')
-  return 'radiogroup, one radio per chip, counts, default all'
-})
-
-check('source-filtered-list', () => {
-  assert(body.includes('const shown = filterExtensions(snapshot.extensions, source)'), 'the page must filter the snapshot')
-  assert(body.includes('{shown.map(entry => ('), 'the cards must render the filtered rows')
-  assert(!body.includes('{snapshot.extensions.map(entry => ('), 'the cards must not bypass the filter')
-  assert(body.includes('{shown.length === 0 ? ('), 'an empty source needs its own state')
-  assert(body.includes('<Empty title={sourceEmptyLabel(lang)} />'), 'an empty source must use the local label')
-  assert(body.includes("{entry.bundled === true ? <Badge tone=\"neutral\">{t('extensions.bundled')}</Badge> : null}"), 'the bundled badge must stay on every bundled card')
-  return 'filtered cards, per-source empty state, bundled badge kept'
-})
-
-check('source-hooks-order', () => {
-  const stateAt = body.indexOf("const [source, setSource] = React.useState<ExtensionSource>('all')")
-  const emptyAt = body.indexOf('if (snapshot.extensions.length === 0)')
-  assert(stateAt !== -1 && emptyAt !== -1, 'the filter state and the installation empty return must both exist')
-  assert(stateAt < emptyAt, 'the filter hook must be declared before the conditional return')
-  return 'useState before the empty return (rules of hooks)'
-})
-
-// ── a local copy over a bundled pack ──────────────────────────────────────
-
-check('override-module', () => {
-  const api = requireView()
-  for (const name of ['overrideLabel', 'copyLabel', 'copyHint', 'canCopyToLocal']) {
-    assert(api[name] !== undefined, 'extensions.tsx does not export ' + name)
-  }
-  assert(api.overrideLabel('zh') === '本地覆盖', 'zh override label')
-  assert(api.overrideLabel('en') === 'Local override', 'en override label')
-  assert(api.copyLabel('zh') === '复制到本地', 'zh copy label')
-  assert(api.copyLabel('en') === 'Copy to local', 'en copy label')
-  assert(api.copyHint('zh', 'pack-a').includes('compat/pack-a'), 'the zh hint must name the bundled folder')
-  assert(api.copyHint('en', 'pack-a').includes('compat/pack-a'), 'the en hint must name the bundled folder')
-  assert(api.copyHint('zh', 'pack-a') !== api.copyHint('en', 'pack-a'), 'the hint must be bilingual')
-  return 'bilingual override/copy copy naming compat/<id>'
-})
-
-check('override-runtime', () => {
-  const api = requireView()
-  assert(api.canCopyToLocal({ bundled: true }) === true, 'a bundled row with no local copy can be copied')
-  assert(api.canCopyToLocal({ bundled: true, overridesBundled: false }) === true, 'an explicit false is still copyable')
-  assert(api.canCopyToLocal({ bundled: true, overridesBundled: true }) === false, 'a shadowed bundled row is never offered')
-  assert(api.canCopyToLocal({ bundled: false, overridesBundled: true }) === false, 'the local override row is already local')
-  assert(api.canCopyToLocal({ bundled: false }) === false, 'a plain local row is not a bundled pack')
-  return 'only a bundled row without a local copy is copyable'
-})
-
-check('override-badge', () => {
-  assert(body.includes('{entry.overridesBundled === true ? <Badge tone="brand">{overrideLabel(lang)}</Badge> : null}'), 'a local copy must carry the override badge')
-  const card = body.slice(body.indexOf('<Card label={name}>'))
-  const bundledAt = card.indexOf("t('extensions.bundled')")
-  const overrideAt = card.indexOf('{overrideLabel(lang)}')
-  assert(bundledAt !== -1 && overrideAt !== -1 && bundledAt < overrideAt, 'the override badge must sit beside the bundled badge')
-  assert(card.includes('{entry.overridesBundled === true ?'), 'the badge must follow the host flag alone')
-  return '本地覆盖 badge beside the bundled badge'
-})
-
-check('copy-to-profile', () => {
-  const card = body.slice(body.indexOf('<Card label={name}>'))
-  const buttonAt = card.indexOf('{copyable ? (')
-  assert(buttonAt !== -1, 'the copy action must be conditional on canCopyToLocal')
-  const button = card.slice(buttonAt, card.indexOf(') : null}', buttonAt))
-  assert(button.includes('setCopyAsk(true)'), 'the copy button must open the confirm dialog')
-  assert(!/void run\(/.test(button), 'the copy button must not send before confirmation')
-  assert(button.includes('busy={copyBusy}') && button.includes('disabled={anyBusy}'), 'the copy button reports its own busy state')
-  assert(button.includes('{copyLabel(lang)}'), 'the copy button needs its label')
-  const dialogAt = card.indexOf('open={copyAsk}')
-  assert(dialogAt !== -1, 'the copy confirm dialog is missing')
-  const dialog = card.slice(dialogAt, card.indexOf('</Dialog>', dialogAt))
-  assert(dialog.includes('title={copyLabel(lang)}'), 'the copy dialog must name the action')
-  assert(dialog.includes("{t('action.cancel')}") && dialog.includes("{t('action.confirm')}"), 'the copy dialog needs cancel and confirm')
-  assert(dialog.includes('{copyHint(lang, entry.id)}'), 'the copy dialog must say what will be copied')
-  const runAt = dialog.indexOf('void run(EXT.installBundled, { id: entry.id })')
-  assert(runAt !== -1, 'the copy confirm must call the op with the row id')
-  assert(dialog.lastIndexOf('setCopyAsk(false)', runAt) !== -1, 'the copy dialog must close before the op is sent')
-  assert(/const result = await runOp\(op, payload, WRITE_TIMEOUT_MS\)[\s\S]*?await load\(true\)/.test(shell), 'the shell must reload the snapshot after a write')
-  return 'confirm first, extension.installBundled with the id, reload after the write'
-})
-
-// ── 官方配套: the card above the list ─────────────────────────────────────
+// ── 官方配套: the online card above the list ──────────────────────────────
 
 check('compat-mounted', () => {
   assert(/import \{ CompatManager \} from '\.\/compat-manager\.js'/.test(body), 'extensions.tsx must import the compat card from ./compat-manager.js')
   const cardAt = body.indexOf('<CompatManager')
-  const listAt = body.indexOf('{shown.map(entry => (')
+  const listAt = body.indexOf('{snapshot.extensions.map(entry => (')
+  const emptyAt = body.indexOf('snapshot.extensions.length === 0')
   assert(cardAt !== -1, 'the compat card must be rendered')
   assert(listAt !== -1 && cardAt < listAt, 'the compat card must sit above the extension list')
-  assert(body.includes('entries={snapshot.extensions}'), 'the card lists the snapshot rows')
+  assert(emptyAt !== -1 && cardAt < emptyAt, 'the card must render before the empty-installation state')
   assert(body.includes("statePath={snapshot.paths.state ?? ''}"), 'the card needs the state path to name the backup folder')
-  const stateAt = compatBody.indexOf('React.useState<CompatPending[] | null>(null)')
-  const returnAt = compatBody.indexOf('if (packs.length === 0) return null')
-  assert(stateAt !== -1 && returnAt !== -1 && stateAt < returnAt, 'the card must declare its hooks before the early return')
-  return 'card above the list, hooks before the empty return'
+  assert(body.includes('runDetailed={runDetailed}'), 'the card sends compat ops through runDetailed')
+  const stateAt = compatBody.indexOf('React.useState<CompatIndex | null>(null)')
+  const effectAt = compatBody.indexOf('React.useEffect(() => {')
+  assert(stateAt !== -1 && effectAt !== -1 && stateAt < effectAt, 'the card must declare its state before the effect')
+  return 'card above the list and before the empty state, hooks before the effect'
 })
 
-check('compat-official-only', () => {
+check('compat-index-shape', () => {
   const api = requireCompat()
-  for (const name of ['COMPAT', 'officialPacks', 'bundledVersionOf', 'localVersionOf', 'compatActionOf',
-    'pendingActions', 'backupRootOf', 'installTargetOf', 'CompatManager', 'installLabel', 'updateLabel',
-    'batchLabel', 'updateHint', 'installHint', 'batchHint', 'originLabel']) {
+  for (const name of ['COMPAT', 'indexOf', 'compatActionOf', 'pendingActions', 'backupRootOf', 'installTargetOf',
+    'CompatManager', 'installLabel', 'updateLabel', 'batchLabel', 'updateHint', 'installHint', 'batchHint',
+    'statusLabel', 'sourceLabel', 'remoteVersionLabel', 'installedVersionLabel']) {
     assert(api[name] !== undefined, 'compat-manager.tsx does not export ' + name)
   }
   const rows = [
-    { id: 'pack-only', version: '1.0.0', bundled: true, bundledVersion: '1.0.0' },
-    { id: 'behind', version: '1.0.0', overridesBundled: true, bundledVersion: '2.0.0' },
-    { id: 'current', version: '2.0.0', overridesBundled: true, bundledVersion: '2.0.0' },
-    { id: 'plain-local', version: '1.0.0' },
-    { id: 'legacy-local', bundled: false, overridesBundled: false },
+    { id: 'new-pack', name: { zh: '新', en: 'New' }, version: '2.0.0', installedVersion: '', installedDir: '', enabled: false, updateAvailable: false, fileCount: 3 },
+    { id: 'behind', name: { zh: '旧', en: 'Old' }, version: '2.0.0', installedVersion: '1.0.0', installedDir: '/x/behind', enabled: true, updateAvailable: true, fileCount: 2 },
+    { id: 'current', name: { zh: '同', en: 'Same' }, version: '2.0.0', installedVersion: '2.0.0', installedDir: '/x/current', enabled: false, updateAvailable: false, fileCount: 1 },
   ]
-  const before = JSON.stringify(rows)
-  const packs = api.officialPacks(rows)
-  assert(packs !== rows, 'officialPacks must return a new array')
-  assert(packs.map(row => row.id).join(',') === 'pack-only,behind,current', 'officialPacks keeps only bundled/override rows in order: ' + packs.map(row => row.id).join(','))
-  assert(api.officialPacks([]).length === 0, 'no rows is no packs')
-  assert(JSON.stringify(rows) === before, 'officialPacks must not mutate the snapshot')
-  assert(api.bundledVersionOf(rows[0]) === '1.0.0', 'a bundled row reports its own version as the pack version')
-  assert(api.bundledVersionOf(rows[1]) === '2.0.0', 'an override row reports the pack version it shadows')
-  assert(api.bundledVersionOf({ id: 'x', bundled: true, version: '3.0.0' }) === '3.0.0', 'a host without bundledVersion falls back to the row version')
-  assert(api.bundledVersionOf(rows[3]) === '', 'a plain local row has no pack version')
-  assert(api.localVersionOf(rows[0]) === '', 'a bundled row has no local version')
-  assert(api.localVersionOf(rows[1]) === '1.0.0', 'an override row reports its own version as the local version')
-  return 'official packs only, both versions, snapshot never mutated'
+  const parsed = api.indexOf({ packs: rows, source: 'mirror', fetchedAt: '2026-01-01T00:00:00.000Z', warnings: ['dropped'] })
+  assert(parsed !== null, 'a catalog answer must normalise')
+  assert(parsed.packs.length === 3, 'every valid row must survive: ' + parsed.packs.length)
+  assert(parsed.source === 'mirror', 'the source must be kept')
+  assert(parsed.fetchedAt === '2026-01-01T00:00:00.000Z', 'the fetch stamp must be kept')
+  assert(parsed.warnings.join(',') === 'dropped', 'the warnings must be kept')
+  // A row without an id or a name cannot be rendered; the rest of the answer still counts.
+  const mixed = api.indexOf({ packs: [{ id: '', name: { zh: 'x', en: 'x' } }, { id: 'ok', name: { zh: '好', en: 'Good' } }, null], source: 'nope', warnings: 'bad' })
+  assert(mixed !== null && mixed.packs.length === 1, 'unusable rows must be dropped')
+  assert(mixed.source === 'index', 'an unknown source falls back to index')
+  assert(mixed.warnings.length === 0, 'a non-array warnings field becomes empty')
+  assert(api.indexOf({}) === null, 'an answer without packs is not a catalog')
+  assert(api.indexOf(null) === null, 'null is not a catalog')
+  return 'rows normalised, unusable rows dropped, source kept'
 })
 
 check('compat-action-rules', () => {
   const api = requireCompat()
-  const packOnly = { id: 'a', version: '1.0.0', bundled: true, bundledVersion: '1.0.0' }
-  const behind = { id: 'b', version: '1.0.0', overridesBundled: true, bundledVersion: '2.0.0' }
-  const current = { id: 'c', version: '2.0.0', overridesBundled: true, bundledVersion: '2.0.0' }
-  assert(api.compatActionOf(packOnly) === 'install', 'a bundled row without a local copy is an install')
-  assert(api.compatActionOf(behind) === 'update', 'a copy behind the pack is an update')
-  assert(api.compatActionOf(current) === null, 'a copy at the pack version has nothing to do')
-  assert(api.compatActionOf({ id: 'd', version: '1.0.0' }) === null, 'a plain local row is not an official pack')
-  assert(api.compatActionOf({ id: 'e', overridesBundled: true }) === null, 'no recorded pack version means no update')
-  const pending = api.pendingActions([packOnly, behind, current, { id: 'f', version: '1.0.0' }])
-  assert(JSON.stringify(pending) === JSON.stringify([{ id: 'a', action: 'install' }, { id: 'b', action: 'update' }]), 'pendingActions is every install/update in order: ' + JSON.stringify(pending))
-  assert(api.pendingActions([]).length === 0, 'nothing to do is an empty batch')
+  const row = extra => ({ id: 'a', name: { zh: 'a', en: 'a' }, version: '2.0.0', installedVersion: '', installedDir: '', enabled: false, updateAvailable: false, fileCount: 1, ...extra })
+  assert(api.compatActionOf(row({})) === 'install', 'no local copy is an install')
+  assert(api.compatActionOf(row({ installedVersion: '1.0.0', updateAvailable: true })) === 'update', 'a copy behind is an update')
+  assert(api.compatActionOf(row({ installedVersion: '2.0.0', updateAvailable: false })) === null, 'the same version has nothing to do')
+  assert(api.compatActionOf(row({ installedVersion: '3.0.0', updateAvailable: true })) === 'update', 'the host flag alone decides an update')
+  const pending = api.pendingActions([row({ id: 'a' }), row({ id: 'b', installedVersion: '1.0.0', updateAvailable: true }), row({ id: 'c', installedVersion: '2.0.0' })])
+  assert(JSON.stringify(pending) === JSON.stringify([{ id: 'a', action: 'install' }, { id: 'b', action: 'update' }]), 'ready work in catalog order: ' + JSON.stringify(pending))
+  assert(api.pendingActions([]).length === 0, 'no rows is an empty batch')
   return 'install / update / nothing, batch in order'
 })
 
 check('compat-labels', () => {
   const api = requireCompat()
-  assert(api.installLabel('zh') === '安装到本地', 'zh install label')
-  assert(api.installLabel('en') === 'Install to local', 'en install label')
+  assert(api.installLabel('zh') === '安装', 'zh install label')
+  assert(api.installLabel('en') === 'Install', 'en install label')
   assert(api.updateLabel('zh') === '更新', 'zh update label')
   assert(api.updateLabel('en') === 'Update', 'en update label')
   assert(api.batchLabel('zh') === '全部安装/更新', 'the batch button is 全部安装/更新')
   assert(api.batchLabel('en') !== api.batchLabel('zh'), 'the batch button is bilingual')
-  assert(api.originLabel('zh', { id: 'a', overridesBundled: true }) === '本地覆盖', 'an override row says 本地覆盖')
-  assert(api.originLabel('zh', { id: 'a', bundled: true }) === '插件包', 'a bundled row says 插件包')
-  assert(api.originLabel('en', { id: 'a', bundled: true }) !== api.originLabel('zh', { id: 'a', bundled: true }), 'the origin label is bilingual')
+  assert(api.refreshLabel('zh') !== api.refreshLabel('en'), 'the refresh button is bilingual')
+  const installed = { id: 'a', name: { zh: 'a', en: 'a' }, version: '2.0.0', installedVersion: '2.0.0', installedDir: '', enabled: true, updateAvailable: false, fileCount: 1 }
+  const behind = { ...installed, installedVersion: '1.0.0', updateAvailable: true }
+  const missing = { ...installed, installedVersion: '' }
+  assert(api.statusLabel('zh', missing) === '未安装', 'a missing pack says 未安装')
+  assert(api.statusLabel('zh', behind) === '可更新', 'a behind copy says 可更新')
+  assert(api.statusLabel('zh', installed) === '已安装', 'an installed copy says 已安装')
+  assert(api.statusLabel('en', missing) !== api.statusLabel('zh', missing), 'the status is bilingual')
+  assert(api.sourceLabel('zh', 'cache').includes('缓存'), 'a cache hit is named')
+  assert(api.sourceLabel('en', 'mirror').toLowerCase().includes('mirror'), 'the mirror is named')
   assert(api.noVersion('zh') === api.noVersion('en'), 'the empty version is the same glyph in both languages')
   assert(api.backupRootOf('/home/me/.dsh/tool-hub/state.json') === '/home/me/.dsh/tool-hub/backups', 'a posix state path maps to its backups folder')
   assert(api.backupRootOf('C:\\Users\\me\\.dsh\\tool-hub\\state.json') === 'C:/Users/me/.dsh/tool-hub/backups', 'a windows state path maps to its backups folder')
   assert(api.backupRootOf('state.json') === 'backups', 'a bare state file has no folder to derive')
   assert(api.installTargetOf('/home/me/.dsh/tool-hub/state.json', 'pack-a') === '/home/me/.dsh/tool-hub/extensions/pack-a', 'installing lands in the profile extension root')
-  assert(api.installTargetOf('C:\\Users\\me\\state.json', 'pack-a') === 'C:/Users/me/extensions/pack-a', 'a windows state path lands in the profile extension root')
   assert(api.installTargetOf('state.json', 'pack-a') === 'extensions/pack-a', 'a bare state file still names the extension folder')
-  return 'bilingual labels, backup folder derived from the state path'
+  return 'bilingual labels, status words, backup folder derived from the state path'
 })
 
 check('compat-update-wording', () => {
   const api = requireCompat()
   const zh = api.updateHint('zh', 'pack-a', '/state/backups')
   const en = api.updateHint('en', 'pack-a', '/state/backups')
-  assert(zh.includes('compat/pack-a'), 'the zh update hint must name the pack it reads')
-  assert(zh.includes('/state/backups') && zh.includes('extensions-pack-a-'), 'the zh update hint must name the backup folder it creates')
-  assert(zh.includes('覆盖'), 'the zh update hint must say the local copy is overwritten')
+  assert(zh.includes('/state/backups') && zh.includes('extensions-pack-a-'), 'the zh update hint names the backup folder it creates')
+  assert(zh.includes('校验'), 'the zh update hint promises verification')
   assert(zh !== en, 'the update hint must be bilingual')
-  assert(en.includes('compat/pack-a') && en.includes('/state/backups') && /overwrit/i.test(en), 'the en update hint must say backup then overwrite')
-  assert(api.installHint('zh', 'pack-a').includes('compat/pack-a'), 'the install hint names the pack')
+  assert(en.includes('/state/backups') && /verified/i.test(en) && /back/i.test(en), 'the en update hint names the backup and the check')
+  assert(api.installHint('zh', 'pack-a').includes('SHA-256'), 'the install hint names the hash check')
   assert(api.installHint('zh', 'pack-a') !== api.installHint('en', 'pack-a'), 'the install hint must be bilingual')
   const batch = api.batchHint('zh', 3, '/state/backups')
   assert(batch.includes('3'), 'the batch hint must carry the count')
   assert(batch.includes('/state/backups'), 'the batch hint must name the backup folder')
   assert(api.reportLine('zh', 2, 1).includes('2') && api.reportLine('zh', 2, 1).includes('1'), 'the report line carries both counts')
-  return 'backup folder + overwrite in the update copy, count in the batch copy'
+  return 'backup folder + verification in the copy, count in the batch copy'
 })
 
 check('compat-row-render', () => {
-  assert(compatBody.includes("{bundledVersionLabel(lang) + ' ' + (bundledVersionOf(entry) || noVersion(lang))}"), 'the row must show the pack version')
-  assert(compatBody.includes("{localVersionLabel(lang) + ' ' + (localVersionOf(entry) || noVersion(lang))}"), 'the row must show the local version')
-  assert(compatBody.includes('{originLabel(lang, entry)}'), 'the row must show where the copy comes from')
-  assert(compatBody.includes("{entry.enabled ? t('extensions.enabled') : t('extensions.disabled')}"), 'the row must show the enabled state')
-  assert(compatBody.includes('const target = entry.bundled === true ? installTargetOf(statePath, entry.id) : entry.dir'), 'a bundled row must name the folder an install lands in')
+  assert(compatBody.includes("{remoteVersionLabel(lang) + ' ' + (row.version === '' ? noVersion(lang) : row.version)}"), 'the row must show the catalog version')
+  assert(compatBody.includes("{installedVersionLabel(lang) + ' ' + (row.installedVersion === '' ? noVersion(lang) : row.installedVersion)}"), 'the row must show the installed version')
+  assert(compatBody.includes('{statusLabel(lang, row)}'), 'the row must show the install status')
+  assert(compatBody.includes('{statusTone(row)}'), 'the status badge must follow the row state')
+  assert(compatBody.includes("{row.enabled ? t('extensions.enabled') : t('extensions.disabled')}"), 'an installed row must show the switch state')
+  assert(compatBody.includes("const target = row.installedDir !== '' ? row.installedDir : installTargetOf(statePath, row.id)"), 'a missing pack must name where an install lands')
   assert(compatBody.includes('{target}'), 'the row must show that target')
   assert(compatBody.includes('title={targetLabel(lang)}'), 'the folder must be labelled as the target')
-  assert(compatBody.includes('const description = packDescription(entry, lang)'), 'the row must read the pack description')
-  assert(compatBody.includes("description === '' ? null : <span className=\"th-field-hint\">{description}</span>"), 'the row must render the description when the manifest has one')
-  assert(compatBody.includes('const name = packName(entry, lang)'), 'the row must resolve the pack name for its language')
+  assert(compatBody.includes('const description = packDescription(row, lang)'), 'the row must read the pack description')
+  assert(compatBody.includes("description === '' ? null : <span className=\"th-field-hint\">{description}</span>"), 'the row must render the description when the index has one')
+  assert(compatBody.includes('const name = packName(row, lang)'), 'the row must resolve the pack name for its language')
   assert(compatBody.includes('<span className="th-row-name">{name}</span>'), 'the row must show the pack name')
-  assert(compatBody.includes('<span className="th-mono">{entry.id}</span>'), 'the row must show the id beside the name')
-  assert(compatBody.includes('busy={busyWith(COMPAT.install, entry.id)}') && compatBody.includes('busy={busyWith(COMPAT.update, entry.id)}'), 'each action needs its own busy key')
-  assert(compatBody.includes('checked={entry.enabled}'), 'the switch must follow the host state')
-  assert(compatBody.includes('runDetailed(COMPAT.set, { id: entry.id, enabled })'), 'the switch must send extension.set with the next state')
+  assert(compatBody.includes('<span className="th-mono">{row.id}</span>'), 'the row must show the id beside the name')
+  assert(compatBody.includes('busy={running}'), 'each action must report the batch state')
+  assert(compatBody.includes('checked={row.enabled}'), 'the switch must follow the host state')
+  assert(compatBody.includes('runDetailed(COMPAT.set, { id: row.id, enabled })'), 'the switch must send extension.set with the next state')
   return 'name/id, target, description, both versions, status, per-row controls'
 })
 
+check('compat-refresh', () => {
+  assert(compatBody.includes('void runDetailed(COMPAT.index, force ? { force: true } : {})'), 'the read must go through compat.index and force only on refresh')
+  assert(compatBody.includes('load(true)'), 'the refresh button must force a network read')
+  assert(compatBody.includes('load(false)'), 'an ordinary read must accept the cache')
+  assert(compatBody.includes('{refreshLabel(lang)}'), 'the refresh button needs its label')
+  assert(compatBody.includes('busy={loading}'), 'the refresh button must report the read state')
+  assert(compatBody.includes("{error === '' ? null : <Callout>{error}</Callout>}"), 'a failed read must be shown in a Callout')
+  assert(compatBody.includes('{sourceLabel(lang, index.source)}'), 'the card must show where the catalog came from')
+  assert(compatBody.includes('{loadingLabel(lang)}'), 'the first read needs a loading line')
+  assert(compatBody.includes('{emptyLabel(lang)}'), 'an empty catalog needs its own state')
+  assert(compatBody.includes('index.warnings.map'), 'the parser warnings must reach the page')
+  return 'refresh forces, cache otherwise, source/loading/error/empty states'
+})
+
 check('compat-batch', () => {
-  assert(compatBody.includes('const pending = pendingActions(entries)'), 'the batch button must compute the pending actions')
+  assert(compatBody.includes('const pending = pendingActions(packs)'), 'the batch button must compute the pending actions')
   assert(compatBody.includes('setQueued(pending)'), 'the batch button must open one confirmation')
   assert(compatBody.includes('batchHint(lang, queued.length, backupRoot)'), 'the batch confirmation must carry the count and the backup promise')
-  assert(compatBody.includes("{ id: entry.id, action: 'install' }") && compatBody.includes("{ id: entry.id, action: 'update' }"), 'a row action must queue exactly that row and action')
+  assert(compatBody.includes('{ id: row.id, action }'), 'a row action must queue exactly that row and action')
   assert(compatBody.includes('const actions = queued ?? []'), 'the confirmation must take the queued actions')
   assert(/setQueued\(null\)[\s\S]{0,120}runActions\(actions\)/.test(compatBody), 'the confirmation must close before the batch runs')
   assert(compatBody.includes('for (const action of actions) {'), 'the batch must run one action at a time')
   assert(!/Promise\.all/.test(compatBody), 'the batch must not fan out')
+  assert(compatBody.includes('runDetailed(COMPAT.install, { id: action.id, confirm: true })'), 'a confirmed install must carry confirm:true')
   assert(compatBody.includes('failed.push({ id: action.id, message: outcome.error'), 'a failed action must be recorded by id')
   assert(compatBody.includes('{report.failed.map(item => ('), 'every failure must be rendered')
   assert(compatBody.includes('{reportLine(lang, report.ok, report.failed.length)}'), 'the batch must report its counts')
@@ -647,10 +515,11 @@ check('compat-batch', () => {
 check('compat-no-auto-actions', () => {
   const effects = compatBody.match(/React\.useEffect\(\(\) => \{[\s\S]*?\}, \[\]\)/g) ?? []
   assert(effects.length === 1, 'the card must declare exactly one effect, found ' + effects.length)
-  assert(!/runDetailed\(|runActions\(|setQueued\(/.test(effects[0]), 'the card must never send or queue from an effect')
+  assert(effects[0].includes('load(false)'), 'the effect may only read the catalog')
+  assert(!/COMPAT\.install|runActions|setQueued|toggle\(/.test(effects[0]), 'the card must never install, queue or switch from an effect')
   assert(effects[0].includes('alive.current = false'), 'the effect must be the unmount guard')
   assert(!/disabled=\{false\}/.test(compatBody), 'no control may be forced enabled')
-  return 'no op on mount, unmount guarded'
+  return 'mount reads the catalog only, unmount guarded'
 })
 
 check('compat-discipline', () => {
@@ -670,9 +539,9 @@ check('compat-discipline', () => {
   for (const match of compatBody.matchAll(/\bt\('([^']+)'/g)) {
     assert(zhKeys.has(match[1]) && enKeys.has(match[1]), "t('" + match[1] + "') is not a catalog key")
   }
-  assert(compatBody.includes("t('extensions.enabled')") && compatBody.includes("t('extensions.disabled')"), 'the status badges must reuse the catalog keys')
+  assert(compatBody.includes("t('extensions.enabled')") && compatBody.includes("t('extensions.disabled')"), 'the switch state must reuse the catalog keys')
   const lines = compatSource.split('\n').length
-  assert(lines < 520, 'compat-manager.tsx has ' + lines + ' lines')
+  assert(lines < 560, 'compat-manager.tsx has ' + lines + ' lines')
   return 'stubs-only imports, no raw buttons, themed styles, catalog keys only, ' + lines + ' lines'
 })
 

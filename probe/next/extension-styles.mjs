@@ -29,16 +29,6 @@ await writeFile(join(dir, 'host.mjs'), `export default () => ({ module: { id: 's
 await writeFile(join(dir, 'style.css'), '.th-root { --demo: 1; }\n', 'utf8')
 
 try {
-  const roots = extensionRoots().map(root => root.replace(/\\/g, '/'))
-  check('the package compat directory is an extension root', roots.some(root => root.endsWith('/compat')), roots.join(' '))
-  const bundled = extensionRoots().find(root => root.replace(/\\/g, '/').endsWith('/compat'))
-  const bundledManifest = bundled === undefined ? null : await import('node:fs/promises').then(fs => fs.readFile(join(bundled, 'codex-ui-glass', 'manifest.json'), 'utf8'))
-  check('the official pack is discoverable there', bundledManifest !== null && JSON.parse(bundledManifest).id === 'codex-ui-glass')
-  const bundledManager = new ExtensionManager({ roots: [resolve('compat')], services: { get: () => undefined }, log: () => {} })
-  const bundledRows = await bundledManager.load([])
-  const bundledRow = bundledRows.statuses.find(status => status.id === 'codex-ui-glass')
-  check('the bundled row is flagged as bundled', bundledRow?.bundled === true, JSON.stringify(bundledRow))
-
   const ok = normalizeManifest({ ...base, styles: ['style.css'] })
   check('manifest accepts a relative css path', ok.ok && ok.manifest.styles[0] === 'style.css')
 

@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.0.0-alpha.69
+
+- Official compat packs moved out of the package into a separate GitHub catalog
+  (`FenrirCait/dsh-tool-hub-packs` by default). The package now ships only the manager.
+- `compat.index` reads the catalog (raw, then jsDelivr mirror) with a configurable cache;
+  `compat.install` downloads each file, verifies byte count + SHA-256, backs up an existing local
+  copy and swaps it in atomically. URLs are HTTPS or loopback only.
+- The manager lists remote pack versions beside installed versions, with install/update/enable
+  and one batch confirmation; no auto-install or auto-update.
+
 ## 2.0.0-alpha.68
 
 - Extensions gains an official compat manager above the list: bundled-only rows with pack/local

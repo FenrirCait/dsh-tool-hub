@@ -5,8 +5,9 @@
  * The Extensions view is only as good as the loader behind it: one folder per extension, a
  * manifest, an ESM host entry, and a hard rule that an extension may add ops under its own id
  * namespace and nothing else. This probe starts the compiled host (dist/host/index.js), points
- * TOOL_HUB_STATE_FILE at a throw-away state document, fills <state dir>/extensions with fixtures
- * and drives Runtime directly - no HTTP, no panel, no build.
+ * TOOL_HUB_STATE_FILE at a throw-away state document, fills <state dir>/extensions with fixtures,
+ * serves the official catalog from a 127.0.0.1 fixture server and drives Runtime directly - no
+ * panel, no build, and never the public network.
  *
  * What it pins down (the acceptance list for task-25):
  *   1. discovery answers enabled / disabled / broken folders as status rows and never throws;
@@ -16,15 +17,17 @@
  *   5. one broken extension never takes the host down - extension.list / snapshot keep working;
  *   6. the namespace, reserved-id, view-op and host-path rules reject at load time;
  *   7. a declared settings field appears in the snapshot schema with its default;
- *   8. extension.installBundled copies a compat pack into the profile, the copy wins discovery and
- *      carries overridesBundled, and a second install refuses without touching the existing copy;
- *   9. bundledVersion keeps the pack's version on the winning row (even when a local copy wins),
- *      and extension.updateBundled backs the local copy up into the backups folder before it
- *      overwrites it from compat/<id> — the pack is only read and no patch file is touched.
+ *   8. compat.index reads the fixture catalog, caches it for compat.cacheMinutes, refreshes on
+ *      force, falls back to the mirror and refuses a plain-http URL before any request leaves;
+ *   9. compat.install verifies every file's bytes and sha256, refuses traversal and oversized
+ *      entries while parsing, backs an existing copy up into the backups folder and replaces it,
+ *      and the installed folder is a normal local extension the switch can enable.
  *
  * Exit 1 when any check fails. dist/host/index.js must be current; no third-party libraries.
  */
+import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -33,6 +36,9 @@ const here = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(here, '..', '..')
 // The built host, or a copy when TOOL_HUB_DIST points at one (same override as core-state.mjs).
 const distRoot = resolve(process.env.TOOL_HUB_DIST ?? join(repoRoot, 'dist'))
+// The built catalog module: its pure rules and constants are what the host runs, so the probe
+// checks them directly instead of restating them.
+const catalog = await import(pathToFileURL(join(distRoot, 'host', 'compat-catalog.js')).href)
 
 // -- harness ----------------------------------------------------------------
 
@@ -105,6 +111,136 @@ await mkdir(extRoot, { recursive: true })
 await mkdir(skillsDir, { recursive: true })
 await mkdir(profileDir, { recursive: true })
 
+// -- fixture: a local catalog over HTTP (127.0.0.1 only) ---------------------
+
+const DEMO_HOST_V1 = [
+  'export default () => ({',
+  "  module: { id: 'compat-demo', title: { zh: '演示配套', en: 'Demo pack' }, ops: [{ id: 'compat-demo.status', write: false, note: 'a read op' }] },",
+  "  handlers: { 'compat-demo.status': async () => ({ marker: 'v1' }) },",
+  '})',
+  '',
+].join('\n')
+
+const DEMO_HOST_V2 = [
+  'export default () => ({',
+  "  module: { id: 'compat-demo', title: { zh: '演示配套', en: 'Demo pack' }, ops: [{ id: 'compat-demo.status', write: false, note: 'a read op' }] },",
+  "  handlers: { 'compat-demo.status': async () => ({ marker: 'v2' }) },",
+  '})',
+  '',
+].join('\n')
+
+function sha256(text) {
+  return createHash('sha256').update(text).digest('hex')
+}
+
+/** What the fixture catalog serves right now; the update test flips the version. */
+const catalogState = { version: '1.0.0', indexBroken: false, mirrorBroken: false }
+const hits = { index: 0, mirror: 0 }
+
+function demoFiles() {
+  return [
+    { path: 'manifest.json', body: JSON.stringify({ id: 'compat-demo', name: { zh: '演示配套', en: 'Demo pack' }, version: catalogState.version, apiVersion: 1, host: 'host.mjs' }, null, 2) + '\n' },
+    { path: 'host.mjs', body: catalogState.version === '2.0.0' ? DEMO_HOST_V2 : DEMO_HOST_V1 },
+    { path: 'style.css', body: '.compat-demo { color: var(--th-text); }\n' },
+  ]
+}
+
+function extraFiles() {
+  return [
+    { path: 'manifest.json', body: JSON.stringify({ id: 'compat-extra', name: { zh: '额外配套', en: 'Extra pack' }, version: '0.9.0', apiVersion: 1, host: 'host.mjs' }, null, 2) + '\n' },
+    { path: 'host.mjs', body: "export default () => ({ module: { id: 'compat-extra', title: { zh: '额外', en: 'Extra' }, ops: [] }, handlers: {} })\n" },
+  ]
+}
+
+/** Bodies for one id; the two deliberately broken packs serve the demo bytes. */
+function filesOf(id) {
+  if (id === 'compat-extra') return extraFiles()
+  if (id === 'compat-demo' || id.startsWith('compat-bad-')) return demoFiles()
+  return []
+}
+
+function packEntry(id, files, version = '1.0.0') {
+  return {
+    id,
+    name: { zh: id + ' 配套', en: id + ' pack' },
+    version,
+    description: { zh: id + ' 的描述', en: 'Description of ' + id },
+    files: files.map(file => ({
+      path: file.path,
+      url: BASE + '/files/' + id + '/' + file.path,
+      bytes: Buffer.byteLength(file.body),
+      sha256: sha256(file.body),
+    })),
+  }
+}
+
+/** A pack whose first file fails verification at install time. */
+function brokenVerificationPack(id, patch) {
+  const pack = packEntry(id, demoFiles())
+  patch(pack.files[0])
+  return pack
+}
+
+/** Packs the parser must drop; each one breaks exactly one rule. */
+function droppedPacks() {
+  const base = packEntry('compat-evil', demoFiles()).files[0]
+  const url = BASE + '/files/compat-demo/manifest.json'
+  return [
+    { ...packEntry('compat-traversal', demoFiles()), files: [{ ...base, path: '../escape.txt', url }] },
+    { ...packEntry('compat-plain-http', demoFiles()), files: [{ ...base, path: 'payload.txt', url: 'http://example.com/payload.txt' }] },
+    { ...packEntry('compat-too-big', demoFiles()), files: [{ ...base, bytes: catalog.MAX_FILE_BYTES + 1 }] },
+    {
+      ...packEntry('compat-huge', demoFiles()),
+      files: Array.from({ length: 5 }, (_, index) => ({ ...base, path: 'big-' + index + '.bin', bytes: Math.ceil(catalog.MAX_PACK_BYTES / 5) + 1 })),
+    },
+  ]
+}
+
+function indexDocument() {
+  return {
+    schema: 1,
+    generatedAt: new Date().toISOString(),
+    packs: [
+      packEntry('compat-demo', demoFiles(), catalogState.version),
+      packEntry('compat-extra', extraFiles()),
+      brokenVerificationPack('compat-bad-hash', file => { file.sha256 = '0'.repeat(64) }),
+      brokenVerificationPack('compat-bad-bytes', file => { file.bytes = 1 }),
+      ...droppedPacks(),
+    ],
+  }
+}
+
+const server = createServer((request, response) => {
+  const url = new URL(request.url ?? '/', 'http://127.0.0.1')
+  const send = (status, body, type) => {
+    response.writeHead(status, { 'content-type': type, 'content-length': Buffer.byteLength(body) })
+    response.end(body)
+  }
+  if (url.pathname === '/index.json') {
+    hits.index += 1
+    if (catalogState.indexBroken) return send(503, 'index down', 'text/plain')
+    return send(200, JSON.stringify(indexDocument()), 'application/json')
+  }
+  if (url.pathname === '/mirror.json') {
+    hits.mirror += 1
+    if (catalogState.mirrorBroken) return send(503, 'mirror down', 'text/plain')
+    return send(200, JSON.stringify(indexDocument()), 'application/json')
+  }
+  const match = /^\/files\/([^/]+)\/(.+)$/.exec(url.pathname)
+  if (match !== null) {
+    const id = decodeURIComponent(match[1])
+    const file = decodeURIComponent(match[2])
+    const found = filesOf(id).find(entry => entry.path === file)
+    if (found === undefined) return send(404, 'no file', 'text/plain')
+    return send(200, found.body, 'application/octet-stream')
+  }
+  send(404, 'no route', 'text/plain')
+})
+await new Promise(resolveListen => {
+  server.listen(0, '127.0.0.1', resolveListen)
+})
+const BASE = 'http://127.0.0.1:' + server.address().port
+
 process.env.DSH_HOME = dshHome
 process.env.TOOL_HUB_STATE_FILE = statePath
 process.env.TOOL_HUB_SKILL_ROOTS = skillsDir
@@ -120,7 +256,11 @@ const v2State = {
   sessions: {},
   scenes: {},
   mode: null,
-  settings: {},
+  settings: {
+    'compat.indexUrl': BASE + '/index.json',
+    'compat.mirrorUrl': BASE + '/mirror.json',
+    'compat.cacheMinutes': 60,
+  },
   modules: {},
   extensions: { enabled: ['hello'] },
 }
@@ -257,8 +397,10 @@ await writeExtension('dangling', manifestOf('dangling', {
 `)
 
 // a reserved id, a manifest from a future api version, a folder without a manifest,
-// a host path that escapes the folder, and an id that breaks the regex
+// a host path that escapes the folder, and an id that breaks the regex. "compat" is reserved by
+// the official-pack module (a folder of that name would clash with the compat domain).
 await writeExtension('core', manifestOf('core'), IDLE_HOST)
+await writeExtension('compat', manifestOf('compat'), IDLE_HOST)
 await writeExtension('badmanifest', { ...manifestOf('badmanifest'), apiVersion: 2 }, IDLE_HOST)
 await writeExtension('nomanifest', null, IDLE_HOST)
 await writeExtension('escape', manifestOf('escape', { host: '../escape.mjs' }), IDLE_HOST)
@@ -392,7 +534,9 @@ try {
     assertEqual(row.loaded, false, 'core.loaded')
     assertEqual(row.enabled, false, 'core.enabled')
     assertEqual(row.error, 'id "core" is reserved', 'core.error')
-    return row.error
+    const compat = await statusOf(runtime, 'compat')
+    assertEqual(compat.error, 'id "compat" is reserved', 'compat.error')
+    return row.error + '; compat reserved too'
   })
 
   // 5. the manifest rules: apiVersion, missing manifest, host path escape, bad id
@@ -423,9 +567,13 @@ try {
       const current = data.extensions[index].id
       assert(previous.localeCompare(current) <= 0, 'rows are not sorted: ' + previous + ' > ' + current)
     }
-    for (const key of ['id', 'name', 'version', 'apiVersion', 'dir', 'enabled', 'loaded', 'error', 'ops', 'views', 'bundled', 'overridesBundled', 'bundledVersion']) {
+    for (const key of ['id', 'name', 'version', 'apiVersion', 'dir', 'enabled', 'loaded', 'error', 'ops', 'views']) {
       assert(key in data.extensions[0], 'status row is missing ' + key)
     }
+    // The package ships no pack any more, so a row must not carry the bundled flags at all.
+    assert(!('bundled' in data.extensions[0]), 'a status row still carries bundled')
+    assert(!('overridesBundled' in data.extensions[0]), 'a status row still carries overridesBundled')
+    assert(!('bundledVersion' in data.extensions[0]), 'a status row still carries bundledVersion')
     return data.extensions.length + ' rows, enabled ' + JSON.stringify(data.enabled)
   })
 
@@ -719,157 +867,280 @@ try {
     return data.enabled.length + ' enabled, snapshot ok, hello v2'
   })
 
-  // 30. an update needs a local copy: it refuses before it writes anything or makes a backup
-  await test('update-needs-local-copy', async () => {
-    const target = join(extRoot, 'codex-ui-glass')
-    assertEqual(await stat(target).then(() => false).catch(() => true), true, 'no local copy before the install test')
-    const outcome = await run(runtime, 'extension.updateBundled', { id: 'codex-ui-glass' })
-    assertEqual(outcome.ok, false, 'update without a local copy')
-    assertEqual(outcome.error.code, 'missing-local', 'error code')
-    includes(outcome.error.message, 'codex-ui-glass', 'message names the id')
-    assertEqual(await stat(target).then(() => false).catch(() => true), true, 'a refused update writes no folder')
-    const backups = await readdir(join(stateDir, 'backups')).catch(() => [])
-    assertEqual(backups.filter(name => name.startsWith('extensions-')).length, 0, 'a refused update makes no extension backup')
-    return outcome.error.message
-  })
-
-  // 31. copying a bundled pack into the profile: the copy wins discovery and is marked as the override
-  await test('install-bundled', async () => {
-    const bundledPack = oneRow((await list(runtime)).extensions, 'codex-ui-glass')
-    assertEqual(bundledPack.bundled, true, 'bundled row before install')
-    assertEqual(bundledPack.overridesBundled, false, 'overridesBundled before install')
-    const packVersion = JSON.parse(await readFile(join(repoRoot, 'compat', 'codex-ui-glass', 'manifest.json'), 'utf8')).version
-    assertEqual(bundledPack.bundledVersion, packVersion, 'bundledVersion on a bundled row')
-    assertEqual(bundledPack.version, packVersion, 'the bundled row reports the pack version')
-    const target = join(extRoot, 'codex-ui-glass')
-    const outcome = await run(runtime, 'extension.installBundled', { id: 'codex-ui-glass' })
-    assert(outcome.ok === true, 'extension.installBundled failed: ' + JSON.stringify(outcome.error))
-    assertEqual(outcome.data.id, 'codex-ui-glass', 'installed id')
-    assertEqual(outcome.data.dir, target, 'returned dir')
-    assertEqual(outcome.data.files, await countFiles(join(repoRoot, 'compat', 'codex-ui-glass')), 'copied file count')
-    const manifest = JSON.parse(await readFile(join(target, 'manifest.json'), 'utf8'))
-    assertEqual(manifest.id, 'codex-ui-glass', 'copied manifest id')
-    for (const file of ['host.mjs', 'style.css']) {
-      const info = await stat(join(target, file))
-      assert(info.isFile(), 'copied file missing: ' + file)
-    }
-    const rows = (await list(runtime)).extensions
-    assertEqual(rowsOf(rows, 'codex-ui-glass').length, 1, 'one row per id after the copy')
-    const localRow = oneRow(rows, 'codex-ui-glass')
-    assertEqual(localRow.bundled, false, 'the copy is the row that wins')
-    assertEqual(localRow.overridesBundled, true, 'the copy is marked as the local override')
-    assertEqual(localRow.bundledVersion, packVersion, 'the copy still reports the pack version beside its own')
-    assertEqual(localRow.dir, target, 'the row points at the copy')
+  // 30. the settings schema publishes the catalog contract, equal to the module constants
+  await test('compat-settings-schema', async () => {
     const snapshot = await run(runtime, 'snapshot', { fresh: true })
-    assertEqual(oneRow(snapshot.data.extensions, 'codex-ui-glass').overridesBundled, true, 'snapshot carries overridesBundled')
+    assertEqual(snapshot.ok, true, 'snapshot failed')
+    const schema = snapshot.data.settingsSchema
+    const index = schema.find(field => field.key === 'compat.indexUrl')
+    const mirror = schema.find(field => field.key === 'compat.mirrorUrl')
+    const cache = schema.find(field => field.key === 'compat.cacheMinutes')
+    assert(index !== undefined && mirror !== undefined && cache !== undefined, 'compat settings missing: ' + JSON.stringify(schema.map(field => field.key)))
+    assertEqual(index.default, catalog.DEFAULT_INDEX_URL, 'compat.indexUrl default')
+    assertEqual(mirror.default, catalog.DEFAULT_MIRROR_URL, 'compat.mirrorUrl default')
+    assertEqual(cache.default, catalog.DEFAULT_CACHE_MINUTES, 'compat.cacheMinutes default')
+    assertEqual(index.type, 'string', 'index url is a string setting')
+    return 'schema defaults match the catalog module'
+  })
+
+  // 31. the catalog read lists the packs and the local state each one has
+  await test('compat-index-catalog', async () => {
+    const outcome = await run(runtime, 'compat.index', {})
+    assert(outcome.ok === true, 'compat.index failed: ' + JSON.stringify(outcome.error))
+    const data = outcome.data
+    assertEqual(data.source, 'index', 'first read comes from the index')
+    // The two bad-verification packs parse fine and are listed; only their install fails.
+    sameList(data.packs.map(pack => pack.id), ['compat-demo', 'compat-extra', 'compat-bad-hash', 'compat-bad-bytes'], 'catalog rows')
+    const demo = data.packs[0]
+    assertEqual(demo.version, '1.0.0', 'demo version')
+    assertEqual(demo.installedVersion, '', 'nothing installed yet')
+    assertEqual(demo.installedDir, '', 'no folder yet')
+    assertEqual(demo.enabled, false, 'not enabled')
+    assertEqual(demo.updateAvailable, false, 'no update before an install')
+    assertEqual(demo.fileCount, 3, 'demo file count')
+    sameJson(demo.name, { zh: 'compat-demo 配套', en: 'compat-demo pack' }, 'localized name')
+    assert(data.warnings.length >= 4, 'the parser must report the packs it dropped: ' + JSON.stringify(data.warnings))
+    for (const needle of ['unsafe file path', 'needs an https URL', 'larger than', 'files total more than']) {
+      assert(data.warnings.some(warning => warning.includes(needle)), 'no warning about ' + needle + ': ' + JSON.stringify(data.warnings))
+    }
+    assertEqual(hits.index, 1, 'one index read')
+    return data.packs.length + ' packs, ' + data.warnings.length + ' warnings'
+  })
+
+  // 32. a second read inside the cache window does not touch the network
+  await test('compat-index-cache', async () => {
+    const outcome = await run(runtime, 'compat.index', {})
+    assert(outcome.ok === true, 'compat.index failed: ' + JSON.stringify(outcome.error))
+    assertEqual(outcome.data.source, 'cache', 'cache hit')
+    assertEqual(hits.index, 1, 'no extra index read')
+    return 'source cache, ' + hits.index + ' index reads'
+  })
+
+  // 33. force is the panel refresh: it reads the network again
+  await test('compat-index-refresh', async () => {
+    const outcome = await run(runtime, 'compat.index', { force: true })
+    assert(outcome.ok === true, 'compat.index failed: ' + JSON.stringify(outcome.error))
+    assertEqual(outcome.data.source, 'index', 'a forced read is not a cache hit')
+    assertEqual(hits.index, 2, 'the forced read hit the index')
+    return 'source index, ' + hits.index + ' index reads'
+  })
+
+  // 34. an unreadable index falls back to the mirror, and says so
+  await test('compat-index-mirror-fallback', async () => {
+    catalogState.indexBroken = true
+    try {
+      const outcome = await run(runtime, 'compat.index', { force: true })
+      assert(outcome.ok === true, 'compat.index failed: ' + JSON.stringify(outcome.error))
+      assertEqual(outcome.data.source, 'mirror', 'mirror fallback')
+      assertEqual(hits.mirror, 1, 'the mirror was read')
+    }
+    finally {
+      catalogState.indexBroken = false
+    }
+    return 'index 503 -> source mirror'
+  })
+
+  // 35. both endpoints down is a reported failure, never an empty catalog
+  await test('compat-index-unavailable', async () => {
+    catalogState.indexBroken = true
+    catalogState.mirrorBroken = true
+    try {
+      const outcome = await run(runtime, 'compat.index', { force: true })
+      assertEqual(outcome.ok, false, 'both endpoints down must fail')
+      assertEqual(outcome.error.code, 'index-unavailable', 'error code')
+      includes(outcome.error.message, 'index:', 'the message names the first attempt')
+      includes(outcome.error.message, 'mirror:', 'the message names the fallback')
+    }
+    finally {
+      catalogState.indexBroken = false
+      catalogState.mirrorBroken = false
+    }
+    return 'index-unavailable with both attempts named'
+  })
+
+  // 36. the URL rule: https or loopback http only, checked before any request
+  await test('compat-index-url-policy', async () => {
+    assert(catalog.parsePackUrl('https://example.com/index.json') !== null, 'https is allowed')
+    assert(catalog.parsePackUrl('http://127.0.0.1:9/index.json') !== null, 'loopback http is allowed')
+    assert(catalog.parsePackUrl('http://example.com/index.json') === null, 'plain http elsewhere is refused')
+    assert(catalog.parsePackUrl('http://localhost:9/index.json') !== null, 'localhost is loopback')
+    assert(catalog.parsePackUrl('ftp://example.com/index.json') === null, 'other protocols are refused')
+    assert(catalog.parsePackUrl('not a url') === null, 'garbage is refused')
+    const before = hits.index
+    const set = await run(runtime, 'settings.set', { values: { 'compat.indexUrl': 'http://example.com/index.json' } })
+    assertEqual(set.ok, true, 'settings.set failed')
+    try {
+      const outcome = await run(runtime, 'compat.index', { force: true })
+      assertEqual(outcome.ok, false, 'a plain-http index must be refused')
+      assertEqual(outcome.error.code, 'bad-url', 'error code')
+      assertEqual(hits.index, before, 'a refused URL never reaches the network')
+    }
+    finally {
+      const restore = await run(runtime, 'settings.set', { values: { 'compat.indexUrl': BASE + '/index.json' } })
+      assertEqual(restore.ok, true, 'restoring the index URL failed')
+    }
+    return 'https/loopback only, no request for a refused URL'
+  })
+
+  // 37. the file-path rule is one pure function
+  await test('compat-path-policy', async () => {
+    assertEqual(catalog.safeRelativePath('style.css'), 'style.css', 'a plain file')
+    assertEqual(catalog.safeRelativePath('sub/dir/app.js'), 'sub/dir/app.js', 'a nested file')
+    assertEqual(catalog.safeRelativePath('..\\escape.txt'), null, 'a parent traversal')
+    assertEqual(catalog.safeRelativePath('/etc/passwd'), null, 'an absolute path')
+    assertEqual(catalog.safeRelativePath('C:/Windows/system.ini'), null, 'a drive path')
+    assertEqual(catalog.safeRelativePath('a/../../b'), null, 'a nested traversal')
+    assertEqual(catalog.safeRelativePath(''), null, 'an empty path')
+    return 'plain and nested ok, traversal/absolute/drive refused'
+  })
+
+  // 38. cacheMinutes 0 disables the cache
+  await test('compat-cache-off', async () => {
+    const set = await run(runtime, 'settings.set', { values: { 'compat.cacheMinutes': 0 } })
+    assertEqual(set.ok, true, 'settings.set failed')
+    try {
+      const before = hits.index
+      const outcome = await run(runtime, 'compat.index', {})
+      assert(outcome.ok === true, 'compat.index failed: ' + JSON.stringify(outcome.error))
+      assertEqual(outcome.data.source, 'index', '0 minutes never serves the cache')
+      assertEqual(hits.index, before + 1, '0 minutes reads the network')
+    }
+    finally {
+      const restore = await run(runtime, 'settings.set', { values: { 'compat.cacheMinutes': 60 } })
+      assertEqual(restore.ok, true, 'restoring cacheMinutes failed')
+    }
+    return 'cacheMinutes 0 reads the index every time'
+  })
+
+  // 39. install: payload gates and confirm:true, before anything is downloaded or written
+  await test('compat-install-payloads', async () => {
+    const target = join(extRoot, 'compat-demo')
+    // The dispatcher's confirm gate runs before the handler, so a missing confirm wins over a
+    // missing id; the id checks are exercised with confirm:true.
+    const cases = [
+      [{}, 'confirm-required', 'no payload at all'],
+      [{ id: 'compat-demo' }, 'confirm-required', 'no confirmation'],
+      [{ confirm: true }, 'bad-payload', 'confirmed but no id'],
+      [{ id: 'Bad_Id', confirm: true }, 'bad-payload', 'uppercase id'],
+      [{ id: 'no-such-pack', confirm: true }, 'unknown-pack', 'unknown pack'],
+    ]
+    for (const [payload, code, label] of cases) {
+      const outcome = await run(runtime, 'compat.install', payload)
+      assertEqual(outcome.ok, false, label)
+      assertEqual(outcome.error.code, code, label + ' code')
+    }
+    assertEqual(await stat(target).then(() => false).catch(() => true), true, 'a refused install writes no folder')
+    return 'confirm-required, bad-payload x2, unknown-pack; nothing written'
+  })
+
+  // 40. install: every file verified, then the folder appears and the row follows
+  await test('compat-install-pack', async () => {
+    const target = join(extRoot, 'compat-demo')
+    const outcome = await run(runtime, 'compat.install', { id: 'compat-demo', confirm: true })
+    assert(outcome.ok === true, 'compat.install failed: ' + JSON.stringify(outcome.error))
+    assertEqual(outcome.data.id, 'compat-demo', 'installed id')
+    assertEqual(outcome.data.version, '1.0.0', 'installed version')
+    assertEqual(outcome.data.dir, target, 'installed dir')
+    assertEqual(outcome.data.backup, '', 'a first install has nothing to back up')
+    assertEqual(outcome.data.files, 3, 'installed file count')
+    assertEqual(await readFile(join(target, 'host.mjs'), 'utf8'), demoFiles()[1].body, 'the host entry matches the index')
+    for (const name of ['manifest.json', 'host.mjs', 'style.css']) {
+      assert((await stat(join(target, name))).isFile(), 'installed file missing: ' + name)
+    }
+    const row = await statusOf(runtime, 'compat-demo')
+    assertEqual(row.version, '1.0.0', 'the row reports the installed version')
+    assertEqual(row.enabled, false, 'install never enables anything')
+    assertEqual(row.dir, target, 'the row points at the folder')
+    const index = await run(runtime, 'compat.index', {})
+    const pack = oneRow(index.data.packs, 'compat-demo')
+    assertEqual(pack.installedVersion, '1.0.0', 'index row installedVersion')
+    assertEqual(pack.installedDir, target, 'index row installedDir')
+    assertEqual(pack.updateAvailable, false, 'the same version is not an update')
+    assertEqual(pack.enabled, false, 'not enabled yet')
     const history = (await readFile(join(stateDir, 'history.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
-    const installed = history.filter(row => row.op === 'extension.installBundled' && row.ok === true)
-    assert(installed.length > 0, 'history has no successful extension.installBundled row')
+    const installed = history.filter(entry => entry.op === 'compat.install' && entry.ok === true)
+    assert(installed.length > 0, 'history has no successful compat.install row')
     assertEqual(installed[installed.length - 1].audit, true, 'the install is audited')
-    return 'copied ' + outcome.data.files + ' files, local row overrides the pack'
+    return '3 files verified and written, row installed but disabled'
   })
 
-  // 32. a second copy is refused and the existing folder is left exactly as it was
-  await test('install-refuses-existing', async () => {
-    const target = join(extRoot, 'codex-ui-glass')
-    await writeFile(join(target, 'marker.txt'), 'keep me', 'utf8')
-    const again = await run(runtime, 'extension.installBundled', { id: 'codex-ui-glass' })
-    assertEqual(again.ok, false, 'second install must fail')
-    assertEqual(again.error.code, 'already-installed', 'error code')
-    includes(again.error.message, 'codex-ui-glass', 'message names the id')
-    assertEqual(await readFile(join(target, 'marker.txt'), 'utf8'), 'keep me', 'existing copy untouched')
-    sameList((await list(runtime)).enabled, ['broken', 'core', 'dangling', 'foreign', 'hello', 'idle', 'refuse', 'writeview'], 'install does not change the enabled list')
-    return 'refused with already-installed, marker intact'
-  })
-
-  // 33. the op validates its payload and only copies a pack the package really ships
-  await test('install-bad-payloads', async () => {
-    const cases = [
-      [{}, 'bad-payload', 'no id'],
-      [{ id: 'Bad_Id' }, 'bad-payload', 'uppercase id'],
-      [{ id: 'no-such-pack' }, 'missing-bundled', 'unknown pack'],
-    ]
-    for (const [payload, code, label] of cases) {
-      const outcome = await run(runtime, 'extension.installBundled', payload)
-      assertEqual(outcome.ok, false, label)
-      assertEqual(outcome.error.code, code, label + ' code')
+  // 41. a verification failure writes nothing and leaves no staging folder
+  await test('compat-install-verify-failed', async () => {
+    const badHash = await run(runtime, 'compat.install', { id: 'compat-bad-hash', confirm: true })
+    assertEqual(badHash.ok, false, 'a wrong sha256 must fail')
+    assertEqual(badHash.error.code, 'verify-failed', 'hash error code')
+    includes(badHash.error.message, 'sha256', 'the message names the hash check')
+    const badBytes = await run(runtime, 'compat.install', { id: 'compat-bad-bytes', confirm: true })
+    assertEqual(badBytes.ok, false, 'a wrong byte count must fail')
+    assertEqual(badBytes.error.code, 'verify-failed', 'bytes error code')
+    includes(badBytes.error.message, 'bytes', 'the message names the byte check')
+    for (const id of ['compat-bad-hash', 'compat-bad-bytes']) {
+      assertEqual(await stat(join(extRoot, id)).then(() => false).catch(() => true), true, 'no folder after a failed verification: ' + id)
     }
-    const ghost = await stat(join(extRoot, 'no-such-pack')).then(() => false).catch(() => true)
-    assertEqual(ghost, true, 'a refused install writes nothing')
-    return 'bad-payload x2, missing-bundled x1, no folder written'
+    const leftovers = (await readdir(extRoot)).filter(name => name.startsWith('.'))
+    sameList(leftovers, [], 'staging or retired folders')
+    const backups = (await readdir(join(stateDir, 'backups')).catch(() => [])).filter(name => name.startsWith('extensions-compat-bad-'))
+    sameList(backups, [], 'backups after a failed verification')
+    return 'verify-failed x2, no folder, no staging, no backup'
   })
 
-  // 34. a local copy edited by hand: the row keeps the pack's version beside its own
-  await test('bundled-version-beside-local', async () => {
-    const target = join(extRoot, 'codex-ui-glass')
-    const manifestFile = join(target, 'manifest.json')
-    const packVersion = JSON.parse(await readFile(join(repoRoot, 'compat', 'codex-ui-glass', 'manifest.json'), 'utf8')).version
-    const edited = JSON.parse(await readFile(manifestFile, 'utf8'))
-    edited.version = '9.9.9'
-    await writeFile(manifestFile, JSON.stringify(edited, null, 2) + '\n', 'utf8')
-    const reload = await run(runtime, 'extension.reload', { id: 'codex-ui-glass' })
-    assert(reload.ok === true, 'extension.reload failed: ' + JSON.stringify(reload.error))
-    const row = await statusOf(runtime, 'codex-ui-glass')
-    assertEqual(row.version, '9.9.9', 'the edited local version is what discovery reports')
-    assertEqual(row.bundledVersion, packVersion, 'the pack version is still reported beside it')
-    assertEqual(row.overridesBundled, true, 'the copy still shadows the pack')
-    return 'local 9.9.9 beside pack ' + packVersion
+  // 42. update: the current copy is backed up, then replaced by the verified files
+  await test('compat-install-update', async () => {
+    const target = join(extRoot, 'compat-demo')
+    let backupName = ''
+    catalogState.version = '2.0.0'
+    try {
+      const index = await run(runtime, 'compat.index', { force: true })
+      const pack = oneRow(index.data.packs, 'compat-demo')
+      assertEqual(pack.version, '2.0.0', 'the catalog moved to 2.0.0')
+      assertEqual(pack.installedVersion, '1.0.0', 'the local copy is still 1.0.0')
+      assertEqual(pack.updateAvailable, true, 'a different version is an update')
+      const outcome = await run(runtime, 'compat.install', { id: 'compat-demo', confirm: true })
+      assert(outcome.ok === true, 'compat.install failed: ' + JSON.stringify(outcome.error))
+      assertEqual(outcome.data.version, '2.0.0', 'updated version')
+      const backup = outcome.data.backup
+      assert(backup.startsWith(join(stateDir, 'backups') + sep), 'the backup is under backupDir: ' + backup)
+      includes(basename(backup), 'extensions-compat-demo-', 'the backup folder is extensions-<id>-<stamp>')
+      assertEqual(JSON.parse(await readFile(join(backup, 'manifest.json'), 'utf8')).version, '1.0.0', 'the backup kept the old copy')
+      const hostEntry = await readFile(join(target, 'host.mjs'), 'utf8')
+      assertEqual(hostEntry, DEMO_HOST_V2, 'the target carries the new host entry')
+      includes(hostEntry, 'v2', 'the new build really landed')
+      const row = await statusOf(runtime, 'compat-demo')
+      assertEqual(row.version, '2.0.0', 'the row reports the new version')
+      backupName = basename(backup)
+    }
+    finally {
+      catalogState.version = '1.0.0'
+    }
+    return 'backup ' + backupName + ', copy replaced at 2.0.0'
   })
 
-  // 35. updating overwrites the local copy from the pack, after backing that copy up
-  await test('update-bundled-overwrites', async () => {
-    const target = join(extRoot, 'codex-ui-glass')
-    const packDir = join(repoRoot, 'compat', 'codex-ui-glass')
-    const packVersion = JSON.parse(await readFile(join(packDir, 'manifest.json'), 'utf8')).version
-    const packFiles = await readdir(packDir)
-    const packBytes = {}
-    for (const name of packFiles) packBytes[name] = await readFile(join(packDir, name), 'utf8')
-    await writeFile(join(target, 'marker.txt'), 'from the copy', 'utf8')
-    const outcome = await run(runtime, 'extension.updateBundled', { id: 'codex-ui-glass' })
-    assert(outcome.ok === true, 'extension.updateBundled failed: ' + JSON.stringify(outcome.error))
-    assertEqual(outcome.data.id, 'codex-ui-glass', 'updated id')
-    assertEqual(outcome.data.dir, target, 'returned dir')
-    assertEqual(outcome.data.version, packVersion, 'returned pack version')
-    for (const name of packFiles) {
-      assertEqual(await readFile(join(target, name), 'utf8'), packBytes[name], 'overwritten from the pack: ' + name)
-    }
-    assertEqual(await stat(join(target, 'marker.txt')).then(() => false).catch(() => true), true, 'a file the pack does not ship is gone after the overwrite')
-    const backup = outcome.data.backup
-    assert(backup.startsWith(join(stateDir, 'backups') + sep), 'the backup is under backupDir: ' + backup)
-    includes(basename(backup), 'extensions-codex-ui-glass-', 'the backup folder is extensions-<id>-<stamp>')
-    assertEqual(await readFile(join(backup, 'marker.txt'), 'utf8'), 'from the copy', 'the backup kept the previous copy')
-    assertEqual(JSON.parse(await readFile(join(backup, 'manifest.json'), 'utf8')).version, '9.9.9', 'the backup kept the edited manifest')
-    for (const name of packFiles) {
-      assertEqual(await readFile(join(packDir, name), 'utf8'), packBytes[name], 'the pack itself is only read: ' + name)
-    }
-    assertEqual(await stat(join(profileDir, 'cordis.patch.yml')).then(() => false).catch(() => true), true, 'no patch file was created in the profile')
-    const row = await statusOf(runtime, 'codex-ui-glass')
-    assertEqual(row.version, packVersion, 'the row reports the pack version after the update')
-    assertEqual(row.bundledVersion, packVersion, 'bundledVersion agrees with it')
-    assertEqual(row.overridesBundled, true, 'the copy still wins discovery')
-    assertEqual(row.dir, target, 'the row points at the copy')
-    const history = (await readFile(join(stateDir, 'history.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
-    const updated = history.filter(entry => entry.op === 'extension.updateBundled' && entry.ok === true)
-    assert(updated.length > 0, 'history has no successful extension.updateBundled row')
-    assertEqual(updated[updated.length - 1].audit, true, 'the update is audited')
-    return 'backup ' + basename(backup) + ', copy = pack, marker gone'
+  // 43. the enable switch works on an installed pack, and the catalog row follows it
+  await test('compat-enable-installed', async () => {
+    const set = await setExtension(runtime, 'compat-demo', true)
+    assert(set.ok === true, 'extension.set failed: ' + JSON.stringify(set.error))
+    const row = await statusOf(runtime, 'compat-demo')
+    assertEqual(row.enabled, true, 'the installed pack is enabled')
+    assertEqual(row.loaded, true, 'the installed pack loads')
+    const op = await run(runtime, 'compat-demo.status', {})
+    assertEqual(op.ok, true, 'the pack op is callable: ' + JSON.stringify(op.error))
+    assertEqual(op.data.marker, 'v2', 'the op comes from the 2.0.0 build')
+    const index = await run(runtime, 'compat.index', {})
+    const pack = oneRow(index.data.packs, 'compat-demo')
+    assertEqual(pack.enabled, true, 'the catalog row reports the switch')
+    return 'enabled, op answers v2, catalog row enabled'
   })
 
-  // 36. update validates its payload and only writes for a pack the package ships
-  await test('update-bad-payloads', async () => {
-    const cases = [
-      [{}, 'bad-payload', 'no id'],
-      [{ id: 'Bad_Id' }, 'bad-payload', 'uppercase id'],
-      [{ id: 'no-such-pack' }, 'missing-bundled', 'unknown pack'],
-    ]
-    for (const [payload, code, label] of cases) {
-      const outcome = await run(runtime, 'extension.updateBundled', payload)
-      assertEqual(outcome.ok, false, label)
-      assertEqual(outcome.error.code, code, label + ' code')
+  // 44. a pack the parser dropped can never be installed, and no traversal file appears
+  await test('compat-dropped-packs-unreachable', async () => {
+    for (const id of ['compat-traversal', 'compat-plain-http', 'compat-too-big', 'compat-huge']) {
+      const outcome = await run(runtime, 'compat.install', { id, confirm: true })
+      assertEqual(outcome.ok, false, id + ' must not be installable')
+      assertEqual(outcome.error.code, 'unknown-pack', id + ' code')
     }
-    const ghost = await stat(join(extRoot, 'no-such-pack')).then(() => false).catch(() => true)
-    assertEqual(ghost, true, 'a refused update writes nothing')
-    return 'bad-payload x2, missing-bundled x1, no folder written'
+    assertEqual(await stat(join(stateDir, 'escape.txt')).then(() => false).catch(() => true), true, 'no file escaped the pack folder')
+    assertEqual(await stat(join(root, 'escape.txt')).then(() => false).catch(() => true), true, 'no file escaped the fixture root')
+    return '4 dropped packs unreachable, nothing escaped'
   })
 
   // 37. the throw-away tree is removed, nothing outside it was touched
@@ -882,6 +1153,9 @@ try {
 }
 finally {
   await rm(root, { recursive: true, force: true }).catch(() => undefined)
+  await new Promise(resolveClose => {
+    server.close(resolveClose)
+  })
 }
 
 note('fixtures lived under TOOL_HUB_STATE_FILE; the shared home extension root was not used')

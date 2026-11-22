@@ -154,14 +154,34 @@ export interface ExtensionStatus {
   styles?: string[]
   /** CSS text injected while the extension is loaded. */
   css?: string[]
-  /** True when the extension comes from the plugin package's compat/ directory. */
-  bundled?: boolean
-  /** True when this local copy shadows a bundled pack with the same id. */
-  overridesBundled?: boolean
-  /** Version the package ships for this id; '' when it ships no pack here. */
-  bundledVersion?: string
   /** The manifest's description, when it declared one. */
   description?: { zh: string; en: string }
+}
+
+/** One row of the remote official pack catalog, matched against the local extension rows. */
+export interface CompatPackRow {
+  id: string
+  name: { zh: string; en: string }
+  version: string
+  description?: { zh: string; en: string }
+  fileCount: number
+  /** The local copy's version; '' when the pack is not installed. */
+  installedVersion: string
+  /** The local copy's folder; '' when the pack is not installed. */
+  installedDir: string
+  /** True when the local copy is on and loaded. */
+  enabled: boolean
+  /** True when a local copy exists at a version other than the catalog's. */
+  updateAvailable: boolean
+}
+
+/** What compat.index answers: the catalog rows plus where the document came from. */
+export interface CompatIndex {
+  packs: CompatPackRow[]
+  source: 'index' | 'mirror' | 'cache'
+  fetchedAt: string
+  /** Packs the host refused while parsing the document, with the reason. */
+  warnings: string[]
 }
 
 export interface HistoryEntry {

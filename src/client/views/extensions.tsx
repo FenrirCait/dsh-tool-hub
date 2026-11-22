@@ -1,6 +1,7 @@
 /**
  * Extensions: what is installed, whether it loaded, its hot switch, the views it declares, and
- * one console for the ops it registers. The 官方配套 card above the list is compat-manager.tsx.
+ * one console for the ops it registers. The 官方配套 card above the list is compat-manager.tsx;
+ * it reads the remote catalog, so the card is the way to get a first extension too.
  *
  * Four host calls, deliberately different: a declared view's read goes through runOp because the
  * page renders the payload; the panel's own three writes go through run so the shell owns busy,
@@ -21,81 +22,7 @@ import type { ExtensionStatus, ExtensionViewRow, ViewProps } from '../types.js'
 // ── the ops this panel sends ─────────────────────────────────────────────────
 
 /** The panel's own writes; an extension's ops arrive in the snapshot and are never spelled here. */
-export const EXT = { set: 'extension.set', reload: 'extension.reload', installBundled: 'extension.installBundled' } as const
-
-// ── source filter: the plugin package's compat/ directory vs a local folder ──
-
-/** Where an extension came from; the toolbar always offers these three, in this order. */
-export type ExtensionSource = 'all' | 'bundled' | 'local'
-
-/** The chips' order, with the default first. */
-export const EXTENSION_SOURCES: readonly ExtensionSource[] = ['all', 'bundled', 'local']
-
-/** The one field the filter reads, so a plain row works as well as a full ExtensionStatus. */
-export interface ExtensionSourceRow {
-  bundled?: boolean
-}
-
-/** Bundled only when the host says so; a missing flag is a local extension, not an unknown one. */
-export function extensionSourceOf(entry: ExtensionSourceRow): Exclude<ExtensionSource, 'all'> {
-  return entry.bundled === true ? 'bundled' : 'local'
-}
-
-/** The rows one source shows, in snapshot order; 'all' keeps everything and returns a copy. */
-export function filterExtensions<T extends ExtensionSourceRow>(entries: readonly T[], source: ExtensionSource): T[] {
-  if (source === 'all') return entries.slice()
-  return entries.filter(entry => extensionSourceOf(entry) === source)
-}
-
-/** Counts over the whole snapshot, so every chip keeps its number while another source is active. */
-export function extensionSourceCounts(entries: readonly ExtensionSourceRow[]): Record<ExtensionSource, number> {
-  let bundled = 0
-  for (const entry of entries) {
-    if (entry.bundled === true) bundled += 1
-  }
-  return { all: entries.length, bundled, local: entries.length - bundled }
-}
-
-/** The bundled chip reuses its catalog key; the other two labels are local copy, no new keys. */
-export function sourceLabel(source: ExtensionSource, lang: ViewProps['lang'], t: ViewProps['t']): string {
-  if (source === 'bundled') return t('extensions.bundled')
-  if (source === 'local') return lang === 'zh' ? '本地' : 'Local'
-  return lang === 'zh' ? '全部' : 'All'
-}
-
-/** The radio group's accessible name. */
-export function sourceHeading(lang: ViewProps['lang']): string {
-  return lang === 'zh' ? '按来源筛选' : 'Filter by source'
-}
-
-/** Shown when the chosen source has no rows although the installation does. */
-export function sourceEmptyLabel(lang: ViewProps['lang']): string {
-  return lang === 'zh' ? '该来源没有扩展' : 'No extensions from this source'
-}
-
-// ── a local copy over a bundled pack ────────────────────────────────────────
-
-/** The badge a local copy carries when a bundled pack of the same id exists. */
-export function overrideLabel(lang: ViewProps['lang']): string {
-  return lang === 'zh' ? '本地覆盖' : 'Local override'
-}
-
-/** The copy action's label; the confirm dialog reuses it as its title. */
-export function copyLabel(lang: ViewProps['lang']): string {
-  return lang === 'zh' ? '复制到本地' : 'Copy to local'
-}
-
-/** What the confirm dialog says the copy will do, naming the pack it reads. */
-export function copyHint(lang: ViewProps['lang'], id: string): string {
-  return lang === 'zh'
-    ? '把插件包中的 compat/' + id + ' 复制到本机扩展目录，之后可以编辑它；已有的同名本地扩展不会被覆盖。'
-    : 'Copies compat/' + id + ' from the plugin package into the local extensions folder so you can edit it; an existing local copy is never overwritten.'
-}
-
-/** Only a bundled row that no local copy shadows can be copied; a shadowing row is already local. */
-export function canCopyToLocal(entry: ExtensionStatus): boolean {
-  return entry.bundled === true && entry.overridesBundled !== true
-}
+export const EXT = { set: 'extension.set', reload: 'extension.reload' } as const
 
 // ── normalising helpers ─────────────────────────────────────────────────────
 
@@ -410,7 +337,6 @@ function ExtensionPanel(props: PanelProps): React.ReactElement {
   const [failure, setFailure] = React.useState('')
   const [pending, setPending] = React.useState<unknown>(null)
   const [asking, setAsking] = React.useState(false)
-  const [copyAsk, setCopyAsk] = React.useState(false)
   const [running, setRunning] = React.useState(false)
   const alive = React.useRef(true)
 
@@ -426,11 +352,8 @@ function ExtensionPanel(props: PanelProps): React.ReactElement {
   const parsed = parsePayload(payload)
   const toggleKey = EXT.set + ':' + entry.id
   const reloadKey = EXT.reload + ':' + entry.id
-  const copyKey = EXT.installBundled + ':' + entry.id
   const toggleBusy = busy === toggleKey
   const reloadBusy = busy === reloadKey
-  const copyBusy = busy === copyKey
-  const copyable = canCopyToLocal(entry)
   const anyBusy = busy !== null
   const name = nameOf(entry, lang)
   const options = entry.ops.map(id => ({ value: id, label: id }))
@@ -558,8 +481,6 @@ function ExtensionPanel(props: PanelProps): React.ReactElement {
             {entry.version === '' ? null : (
               <Badge title={t('extensions.version')}>{t('extensions.version') + ' ' + entry.version}</Badge>
             )}
-            {entry.bundled === true ? <Badge tone="neutral">{t('extensions.bundled')}</Badge> : null}
-            {entry.overridesBundled === true ? <Badge tone="brand">{overrideLabel(lang)}</Badge> : null}
             <Badge tone={entry.enabled ? 'on' : 'off'}>
               {entry.enabled ? t('extensions.enabled') : t('extensions.disabled')}
             </Badge>
@@ -571,19 +492,6 @@ function ExtensionPanel(props: PanelProps): React.ReactElement {
             )}
           </span>
         </div>
-        {copyable ? (
-          <Button
-            variant="ghost"
-            busy={copyBusy}
-            disabled={anyBusy}
-            title={copyHint(lang, entry.id)}
-            onClick={() => {
-              setCopyAsk(true)
-            }}
-          >
-            {copyLabel(lang)}
-          </Button>
-        ) : null}
         <Button
           variant="ghost"
           busy={reloadBusy}
@@ -643,40 +551,6 @@ function ExtensionPanel(props: PanelProps): React.ReactElement {
           {jsonText(pending)}
         </pre>
       </Dialog>
-      <Dialog
-        open={copyAsk}
-        title={copyLabel(lang)}
-        onClose={() => {
-          if (!copyBusy) setCopyAsk(false)
-        }}
-        footer={
-          <>
-            <Button
-              variant="ghost"
-              disabled={copyBusy}
-              onClick={() => {
-                setCopyAsk(false)
-              }}
-            >
-              {t('action.cancel')}
-            </Button>
-            <Button
-              variant="primary"
-              busy={copyBusy}
-              onClick={() => {
-                setCopyAsk(false)
-                void run(EXT.installBundled, { id: entry.id })
-              }}
-            >
-              {t('action.confirm')}
-            </Button>
-          </>
-        }
-      >
-        <p className="th-field-hint" style={{ marginTop: 0 }}>
-          {copyHint(lang, entry.id)}
-        </p>
-      </Dialog>
     </Card>
   )
 }
@@ -685,64 +559,41 @@ function ExtensionPanel(props: PanelProps): React.ReactElement {
 
 export function ExtensionsView(props: ViewProps): React.ReactElement {
   const { snapshot, lang, t, busy, run, runDetailed, reload } = props
-  const [source, setSource] = React.useState<ExtensionSource>('all')
-  const counts = extensionSourceCounts(snapshot.extensions)
-  const shown = filterExtensions(snapshot.extensions, source)
-  if (snapshot.extensions.length === 0) {
-    return <Empty title={t('extensions.empty')} hint={t('extensions.enableHint')} />
-  }
+  // The catalog card is the way to get a first extension, so it renders before the empty state:
+  // an installation with no local folder still sees what the official index offers.
   return (
     <div>
       <CompatManager
-        entries={snapshot.extensions}
         statePath={snapshot.paths.state ?? ''}
         lang={lang}
         t={t}
-        busy={busy}
         runDetailed={runDetailed}
       />
-      <Toolbar>
-        <Badge tone="brand">{t('extensions.count', { n: snapshot.extensions.length })}</Badge>
-        <Button variant="ghost" onClick={() => { void reload() }}>
-          {t('action.retry')}
-        </Button>
-      </Toolbar>
-      <p className="th-field-hint" style={{ marginTop: 0 }}>{t('extensions.hot')}</p>
-      <p className="th-field-hint" style={{ marginBottom: SP.lg }}>{t('extensions.local')}</p>
-      <div className="th-toolbar" role="radiogroup" aria-label={sourceHeading(lang)}>
-        {EXTENSION_SOURCES.map(item => {
-          const active = source === item
-          return (
-            <label key={item} className={'th-btn' + (active ? ' th-btn--primary' : ' th-btn--ghost')}>
-              <input
-                type="radio"
-                name="extensions-source"
-                value={item}
-                checked={active}
-                onChange={() => {
-                  setSource(item)
-                }}
-              />
-              <span>{sourceLabel(item, lang, t) + ' (' + counts[item] + ')'}</span>
-            </label>
-          )
-        })}
-      </div>
-      {shown.length === 0 ? (
-        <Empty title={sourceEmptyLabel(lang)} />
+      {snapshot.extensions.length === 0 ? (
+        <Empty title={t('extensions.empty')} hint={t('extensions.enableHint')} />
       ) : (
-        <div className="th-list">
-          {shown.map(entry => (
-            <ExtensionPanel
-              key={entry.id}
-              entry={entry}
-              lang={lang}
-              t={t}
-              busy={busy}
-              run={run}
-              runDetailed={runDetailed}
-            />
-          ))}
+        <div>
+          <Toolbar>
+            <Badge tone="brand">{t('extensions.count', { n: snapshot.extensions.length })}</Badge>
+            <Button variant="ghost" onClick={() => { void reload() }}>
+              {t('action.retry')}
+            </Button>
+          </Toolbar>
+          <p className="th-field-hint" style={{ marginTop: 0 }}>{t('extensions.hot')}</p>
+          <p className="th-field-hint" style={{ marginBottom: SP.lg }}>{t('extensions.local')}</p>
+          <div className="th-list">
+            {snapshot.extensions.map(entry => (
+              <ExtensionPanel
+                key={entry.id}
+                entry={entry}
+                lang={lang}
+                t={t}
+                busy={busy}
+                run={run}
+                runDetailed={runDetailed}
+              />
+            ))}
+          </div>
         </div>
       )}
     </div>
