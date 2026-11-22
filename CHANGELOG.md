@@ -3,6 +3,11 @@
 > Scope note: **1.x never shipped extension-pack management.** Early 2.0 alpha builds experimented
 > with bundled packs; the final 2.0 manager ships no packs and reads the separate official catalog.
 
+## 2.0.0-alpha.77
+
+- Extension API v2: trusted official packs receive the root host context and `onDispose`, so
+  lifecycle hooks, per-agent tool policies and cleanup can live in a pack without core changes.
+
 ## 2.0.0-alpha.76
 
 2.0 rewrite: the package is now a manager for a separate official-pack repository.

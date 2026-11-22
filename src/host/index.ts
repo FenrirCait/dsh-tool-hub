@@ -92,6 +92,7 @@ export class Runtime {
       roots: extensionRoots(),
       services: { get: service => ctx.get(service) },
       log: logTo(ctx),
+      ctx,
     })
   }
 

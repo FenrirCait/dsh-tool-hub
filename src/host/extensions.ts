@@ -18,7 +18,7 @@ import { stateDir } from '../core/io.js'
 import type { DomainRegistration } from '../shared/contract.js'
 import type { DomainModule, LocalizedText } from '../shared/types.js'
 
-export const EXTENSION_API_VERSION = 1
+export const EXTENSION_API_VERSION = 2
 
 const ID = /^[a-z0-9][a-z0-9_-]{0,31}$/
 const RESERVED = new Set([
@@ -85,6 +85,8 @@ export interface ExtensionManagerOptions {
   roots: string[]
   services: { get(name: string): unknown }
   log: (level: 'info' | 'warn', message: string) => void
+  /** Root host context for API v2 packs; v1 packs do not receive it. Trusted local code. */
+  ctx?: unknown
 }
 
 /**
@@ -176,8 +178,24 @@ function errorText(error: unknown): string {
 
 export class ExtensionManager {
   private readonly cache = new Map<string, { key: string; registration: DomainRegistration }>()
+  private readonly disposers = new Map<string, Set<() => void>>()
 
   constructor(private readonly options: ExtensionManagerOptions) {}
+
+  /** Run and forget every disposer registered by one extension's activate(). */
+  private disposeExtension(id: string): void {
+    const set = this.disposers.get(id)
+    this.disposers.delete(id)
+    if (set === undefined) return
+    for (const dispose of [...set].reverse()) {
+      try {
+        dispose()
+      }
+      catch {
+        /* an extension disposer must not take down the host */
+      }
+    }
+  }
 
   private async discover(): Promise<{ entries: ExtensionDiscovered[]; problems: ExtensionStatus[] }> {
     const entries: ExtensionDiscovered[] = []
@@ -254,6 +272,7 @@ export class ExtensionManager {
       const { manifest, dir, hostFile } = entry
       const on = wanted.has(manifest.id)
       if (!on) {
+        this.disposeExtension(manifest.id)
         statuses.push({
           id: manifest.id, name: manifest.name, version: manifest.version, apiVersion: manifest.apiVersion,
           dir, enabled: false, loaded: false, error: null, ops: [], views: manifest.views,
@@ -310,6 +329,8 @@ export class ExtensionManager {
         registration: cached.registration,
       }
     }
+    if (cached !== undefined) this.disposeExtension(manifest.id)
+    const current = new Set<() => void>()
     try {
       const moduleUrl = pathToFileURL(hostFile).href + '?v=' + encodeURIComponent(key)
       const loaded = await import(moduleUrl) as { default?: unknown }
@@ -321,7 +342,13 @@ export class ExtensionManager {
         dir,
         log: this.options.log,
         services: this.options.services,
+        ...(this.options.ctx === undefined ? {} : { ctx: this.options.ctx }),
+        onDispose: (dispose: () => void) => {
+          if (typeof dispose !== 'function') throw new Error('onDispose needs a function')
+          current.add(dispose)
+        },
       }
+      this.disposers.set(manifest.id, current)
       const registration = await (activate as (api: unknown) => DomainRegistration | Promise<DomainRegistration>)(api)
       const checked = validateRegistration(manifest, registration)
       this.cache.set(manifest.id, { key, registration: checked })
@@ -331,6 +358,7 @@ export class ExtensionManager {
       }
     }
     catch (error) {
+      this.disposeExtension(manifest.id)
       this.cache.delete(manifest.id)
       return { status: { ...base, loaded: false, error: errorText(error), ops: [], css: [] } }
     }
@@ -338,8 +366,14 @@ export class ExtensionManager {
 
   /** Forget cached code for one extension (or all) so the next build re-imports it. */
   invalidate(id?: string): void {
-    if (id === undefined) this.cache.clear()
-    else this.cache.delete(id)
+    if (id === undefined) {
+      for (const key of [...this.disposers.keys()]) this.disposeExtension(key)
+      this.cache.clear()
+    }
+    else {
+      this.disposeExtension(id)
+      this.cache.delete(id)
+    }
   }
 }
 
