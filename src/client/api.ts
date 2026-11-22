@@ -354,6 +354,10 @@ function extensionOf(row: Record<string, unknown>): ExtensionStatus | null {
     css: asStringList(row.css),
     bundled: row.bundled === true,
     overridesBundled: row.overridesBundled === true,
+    bundledVersion: asString(row.bundledVersion),
+    ...(row.description === undefined || row.description === null
+      ? {}
+      : { description: { zh: asString(asRecord(row.description).zh), en: asString(asRecord(row.description).en) } }),
   }
 }
 

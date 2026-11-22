@@ -158,6 +158,10 @@ export interface ExtensionStatus {
   bundled?: boolean
   /** True when this local copy shadows a bundled pack with the same id. */
   overridesBundled?: boolean
+  /** Version the package ships for this id; '' when it ships no pack here. */
+  bundledVersion?: string
+  /** The manifest's description, when it declared one. */
+  description?: { zh: string; en: string }
 }
 
 export interface HistoryEntry {

@@ -31,8 +31,7 @@ dsh plugin install ./dsh-tool-hub
 Then open **Plugins → Hub**, or the **Tool Hub** entry in the sidebar. A restart is not required;
 the plugin hot-loads.
 
-The package also ships the official `compat/codex-ui-glass/` compatibility pack. It is discovered
-directly from the installed package and appears in **Extensions** without copying; enable it there
+The package also ships the official `compat/codex-ui-glass/` compatibility pack. The **Official packs** card at the top of Extensions lists it for install/update/batch sync; enable it there
 to make the panel, dock button and sidebar entry follow codex-ui's mica/flat glass settings. It is
 off until you turn it on.
 

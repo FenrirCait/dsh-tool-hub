@@ -14,7 +14,7 @@ import { installApi } from './routes.js'
 import { installEntryPoints, type EntryPointCtx } from './entrypoints.js'
 import { PORTABILITY_OPS, portabilityHandlers } from './portability.js'
 import { buildSnapshot } from './snapshot.js'
-import { ExtensionManager, extensionRoots, installBundledExtension, type ExtensionStatus } from './extensions.js'
+import { ExtensionManager, extensionRoots, installBundledExtension, updateBundledExtension, type ExtensionStatus } from './extensions.js'
 import { attachToolMask, knownToolNames, maskControl, surfacePort, type ToolMask } from './tool-mask.js'
 import { applySurface, clearSessionLazy, pruneLazy, readLazy, readOpen } from '../domains/tool-surface.js'
 import { normalizeGroups } from '../domains/groups.js'
@@ -248,6 +248,7 @@ export class Runtime {
           { id: 'extension.set', write: true, audit: true, note: 'Switches one extension on or off, saves the enabled list and rebuilds the runtime.' },
           { id: 'extension.reload', write: true, audit: true, note: 'Re-imports extension code and rebuilds the runtime; no host restart.' },
           { id: 'extension.installBundled', write: true, audit: true, note: 'Copies one bundled compat pack into this profile so it can be edited; an existing local copy is never overwritten.' },
+          { id: 'extension.updateBundled', write: true, audit: true, note: 'Backs up the local copy into the backups folder, then overwrites it from the bundled compat pack of the same id; the pack is only read and no patch file is touched.' },
         ],
       },
       handlers: {
@@ -284,6 +285,17 @@ export class Runtime {
           // the reload the panel does next already carries the local row the copy created.
           await this.rebuild('extension-install-bundled')
           return { id, dir: copied.dir, files: copied.files }
+        },
+        'extension.updateBundled': async (payload) => {
+          const body = payload as { id?: unknown } | null
+          const id = typeof body?.id === 'string' ? body.id : ''
+          if (!EXTENSION_ID.test(id)) throw new Failure('bad-payload', 'extension.updateBundled needs an id')
+          const updated = await updateBundledExtension(id)
+          if (!updated.ok) throw new Failure(updated.reason === 'invalid-id' ? 'bad-payload' : updated.reason, updated.message)
+          // The row's version and the file list both change, so rebuild before answering: the
+          // reload the panel does next already sees the pack's version on the local copy.
+          await this.rebuild('extension-update-bundled')
+          return { id, dir: updated.dir, backup: updated.backup, version: updated.version }
         },
       },
     }

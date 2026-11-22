@@ -1,24 +1,19 @@
 /**
  * Extensions: what is installed, whether it loaded, its hot switch, the views it declares, and
- * one console for the ops it registers.
+ * one console for the ops it registers. The 官方配套 card above the list is compat-manager.tsx.
  *
- * Four host calls, and the difference between them is deliberate:
- *   - a declared view's read goes through runOp, because the page renders the payload and run()
- *     reports success instead of keeping it;
- *   - the panel's own three writes (extension.set, extension.reload, extension.installBundled) go
- *     through run, so the shell owns busy and the failure notice, and the snapshot reload after a
- *     write comes for free;
- *   - the console's ops go through runDetailed, because the host's answer is what the operator
- *     came for and a failure has to stay readable under the form.
+ * Four host calls, deliberately different: a declared view's read goes through runOp because the
+ * page renders the payload; the panel's own three writes go through run so the shell owns busy,
+ * the failure notice and the reload that follows a write; the console's ops go through
+ * runDetailed because the host's answer is what the operator came for.
  *
- * A declared view may only point at a read op — src/host/extensions.ts refuses a registration
- * whose view names a write op — so views[].op is the panel's only trustworthy source of "this op
- * is a read". Any op the console can reach that no view declares is handled as a write: the
- * dialog asks first and the payload leaves with confirm:true, the flag the dispatch gate accepts.
- * Nothing here decides what an extension's op means; it only refuses to fire one silently.
+ * views[].op is the panel's only trustworthy "this op is a read" (the host refuses a view over a
+ * write op); any other reachable op is treated as a write: the dialog asks first and the payload
+ * leaves with confirm:true. Nothing here decides what an extension's op means.
  */
 import * as React from 'react'
 import { runOp } from '../api.js'
+import { CompatManager } from './compat-manager.js'
 import { Badge, Button, Callout, Card, Dialog, Empty, Field, Select, Switch, Toolbar, monoStyle } from '../components.js'
 import { FONT, R, SP, T } from '../theme.js'
 import type { ExtensionStatus, ExtensionViewRow, ViewProps } from '../types.js'
@@ -290,33 +285,9 @@ const BAR: React.CSSProperties = { marginBottom: SP.sm }
 const PAD: React.CSSProperties = { padding: '0 ' + SP.lg + 'px ' + SP.lg + 'px' }
 const SCROLL: React.CSSProperties = { overflowX: 'auto' }
 const TABLE: React.CSSProperties = { width: '100%', borderCollapse: 'collapse', fontSize: FONT.xs }
-const TH: React.CSSProperties = {
-  textAlign: 'left',
-  padding: SP.xs + 'px ' + SP.md + 'px',
-  borderBottom: '1px solid ' + T.borderSoft,
-  color: T.text3,
-  fontWeight: 600,
-  whiteSpace: 'nowrap',
-}
-const TD: React.CSSProperties = {
-  padding: SP.xs + 'px ' + SP.md + 'px',
-  borderTop: '1px solid ' + T.borderSoft,
-  color: T.text2,
-  verticalAlign: 'top',
-}
-const BOX: React.CSSProperties = {
-  ...monoStyle,
-  color: T.text2,
-  margin: 0,
-  padding: SP.md + 'px ' + SP.lg + 'px',
-  border: '1px solid ' + T.borderSoft,
-  borderRadius: R.sm,
-  background: T.surface,
-  whiteSpace: 'pre-wrap',
-  wordBreak: 'break-word',
-  maxHeight: 260,
-  overflow: 'auto',
-}
+const TH: React.CSSProperties = { textAlign: 'left', padding: SP.xs + 'px ' + SP.md + 'px', borderBottom: '1px solid ' + T.borderSoft, color: T.text3, fontWeight: 600, whiteSpace: 'nowrap' }
+const TD: React.CSSProperties = { padding: SP.xs + 'px ' + SP.md + 'px', borderTop: '1px solid ' + T.borderSoft, color: T.text2, verticalAlign: 'top' }
+const BOX: React.CSSProperties = { ...monoStyle, color: T.text2, margin: 0, padding: SP.md + 'px ' + SP.lg + 'px', border: '1px solid ' + T.borderSoft, borderRadius: R.sm, background: T.surface, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 260, overflow: 'auto' }
 const BOX_INPUT: React.CSSProperties = { ...BOX, minHeight: 72, width: '100%', resize: 'vertical' }
 
 // ── renderers ───────────────────────────────────────────────────────────────
@@ -521,13 +492,7 @@ function ExtensionPanel(props: PanelProps): React.ReactElement {
                 <span className="th-row-name">{label}</span>
                 <Badge>{view.kind}</Badge>
                 <span className="th-mono">{view.op}</span>
-                <Button
-                  variant="ghost"
-                  busy={state !== undefined && state.loading}
-                  onClick={() => {
-                    readView(view)
-                  }}
-                >
+                <Button variant="ghost" busy={state !== undefined && state.loading} onClick={() => { readView(view) }}>
                   {t('extensions.viewLoad')}
                 </Button>
               </div>
@@ -728,23 +693,22 @@ export function ExtensionsView(props: ViewProps): React.ReactElement {
   }
   return (
     <div>
+      <CompatManager
+        entries={snapshot.extensions}
+        statePath={snapshot.paths.state ?? ''}
+        lang={lang}
+        t={t}
+        busy={busy}
+        runDetailed={runDetailed}
+      />
       <Toolbar>
         <Badge tone="brand">{t('extensions.count', { n: snapshot.extensions.length })}</Badge>
-        <Button
-          variant="ghost"
-          onClick={() => {
-            void reload()
-          }}
-        >
+        <Button variant="ghost" onClick={() => { void reload() }}>
           {t('action.retry')}
         </Button>
       </Toolbar>
-      <p className="th-field-hint" style={{ marginTop: 0 }}>
-        {t('extensions.hot')}
-      </p>
-      <p className="th-field-hint" style={{ marginBottom: SP.lg }}>
-        {t('extensions.local')}
-      </p>
+      <p className="th-field-hint" style={{ marginTop: 0 }}>{t('extensions.hot')}</p>
+      <p className="th-field-hint" style={{ marginBottom: SP.lg }}>{t('extensions.local')}</p>
       <div className="th-toolbar" role="radiogroup" aria-label={sourceHeading(lang)}>
         {EXTENSION_SOURCES.map(item => {
           const active = source === item

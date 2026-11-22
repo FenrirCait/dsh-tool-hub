@@ -40,7 +40,16 @@
  *  27. a local copy over a bundled pack carries the 本地覆盖 badge in the page's language, and only
  *      a bundled row without a local copy offers 复制到本地;
  *  28. that copy action confirms first, sends extension.installBundled with the row id through the
- *      shell's write path, and the shell reloads the snapshot afterwards.
+ *      shell's write path, and the shell reloads the snapshot afterwards;
+ *  29. the 官方配套 card sits above the list, lists only official packs (a bundled row or the local
+ *      copy shadowing one) and shows both versions, the origin status and the row's controls;
+ *  30. install is offered for a bundled row with no local copy, update exactly while the local copy
+ *      is behind bundledVersion, and the switch sends extension.set with the next state;
+ *  31. the update confirmation names the backup folder and the overwrite, and the batch button
+ *      computes the pending actions, confirms once with the count and runs them one at a time,
+ *      keeping a per-action failure;
+ *  32. the card never acts on mount, its copy is bilingual local text, and it adds no catalog key;
+ *  33. compat-manager.tsx stays inside the allowed imports, themed styles and the view budget.
  *
  * The source rules are transpiled with the esbuild devDependency and imported against stubs, so
  * checks 24-26 are measured on a fixture instead of matched as text. PASS/FAIL lines, exit 1
@@ -54,6 +63,7 @@ import { transformSync } from 'esbuild'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const VIEW = join(ROOT, 'src', 'client', 'views', 'extensions.tsx')
+const COMPAT = join(ROOT, 'src', 'client', 'views', 'compat-manager.tsx')
 const SHELL = join(ROOT, 'src', 'client', 'shell.tsx')
 const I18N = join(ROOT, 'src', 'client', 'i18n.ts')
 
@@ -83,6 +93,8 @@ const code = text => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*(?:\/\/|
 
 const source = read(VIEW)
 const body = code(source)
+const compatSource = read(COMPAT)
+const compatBody = code(compatSource)
 const shell = read(SHELL)
 const i18nSource = read(I18N)
 
@@ -138,13 +150,20 @@ function rewrite(text) {
 }
 
 let viewModule = null
+let compatModule = null
 let viewModuleError = null
 try {
   const dir = mkdtempSync(join(tmpdir(), 'tool-hub-ext-'))
   try {
     for (const [name, text] of Object.entries(STUBS)) writeFileSync(join(dir, name), text)
-    const js = transformSync(read(VIEW), { loader: 'tsx', format: 'esm', target: 'node20', jsx: 'transform' }).code
-    writeFileSync(join(dir, 'extensions.mjs'), rewrite(js))
+    const compile = file => rewrite(transformSync(read(file), { loader: 'tsx', format: 'esm', target: 'node20', jsx: 'transform' }).code)
+    // The card is written beside its importer and under the name the import spells, so
+    // extensions.tsx's './compat-manager.js' resolves to the real transpiled module instead of a
+    // stub: the card's rules are measured, not matched. The marker makes .js an ES module here.
+    writeFileSync(join(dir, 'package.json'), '{ "type": "module" }\n')
+    writeFileSync(join(dir, 'compat-manager.js'), compile(COMPAT))
+    writeFileSync(join(dir, 'extensions.mjs'), compile(VIEW))
+    compatModule = await import(pathToFileURL(join(dir, 'compat-manager.js')).href)
     viewModule = await import(pathToFileURL(join(dir, 'extensions.mjs')).href)
   } finally {
     rmSync(dir, { recursive: true, force: true })
@@ -156,6 +175,11 @@ try {
 function requireView() {
   assert(viewModuleError === null, 'the view module did not load: ' + (viewModuleError === null ? '' : viewModuleError.message))
   return viewModule
+}
+
+function requireCompat() {
+  assert(viewModuleError === null, 'the compat module did not load: ' + (viewModuleError === null ? '' : viewModuleError.message))
+  return compatModule
 }
 
 /** Rows as the snapshot reports them: two bundled, one local without the flag, one local false. */
@@ -486,7 +510,174 @@ check('copy-to-profile', () => {
   return 'confirm first, extension.installBundled with the id, reload after the write'
 })
 
+// ── 官方配套: the card above the list ─────────────────────────────────────
+
+check('compat-mounted', () => {
+  assert(/import \{ CompatManager \} from '\.\/compat-manager\.js'/.test(body), 'extensions.tsx must import the compat card from ./compat-manager.js')
+  const cardAt = body.indexOf('<CompatManager')
+  const listAt = body.indexOf('{shown.map(entry => (')
+  assert(cardAt !== -1, 'the compat card must be rendered')
+  assert(listAt !== -1 && cardAt < listAt, 'the compat card must sit above the extension list')
+  assert(body.includes('entries={snapshot.extensions}'), 'the card lists the snapshot rows')
+  assert(body.includes("statePath={snapshot.paths.state ?? ''}"), 'the card needs the state path to name the backup folder')
+  const stateAt = compatBody.indexOf('React.useState<CompatPending[] | null>(null)')
+  const returnAt = compatBody.indexOf('if (packs.length === 0) return null')
+  assert(stateAt !== -1 && returnAt !== -1 && stateAt < returnAt, 'the card must declare its hooks before the early return')
+  return 'card above the list, hooks before the empty return'
+})
+
+check('compat-official-only', () => {
+  const api = requireCompat()
+  for (const name of ['COMPAT', 'officialPacks', 'bundledVersionOf', 'localVersionOf', 'compatActionOf',
+    'pendingActions', 'backupRootOf', 'installTargetOf', 'CompatManager', 'installLabel', 'updateLabel',
+    'batchLabel', 'updateHint', 'installHint', 'batchHint', 'originLabel']) {
+    assert(api[name] !== undefined, 'compat-manager.tsx does not export ' + name)
+  }
+  const rows = [
+    { id: 'pack-only', version: '1.0.0', bundled: true, bundledVersion: '1.0.0' },
+    { id: 'behind', version: '1.0.0', overridesBundled: true, bundledVersion: '2.0.0' },
+    { id: 'current', version: '2.0.0', overridesBundled: true, bundledVersion: '2.0.0' },
+    { id: 'plain-local', version: '1.0.0' },
+    { id: 'legacy-local', bundled: false, overridesBundled: false },
+  ]
+  const before = JSON.stringify(rows)
+  const packs = api.officialPacks(rows)
+  assert(packs !== rows, 'officialPacks must return a new array')
+  assert(packs.map(row => row.id).join(',') === 'pack-only,behind,current', 'officialPacks keeps only bundled/override rows in order: ' + packs.map(row => row.id).join(','))
+  assert(api.officialPacks([]).length === 0, 'no rows is no packs')
+  assert(JSON.stringify(rows) === before, 'officialPacks must not mutate the snapshot')
+  assert(api.bundledVersionOf(rows[0]) === '1.0.0', 'a bundled row reports its own version as the pack version')
+  assert(api.bundledVersionOf(rows[1]) === '2.0.0', 'an override row reports the pack version it shadows')
+  assert(api.bundledVersionOf({ id: 'x', bundled: true, version: '3.0.0' }) === '3.0.0', 'a host without bundledVersion falls back to the row version')
+  assert(api.bundledVersionOf(rows[3]) === '', 'a plain local row has no pack version')
+  assert(api.localVersionOf(rows[0]) === '', 'a bundled row has no local version')
+  assert(api.localVersionOf(rows[1]) === '1.0.0', 'an override row reports its own version as the local version')
+  return 'official packs only, both versions, snapshot never mutated'
+})
+
+check('compat-action-rules', () => {
+  const api = requireCompat()
+  const packOnly = { id: 'a', version: '1.0.0', bundled: true, bundledVersion: '1.0.0' }
+  const behind = { id: 'b', version: '1.0.0', overridesBundled: true, bundledVersion: '2.0.0' }
+  const current = { id: 'c', version: '2.0.0', overridesBundled: true, bundledVersion: '2.0.0' }
+  assert(api.compatActionOf(packOnly) === 'install', 'a bundled row without a local copy is an install')
+  assert(api.compatActionOf(behind) === 'update', 'a copy behind the pack is an update')
+  assert(api.compatActionOf(current) === null, 'a copy at the pack version has nothing to do')
+  assert(api.compatActionOf({ id: 'd', version: '1.0.0' }) === null, 'a plain local row is not an official pack')
+  assert(api.compatActionOf({ id: 'e', overridesBundled: true }) === null, 'no recorded pack version means no update')
+  const pending = api.pendingActions([packOnly, behind, current, { id: 'f', version: '1.0.0' }])
+  assert(JSON.stringify(pending) === JSON.stringify([{ id: 'a', action: 'install' }, { id: 'b', action: 'update' }]), 'pendingActions is every install/update in order: ' + JSON.stringify(pending))
+  assert(api.pendingActions([]).length === 0, 'nothing to do is an empty batch')
+  return 'install / update / nothing, batch in order'
+})
+
+check('compat-labels', () => {
+  const api = requireCompat()
+  assert(api.installLabel('zh') === '安装到本地', 'zh install label')
+  assert(api.installLabel('en') === 'Install to local', 'en install label')
+  assert(api.updateLabel('zh') === '更新', 'zh update label')
+  assert(api.updateLabel('en') === 'Update', 'en update label')
+  assert(api.batchLabel('zh') === '全部安装/更新', 'the batch button is 全部安装/更新')
+  assert(api.batchLabel('en') !== api.batchLabel('zh'), 'the batch button is bilingual')
+  assert(api.originLabel('zh', { id: 'a', overridesBundled: true }) === '本地覆盖', 'an override row says 本地覆盖')
+  assert(api.originLabel('zh', { id: 'a', bundled: true }) === '插件包', 'a bundled row says 插件包')
+  assert(api.originLabel('en', { id: 'a', bundled: true }) !== api.originLabel('zh', { id: 'a', bundled: true }), 'the origin label is bilingual')
+  assert(api.noVersion('zh') === api.noVersion('en'), 'the empty version is the same glyph in both languages')
+  assert(api.backupRootOf('/home/me/.dsh/tool-hub/state.json') === '/home/me/.dsh/tool-hub/backups', 'a posix state path maps to its backups folder')
+  assert(api.backupRootOf('C:\\Users\\me\\.dsh\\tool-hub\\state.json') === 'C:/Users/me/.dsh/tool-hub/backups', 'a windows state path maps to its backups folder')
+  assert(api.backupRootOf('state.json') === 'backups', 'a bare state file has no folder to derive')
+  assert(api.installTargetOf('/home/me/.dsh/tool-hub/state.json', 'pack-a') === '/home/me/.dsh/tool-hub/extensions/pack-a', 'installing lands in the profile extension root')
+  assert(api.installTargetOf('C:\\Users\\me\\state.json', 'pack-a') === 'C:/Users/me/extensions/pack-a', 'a windows state path lands in the profile extension root')
+  assert(api.installTargetOf('state.json', 'pack-a') === 'extensions/pack-a', 'a bare state file still names the extension folder')
+  return 'bilingual labels, backup folder derived from the state path'
+})
+
+check('compat-update-wording', () => {
+  const api = requireCompat()
+  const zh = api.updateHint('zh', 'pack-a', '/state/backups')
+  const en = api.updateHint('en', 'pack-a', '/state/backups')
+  assert(zh.includes('compat/pack-a'), 'the zh update hint must name the pack it reads')
+  assert(zh.includes('/state/backups') && zh.includes('extensions-pack-a-'), 'the zh update hint must name the backup folder it creates')
+  assert(zh.includes('覆盖'), 'the zh update hint must say the local copy is overwritten')
+  assert(zh !== en, 'the update hint must be bilingual')
+  assert(en.includes('compat/pack-a') && en.includes('/state/backups') && /overwrit/i.test(en), 'the en update hint must say backup then overwrite')
+  assert(api.installHint('zh', 'pack-a').includes('compat/pack-a'), 'the install hint names the pack')
+  assert(api.installHint('zh', 'pack-a') !== api.installHint('en', 'pack-a'), 'the install hint must be bilingual')
+  const batch = api.batchHint('zh', 3, '/state/backups')
+  assert(batch.includes('3'), 'the batch hint must carry the count')
+  assert(batch.includes('/state/backups'), 'the batch hint must name the backup folder')
+  assert(api.reportLine('zh', 2, 1).includes('2') && api.reportLine('zh', 2, 1).includes('1'), 'the report line carries both counts')
+  return 'backup folder + overwrite in the update copy, count in the batch copy'
+})
+
+check('compat-row-render', () => {
+  assert(compatBody.includes("{bundledVersionLabel(lang) + ' ' + (bundledVersionOf(entry) || noVersion(lang))}"), 'the row must show the pack version')
+  assert(compatBody.includes("{localVersionLabel(lang) + ' ' + (localVersionOf(entry) || noVersion(lang))}"), 'the row must show the local version')
+  assert(compatBody.includes('{originLabel(lang, entry)}'), 'the row must show where the copy comes from')
+  assert(compatBody.includes("{entry.enabled ? t('extensions.enabled') : t('extensions.disabled')}"), 'the row must show the enabled state')
+  assert(compatBody.includes('const target = entry.bundled === true ? installTargetOf(statePath, entry.id) : entry.dir'), 'a bundled row must name the folder an install lands in')
+  assert(compatBody.includes('{target}'), 'the row must show that target')
+  assert(compatBody.includes('title={targetLabel(lang)}'), 'the folder must be labelled as the target')
+  assert(compatBody.includes('const description = packDescription(entry, lang)'), 'the row must read the pack description')
+  assert(compatBody.includes("description === '' ? null : <span className=\"th-field-hint\">{description}</span>"), 'the row must render the description when the manifest has one')
+  assert(compatBody.includes('const name = packName(entry, lang)'), 'the row must resolve the pack name for its language')
+  assert(compatBody.includes('<span className="th-row-name">{name}</span>'), 'the row must show the pack name')
+  assert(compatBody.includes('<span className="th-mono">{entry.id}</span>'), 'the row must show the id beside the name')
+  assert(compatBody.includes('busy={busyWith(COMPAT.install, entry.id)}') && compatBody.includes('busy={busyWith(COMPAT.update, entry.id)}'), 'each action needs its own busy key')
+  assert(compatBody.includes('checked={entry.enabled}'), 'the switch must follow the host state')
+  assert(compatBody.includes('runDetailed(COMPAT.set, { id: entry.id, enabled })'), 'the switch must send extension.set with the next state')
+  return 'name/id, target, description, both versions, status, per-row controls'
+})
+
+check('compat-batch', () => {
+  assert(compatBody.includes('const pending = pendingActions(entries)'), 'the batch button must compute the pending actions')
+  assert(compatBody.includes('setQueued(pending)'), 'the batch button must open one confirmation')
+  assert(compatBody.includes('batchHint(lang, queued.length, backupRoot)'), 'the batch confirmation must carry the count and the backup promise')
+  assert(compatBody.includes("{ id: entry.id, action: 'install' }") && compatBody.includes("{ id: entry.id, action: 'update' }"), 'a row action must queue exactly that row and action')
+  assert(compatBody.includes('const actions = queued ?? []'), 'the confirmation must take the queued actions')
+  assert(/setQueued\(null\)[\s\S]{0,120}runActions\(actions\)/.test(compatBody), 'the confirmation must close before the batch runs')
+  assert(compatBody.includes('for (const action of actions) {'), 'the batch must run one action at a time')
+  assert(!/Promise\.all/.test(compatBody), 'the batch must not fan out')
+  assert(compatBody.includes('failed.push({ id: action.id, message: outcome.error'), 'a failed action must be recorded by id')
+  assert(compatBody.includes('{report.failed.map(item => ('), 'every failure must be rendered')
+  assert(compatBody.includes('{reportLine(lang, report.ok, report.failed.length)}'), 'the batch must report its counts')
+  return 'pending actions, one confirmation with the count, sequential, per-action failures'
+})
+
+check('compat-no-auto-actions', () => {
+  const effects = compatBody.match(/React\.useEffect\(\(\) => \{[\s\S]*?\}, \[\]\)/g) ?? []
+  assert(effects.length === 1, 'the card must declare exactly one effect, found ' + effects.length)
+  assert(!/runDetailed\(|runActions\(|setQueued\(/.test(effects[0]), 'the card must never send or queue from an effect')
+  assert(effects[0].includes('alive.current = false'), 'the effect must be the unmount guard')
+  assert(!/disabled=\{false\}/.test(compatBody), 'no control may be forced enabled')
+  return 'no op on mount, unmount guarded'
+})
+
+check('compat-discipline', () => {
+  const allowed = new Set(['react', '../components.js', '../theme.js', '../types.js'])
+  for (const match of compatBody.matchAll(/from '([^']+)'/g)) {
+    assert(allowed.has(match[1]), "unexpected import '" + match[1] + "' in compat-manager.tsx")
+  }
+  assert(!/<button\b/.test(compatBody), 'raw buttons belong to components.tsx')
+  for (const pattern of ['innerHTML', 'outerHTML', 'dangerouslySetInnerHTML', 'document.write']) {
+    assert(compatBody.indexOf(pattern) === -1, 'compat-manager.tsx uses ' + pattern)
+  }
+  assert(!/TODO\(|FIXME/.test(compatSource), 'compat-manager.tsx still carries a TODO marker')
+  const literal = /#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(/.exec(compatBody)
+  assert(literal === null, 'a literal colour in compat-manager.tsx')
+  const zhKeys = catalogKeys('zh')
+  const enKeys = catalogKeys('en')
+  for (const match of compatBody.matchAll(/\bt\('([^']+)'/g)) {
+    assert(zhKeys.has(match[1]) && enKeys.has(match[1]), "t('" + match[1] + "') is not a catalog key")
+  }
+  assert(compatBody.includes("t('extensions.enabled')") && compatBody.includes("t('extensions.disabled')"), 'the status badges must reuse the catalog keys')
+  const lines = compatSource.split('\n').length
+  assert(lines < 520, 'compat-manager.tsx has ' + lines + ' lines')
+  return 'stubs-only imports, no raw buttons, themed styles, catalog keys only, ' + lines + ' lines'
+})
+
 // ── the op console ─────────────────────────────────────────────────────────
+
 
 check('console-select', () => {
   assert(body.includes("<Select id={entry.id + '-op'} value={chosen} options={options} onChange={setOp} label={t('extensions.ops')} />"), 'the console must choose from the declared ops')
@@ -600,7 +791,7 @@ check('no-todo', () => {
 })
 
 check('imports', () => {
-  const allowed = new Set(['react', '../api.js', '../components.js', '../theme.js', '../types.js'])
+  const allowed = new Set(['react', '../api.js', '../components.js', '../theme.js', '../types.js', './compat-manager.js'])
   for (const match of body.matchAll(/from '([^']+)'/g)) {
     assert(allowed.has(match[1]), "unexpected import '" + match[1] + "'")
   }
@@ -613,7 +804,7 @@ check('imports', () => {
 check('file-length', () => {
   const lines = source.split('\n').length
   const bytes = statSync(VIEW).size
-  assert(lines < 840, 'extensions.tsx has ' + lines + ' lines (limit 840)')
+  assert(lines < 760, 'extensions.tsx has ' + lines + ' lines (limit 760)')
   assert(bytes < 60 * 1024, 'extensions.tsx is ' + bytes + ' bytes (limit 60 KB)')
   return lines + ' lines, ' + bytes + ' bytes'
 })

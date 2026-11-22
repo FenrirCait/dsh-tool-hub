@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.0.0-alpha.68
+
+- Extensions gains an official compat manager above the list: bundled-only rows with pack/local
+  versions, install/update/enable actions and one batch "安装/更新" confirmation.
+- `extension.updateBundled` backs up the local pack to `backupDir()/extensions-<id>-<stamp>`
+  before overwriting it from the package; the patch file is never touched.
+- A local copy still reports the package version beside its own (bundledVersion), so updates are
+  visible even when the local copy wins.
+
 ## 2.0.0-alpha.67
 
 - A lazy-hidden row shows only '懒加载隐藏' + '固定'; the server's '懒加载' badge is not
