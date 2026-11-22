@@ -11,6 +11,26 @@ It shows up twice: as a **Hub tab** on the Plugins page, and as a **sidebar pane
 
 
 
+## 2.0 at a glance
+
+2.0 is a rewrite of both the panel and how compatibility packs are distributed, not a version bump:
+
+- **Manager only.** The plugin package no longer bundles `compat/` packs. Official packs live in
+  [FenrirCait/dsh-tool-hub-packs](https://github.com/FenrirCait/dsh-tool-hub-packs), are read from a
+  remote catalog, and are installed on explicit confirmation.
+- **Verified pack lifecycle.** Install/update downloads to staging, checks byte counts and SHA-256,
+  backs up an existing local copy, then replaces it atomically. Uninstall backs up the local copy
+  before removing it. Nothing is installed, updated or enabled automatically.
+- **Clear failure states.** Pack rows distinguish not installed / installed / update available /
+  enabled, and report download, verification, backup and extension-load errors separately.
+- **Large-install usability.** Lists paginate, headers stay visible, search results are highlighted,
+  and every masked tool or plugin says *why* it is masked instead of silently disappearing.
+- **Codex glass integration** (optional pack). The panel follows codex-ui's float/compat layout,
+  its Clear / Standard / Frosted material presets, and its floor-glow switch through the same CSS
+  tokens. It is a pack like any other, not part of the manager.
+- **In-panel usage guide.** The `?` button in either topbar opens a bilingual guide covering every
+  view, the official pack lifecycle and the common keyboard paths.
+
 ## Why
 
 Disabling a plugin normally means digging through a profile's patch file, and skills are switched
@@ -20,22 +40,69 @@ switches, groups, and presets.
 
 ## Install
 
-From a git checkout or a local folder:
+Requires a DSH host that can install a GitHub plugin bundle.
+
+Pinned release, recommended:
 
 ```bash
-dsh plugin install FenrirCait/dsh-tool-hub
-# or, from a local copy
-dsh plugin install ./dsh-tool-hub
+dsh plugin --profile <profile> add github:FenrirCait/dsh-tool-hub#v2.0.0-alpha.76
 ```
 
-Then open **Plugins → Hub**, or the **Tool Hub** entry in the sidebar. A restart is not required;
-the plugin hot-loads.
+From a local checkout:
 
-Official compatibility packs live in a separate repository and are never bundled with the plugin.
-The **Official packs** card in Extensions reads that GitHub catalog, shows pack and installed
-versions, and installs or updates a pack only after an explicit confirmation; every file is
-checked against its catalog SHA-256 before it is written. Configure the catalog URL and mirror in
-Settings (defaults point at `FenrirCait/dsh-tool-hub-packs`).
+```bash
+dsh plugin --profile <profile> add ./dsh-tool-hub
+```
+
+Open **Plugins → Hub**, or the **Tool Hub** entry in the sidebar. The panel hot-loads; restart only
+if the host asks for it. The profile's existing groups, presets and state file are kept.
+
+## Official packs
+
+Official compatibility packs are **not bundled**. The manager reads a catalog from
+`FenrirCait/dsh-tool-hub-packs` (raw GitHub, with a jsDelivr mirror) and shows one row per pack:
+
+- **Refresh index** re-reads the catalog; the result is cached for 60 minutes by default.
+- **Install / Update** requires an explicit confirmation, verifies every file, backs up an existing
+  copy to `<backup dir>/extensions-<id>-<stamp>`, then replaces it atomically.
+- **Uninstall** backs up the local copy, removes it from the profile extension root, drops it from
+  the enabled list and rebuilds; the catalog entry is untouched.
+- **Install all / update all** works on the visible queue, but uninstall is deliberately never
+  included in batch actions.
+- Packs can be disabled and enabled on their row; disabled does not mean uninstalled.
+
+Settings: `compat.indexUrl`, `compat.mirrorUrl` and `compat.cacheMinutes`. The defaults point at
+the public pack repository; a local HTTP fixture is supported for testing.
+
+## Usage guide
+
+The `?` button in the panel topbar opens the bilingual guide. It covers plugins, skills, MCP and
+lazy tools, groups, presets, official packs, diagnostics, extensions, and the keyboard paths
+(↑/↓, Home/End, Esc). The guide is a native top-layer dialog, so it stays readable in dark mode and
+lets the page behind show through.
+
+## Codex glass pack
+
+`codex-ui-glass` is an **optional official pack** for codex-ui users. It is not part of the
+manager and can be uninstalled independently. It follows codex-ui's own attributes and CSS tokens:
+
+- layout: `data-dsh-glass-float` (mica / floating rounded panels) or `data-dsh-glass-compat`
+  (official flush layout with glass material);
+- material: `--dsh-glass-frost` / `--dsh-glass-blur` from the Clear / Standard / Frosted presets;
+- ground glow: `--dsh-glass-glow`;
+- panel dialogs and fields use `--dsh-glass-card` / `--dsh-glass-card-raised`, so their opacity
+  follows the selected preset instead of a hardcoded value.
+
+## Upgrading from 1.x
+
+- Bundled compatibility packs are gone from the package. Install the packs you need from the
+  **Official packs** card after upgrading; nothing is installed or enabled automatically.
+- The manager, groups, presets and state file are preserved. Existing local extension copies remain
+  normal extensions until you install/update them through the official catalog.
+- The install command now pins a release tag, so a profile can stay on a known artifact instead of
+  following `main`.
+- The panel UI, dark/light support and the usage guide are new; existing behavior for switches,
+  groups, presets and MCP tools is unchanged.
 
 ## What it does
 

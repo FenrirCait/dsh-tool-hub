@@ -8,6 +8,21 @@
 
 
 
+## 2.0 概览
+
+2.0 不是版本号补丁，而是面板和配套分发方式的重构：
+
+- **只保留管理器**：主包不再内置 `compat/` 兼容包。官方配套放在独立仓库
+  [FenrirCait/dsh-tool-hub-packs](https://github.com/FenrirCait/dsh-tool-hub-packs)，从远端索引读取，
+  必须显式确认后才安装。
+- **可验证的配套生命周期**：安装/更新先下载到 staging，校验字节数和 SHA-256，备份旧副本后原子替换；
+  卸载先备份再删除本地副本。不会自动安装、自动更新或自动启用。
+- **状态说清楚**：配套行区分未安装 / 已安装 / 有更新 / 已启用，下载、校验、备份、扩展加载失败分别报错。
+- **大列表可用性**：分页、表头固定、搜索高亮；被屏蔽的插件或工具会写明原因，不再无声消失。
+- **Codex 玻璃兼容**（可选配套）：跟随 codex-ui 的平铺/云母排版、清透/标准/磨砂三档材质和地面光斑开关，
+  使用同一组 CSS 变量；它只是普通配套，不属于管理器本体。
+- **面板内使用指引**：顶栏 `?` 打开中英双语指引，覆盖所有视图、官方配套流程和常用键盘操作。
+
 ## 为什么做
 
 关一个插件通常要翻 profile 的 patch 文件，关一个技能要手改 `SKILL.md` 的文件名。而「写论文要哪
@@ -16,17 +31,60 @@
 
 ## 安装
 
+需要能安装 GitHub 插件 bundle 的 DSH 宿主。
+
+推荐固定 release：
+
 ```bash
-dsh plugin install FenrirCait/dsh-tool-hub
-# 或者本地目录
-dsh plugin install ./dsh-tool-hub
+dsh plugin --profile <profile> add github:FenrirCait/dsh-tool-hub#v2.0.0-alpha.76
 ```
 
-装完打开**插件 → 总控台**，或侧边栏的**工具总控台**。不需要重启，插件热加载。
+从本地目录安装：
 
-官方兼容包放在独立仓库，主包不内置。扩展页的「官方配套」卡片读取 GitHub 索引，显示包版本与已装版本；
-安装或更新必须显式确认，每个文件写入前都会校验索引里的 SHA-256。索引地址和镜像在设置里配置
-（默认指向 `FenrirCait/dsh-tool-hub-packs`）。
+```bash
+dsh plugin --profile <profile> add ./dsh-tool-hub
+```
+
+打开**插件 → 总控台**，或侧边栏的**工具总控台**。面板热加载；宿主提示需要重启时再重启。原有的分组、
+预设和状态文件都会保留。
+
+## 官方配套
+
+官方兼容包**不内置**。管理器从 `FenrirCait/dsh-tool-hub-packs` 读取索引（raw GitHub，jsDelivr 镜像），
+每个包一行：
+
+- **刷新索引**：重新读取远端；默认缓存 60 分钟。
+- **安装 / 更新**：必须显式确认，逐文件校验，先备份到 `<backup dir>/extensions-<id>-<stamp>`，
+  再原子替换。
+- **卸载**：先备份本地副本，再从 profile 的 extensions 目录删除、从启用列表移除并重建；
+  远端索引不受影响。
+- **全部安装 / 全部更新**：只处理可见队列；卸载刻意不进入批量操作。
+- 配套行可以单独停用/启用；停用不等于卸载。
+
+设置项：`compat.indexUrl`、`compat.mirrorUrl`、`compat.cacheMinutes`。默认指向公开配套仓库；
+也支持本地 HTTP fixture 做测试。
+
+## 使用指引
+
+面板顶栏 `?` 打开中英双语指引，覆盖插件、技能、MCP 与懒加载、分组、预设、官方配套、诊断、扩展，
+以及 ↑/↓、Home/End、Esc 等键盘路径。指引是原生 top-layer 弹窗，暗色可读，也能看到后面的页面内容。
+
+## Codex 玻璃配套
+
+`codex-ui-glass` 是给 codex-ui 用户的**可选官方配套**，不属于管理器本体，可以独立卸载。它跟随
+codex-ui 自己的属性和 CSS 变量：
+
+- 排版：`data-dsh-glass-float`（云母/悬浮圆角）或 `data-dsh-glass-compat`（官方贴边布局 + 玻璃材质）；
+- 材质：`--dsh-glass-frost` / `--dsh-glass-blur`，对应清透/标准/磨砂三档；
+- 地面光斑：`--dsh-glass-glow`；
+- 面板弹窗和字段用 `--dsh-glass-card` / `--dsh-glass-card-raised`，透明度随档位走，不再写死。
+
+## 从 1.x 升级
+
+- 内置兼容包已从主包移除。升级后到**官方配套**卡片安装需要的包；不会自动安装或启用任何东西。
+- 管理器、分组、预设和状态文件保留。已有本地扩展副本仍是普通扩展，直到通过官方索引安装/更新。
+- 安装命令现在固定 release tag，profile 可以停在已知产物上，而不是跟随 `main`。
+- 面板 UI、深浅色和使用指引是 2.0 新增；开关、分组、预设和 MCP 工具的既有行为不变。
 
 ## 能做什么
 
