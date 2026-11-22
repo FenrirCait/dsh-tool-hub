@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.0-alpha.74
+
+- Fix vertically stretched form inputs inside column fields (the `flex: 1 1 180px` basis applied
+  to height), which made overlay dialogs enormous.
+
 ## 2.0.0-alpha.73
 
 - Forced catalog refreshes bypass GitHub raw's CDN cache with a cache-busting query, so a

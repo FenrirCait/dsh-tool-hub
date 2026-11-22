@@ -401,6 +401,7 @@ const CSS = `
 .th-dialog-body { font-size: 12px; color: var(--dsw-alias-label-secondary, rgba(127, 127, 127, 0.96)); }
 .th-dialog-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .th-field { display: flex; flex-direction: column; gap: 4px; }
+.th-field > .th-input, .th-field > .th-select { flex: 0 0 auto; width: 100%; }
 .th-field-label { font-size: 11px; font-weight: 600; color: var(--dsw-alias-label-secondary, rgba(127, 127, 127, 0.96)); }
 .th-field-hint { font-size: 11px; color: var(--dsw-alias-label-tertiary, rgba(127, 127, 127, 0.78)); }
 .th-field-error { font-size: 11px; color: var(--dsw-alias-state-error-primary, rgba(229, 72, 77, 1)); }
