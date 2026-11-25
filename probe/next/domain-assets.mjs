@@ -477,6 +477,30 @@ async function main() {
     eq('mcp: duplicate second changed', rows[1].config.serverName, 'second-changed')
   })
 
+  await step('mcp: host verification selects the requested duplicate occurrence', async () => {
+    const duplicate = [
+      '- insert:',
+      '  - id: dup-mcp',
+      '    name: "@deepseek-ai/dsh-mcp-client"',
+      '    config:',
+      '      serverName: first',
+      '  - id: dup-mcp',
+      '    name: "@deepseek-ai/dsh-mcp-client"',
+      '    config:',
+      '      serverName: second',
+    ].join('\n') + '\n'
+    await writeFile(patchPath, duplicate, 'utf8')
+    const host = pluginManager([
+      { entryId: 'loader-first', patchId: 'dup-mcp', name: 'first', moduleName: '@deepseek-ai/dsh-mcp-client', enabled: true },
+      { entryId: 'loader-second', patchId: 'dup-mcp', name: 'second-changed', moduleName: '@deepseek-ai/dsh-mcp-client', enabled: true },
+    ])
+    const res = await call(mcpDomain, 'mcp.save', { id: 'dup-mcp', occurrence: 1, config: { serverName: 'second-changed' } }, makeEnv({ profileContext: { dir: profile }, pluginManager: host }))
+    eq('mcp: host duplicate save ok', res.ok, true)
+    const rows = mcp.parseMcpRows(await readFile(patchPath, 'utf8'))
+    eq('mcp: host duplicate first untouched', rows[0].config.serverName, 'first')
+    eq('mcp: host duplicate second changed', rows[1].config.serverName, 'second-changed')
+  })
+
   await step('mcp: a managed-block row is read-only for host writes', async () => {
     const managed = [
       '# >>> dsh-skill-mcp-panel:mcp:begin',

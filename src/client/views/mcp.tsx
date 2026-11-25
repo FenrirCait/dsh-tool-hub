@@ -182,7 +182,7 @@ export function McpView(props: ViewProps): React.ReactElement {
               const detail = command !== '' ? command : row.url ?? ''
               const rawBusy = raw !== null && raw.loading && raw.id === id
               return (
-                <RowBoundary key={id + ':' + String(occurrence)} label={copy(lang, '这一条 MCP 行渲染失败：' + row.name, 'This MCP row failed to render: ' + row.name)} retry={t('action.retry')}>
+                <RowBoundary key={id === '' ? 'loader:' + row.id : id + ':' + String(occurrence)} label={copy(lang, '这一条 MCP 行渲染失败：' + row.name, 'This MCP row failed to render: ' + row.name)} retry={t('action.retry')}>
                 <div className="th-row">
                   <div className="th-row-body">
                     <span className="th-row-name">{row.name}</span>

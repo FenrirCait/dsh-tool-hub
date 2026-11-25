@@ -100,6 +100,7 @@ check('action-save', () => {
 check('row-boundary', () => {
   assert(has('<RowBoundary'), 'each MCP row must be wrapped in its own error boundary')
   assert(has('mcpReadOnlyReason'), 'a managed block row must carry its read-only reason')
+  assert(has("id === '' ? 'loader:' + row.id"), 'orphan rows need a loader-id key, not :0')
   return 'per-row fallback + read-only reason'
 })
 

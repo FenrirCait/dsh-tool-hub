@@ -10,3 +10,4 @@ release-*.md
 dist/
 # Local design/research notes; never shipped or published.
 research/
+_session/

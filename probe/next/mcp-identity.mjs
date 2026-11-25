@@ -83,6 +83,25 @@ check('managed block marks its row and leaves the outside row ours', () => {
   ])
 })
 
+check('an unclosed managed block also marks rows read-only', () => {
+  const unclosed = [
+    '# >>> dsh-skill-mcp-panel:mcp:begin',
+    '- insert:',
+    '  - id: panel-mcp-open',
+    '    name: "@deepseek-ai/dsh-mcp-client"',
+    '    config:',
+    '      serverName: open',
+    '- id: ours-open',
+    '  name: "@deepseek-ai/dsh-mcp-client"',
+    '  config:',
+    '    serverName: ours-open',
+  ].join('\n') + '\n'
+  equal(mcp.parseMcpRows(unclosed).map(row => [row.id, row.managedBy]), [
+    ['panel-mcp-open', 'dsh-skill-mcp-panel:mcp'],
+    ['ours-open', 'dsh-skill-mcp-panel:mcp'],
+  ])
+})
+
 check('mergeMcpRows carries occurrence and read-only owner', () => {
   const rows = mcp.mergeMcpRows(mcp.parseMcpRows(managed), [
     { id: 'loader-x', moduleName: '@deepseek-ai/dsh-mcp-client', patchId: 'panel-mcp-x', enabled: true, manageable: true },

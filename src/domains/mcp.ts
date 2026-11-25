@@ -363,10 +363,13 @@ export function parseMcpRows(text: string): McpRow[] {
     seen.set(row.id, occurrence + 1)
   }
   try {
-    const blocks = scanPatchBlocks(text).blocks
+    const layout = scanPatchBlocks(text)
     for (const row of rows) {
-      const block = blocks.find(candidate => row.startLine > candidate.beginLine && row.endLine <= candidate.endLine)
-      row.managedBy = block?.name ?? null
+      const block = layout.blocks.find(candidate => row.startLine > candidate.beginLine && row.endLine <= candidate.endLine)
+      const unclosed = block === undefined
+        ? layout.unclosedBlocks.find(candidate => row.startLine > candidate.beginLine)
+        : undefined
+      row.managedBy = block?.name ?? unclosed?.name ?? null
     }
   }
   catch {
@@ -798,7 +801,12 @@ async function verifyWritten(
       try {
         const rows = await (manager?.listPlugins as () => Promise<unknown>).call(manager)
         if (!Array.isArray(rows)) continue
-        const live = rows.find(row => isRecord(row) && row.patchId === id)
+        const candidates = rows.filter(row => isRecord(row) && row.patchId === id)
+        // The host list is in load order. Pick the occurrence this write targeted, but let a
+        // matching server name win when the loader reordered or omitted a sibling.
+        const live = (expectedName === '' ? undefined : candidates.find(row => isRecord(row) && row.name === expectedName))
+          ?? candidates[occurrence]
+          ?? (candidates.length === 1 ? candidates[0] : undefined)
         if (live === undefined || !isRecord(live)) continue
         const name = typeof live.name === 'string' ? live.name : expectedName
         if (expectedName !== '' && name !== expectedName) continue
@@ -1283,7 +1291,7 @@ export function createMcpDomain(): DomainRegistration {
           const config: Record<string, unknown> = { ...row.config, headers: { ...headers, Authorization: 'Bearer ' + accessToken } }
           const next = replaceMcpConfig(text, pending.id, config, pending.occurrence)
           const expectedName = typeof config.serverName === 'string' ? config.serverName : pending.id
-          const written = await commitPatch(env, patch, pending.id, next, text, expectedName)
+          const written = await commitPatch(env, patch, pending.id, next, text, expectedName, pending.occurrence)
           const note = await noteWrite(env, { op: 'oauth', id: pending.id, backup: written.backup, patch })
           return { ok: true, id: pending.id, saved: true, backup: written.backup, verify: written.verify, stateSaved: note.saved, warn: note.warn }
         })
