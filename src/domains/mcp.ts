@@ -803,16 +803,17 @@ async function verifyWritten(
     catch {
       patchCount = null
     }
+    let lastProblem = 'the host did not list the row after three attempts'
     for (let attempt = 0; attempt < 3; attempt += 1) {
       await new Promise(done => setTimeout(done, attempt === 0 ? RAW_VERIFY_DELAY_MS : VERIFY_RETRY_MS))
       try {
         const rows = await (manager?.listPlugins as () => Promise<unknown>).call(manager)
         if (!Array.isArray(rows)) continue
-        const candidates = rows.filter(row => isRecord(row) && row.patchId === id)
-        // If the host list omits a duplicate, its positional index cannot be trusted. Refuse
-        // rather than let a sibling at the compressed index certify the write.
+        const candidates = rows.filter(row => isRecord(row) && row.patchId === id && (row.moduleName === undefined || row.moduleName === MCP_MODULE))
+        // A fresh HMR list can lag; retry a count mismatch instead of rolling back a just-written row.
         if (patchCount === null || candidates.length !== patchCount) {
-          return { mode: 'host', ok: false, detail: 'the host lists ' + String(candidates.length) + ' of ' + String(patchCount ?? '?') + ' duplicate rows; cannot verify the occurrence' }
+          lastProblem = 'the host lists ' + String(candidates.length) + ' of ' + String(patchCount ?? '?') + ' duplicate MCP rows; cannot verify the occurrence'
+          continue
         }
         // Trust the requested occurrence first. A stale target must fail verification even when
         // some other duplicate happens to carry the same server name.
@@ -827,7 +828,7 @@ async function verifyWritten(
         // A host read that throws is not an answer; try once more.
       }
     }
-    return { mode: 'host', ok: false, detail: 'the host did not list the row after three attempts' }
+    return { mode: 'host', ok: false, detail: lastProblem }
   }
   const rows = parseMcpRows(await readPatchText(patch))
   const row = findMcpRow(rows, id, occurrence)

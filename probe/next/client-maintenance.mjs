@@ -130,7 +130,7 @@ check('index-read', () => {
 })
 
 check('diff-read', () => {
-  assert(has(source, 'void runOp(RESTORE_OPS.diff, { backup, id: row })'), 'backup.diff must send { backup, id }')
+  assert(has(source, 'void runOp(RESTORE_OPS.diff, { backup, id: target.id, occurrence: target.occurrence })'), 'backup.diff must decode the row key and send occurrence')
   assert(!has(source, 'run(RESTORE_OPS.diff'), 'backup.diff is a read: run() only reports success, so it cannot carry the lines')
   assert(has(source, 'setDiff(diffOf(result.data))'), 'the diff must come from the op answer')
   assert(has(source, "kind: DIFF_KINDS.has(item.kind as DiffKind)"), 'diff kinds are narrowed to same/add/del')

@@ -243,11 +243,12 @@ export function BackupRestoreDialog(props: BackupRestoreProps): React.ReactEleme
 
   const readDiff = (): void => {
     if (backup === '' || row === '') return
+    const target = rowRefOf(row)
     setDiffLoading(true)
     setDiffError('')
     setConfirmed(false)
     setRestored(false)
-    void runOp(RESTORE_OPS.diff, { backup, id: row }).then(result => {
+    void runOp(RESTORE_OPS.diff, { backup, id: target.id, occurrence: target.occurrence }).then(result => {
       setDiffLoading(false)
       if (!result.ok) {
         setDiff(null)
