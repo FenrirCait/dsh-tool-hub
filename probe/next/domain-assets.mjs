@@ -524,6 +524,29 @@ async function main() {
     eq('mcp: ambiguous host second row changed', rows[1].config.url, 'http://second/mcp')
   })
 
+  await step('mcp: a stale duplicate is not rescued by a sibling name', async () => {
+    const duplicate = [
+      '- insert:',
+      '  - id: dup-stale',
+      '    name: "@deepseek-ai/dsh-mcp-client"',
+      '    config:',
+      '      serverName: target-name',
+      '  - id: dup-stale',
+      '    name: "@deepseek-ai/dsh-mcp-client"',
+      '    config:',
+      '      serverName: other-name',
+    ].join('\n') + '\n'
+    await writeFile(patchPath, duplicate, 'utf8')
+    // Only the first sibling is live under the requested name; occurrence 1 was not reloaded.
+    const host = pluginManager([
+      { entryId: 'loader-one', patchId: 'dup-stale', name: 'target-name', moduleName: '@deepseek-ai/dsh-mcp-client', enabled: true },
+    ])
+    const before = await readFile(patchPath, 'utf8')
+    const res = await call(mcpDomain, 'mcp.save', { id: 'dup-stale', occurrence: 1, config: { serverName: 'target-name' } }, makeEnv({ profileContext: { dir: profile }, pluginManager: host }))
+    eq('mcp: stale duplicate is refused', res.ok, false)
+    eq('mcp: stale duplicate rolled back', await readFile(patchPath, 'utf8'), before)
+  })
+
   await step('mcp: a managed-block row is read-only for host writes', async () => {
     const managed = [
       '# >>> dsh-skill-mcp-panel:mcp:begin',

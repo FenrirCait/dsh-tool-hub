@@ -802,12 +802,10 @@ async function verifyWritten(
         const rows = await (manager?.listPlugins as () => Promise<unknown>).call(manager)
         if (!Array.isArray(rows)) continue
         const candidates = rows.filter(row => isRecord(row) && row.patchId === id)
-        // The host list is in load order. A name is only a disambiguator when exactly one
-        // candidate carries it; duplicate server names must use the requested occurrence.
-        const named = expectedName === '' ? [] : candidates.filter(row => isRecord(row) && row.name === expectedName)
-        const live = (named.length === 1 ? named[0] : undefined)
-          ?? candidates[occurrence]
-          ?? (candidates.length === 1 ? candidates[0] : undefined)
+        // Trust the requested occurrence first. A stale target must fail verification even when
+        // some other duplicate happens to carry the same server name.
+        const live = candidates[occurrence]
+          ?? (occurrence === 0 && candidates.length === 1 ? candidates[0] : undefined)
         if (live === undefined || !isRecord(live)) continue
         const name = typeof live.name === 'string' ? live.name : expectedName
         if (expectedName !== '' && name !== expectedName) continue

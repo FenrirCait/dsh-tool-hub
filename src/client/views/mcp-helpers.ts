@@ -32,7 +32,9 @@ export function asRecord(value: unknown): Record<string, unknown> {
 
 /** The patch row id a write needs; '' when the row only exists in the loader. */
 export function patchIdOf(row: PluginRow): string {
-  const direct = row.mcpPatchId ?? row.patchId ?? ''
+  // An explicit null means mergeMcpRows found no patch row; falling back to the loader's stale
+  // patchId would give several unmatched siblings the same key.
+  const direct = row.mcpPatchId === null ? '' : row.mcpPatchId ?? row.patchId ?? ''
   return typeof direct === 'string' ? direct : ''
 }
 
