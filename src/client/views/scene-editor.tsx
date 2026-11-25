@@ -184,7 +184,8 @@ export function SceneEditor(props: SceneEditorProps): React.ReactElement {
   const patch = (next: Partial<SceneDraft>): void => {
     setDraft(current => ({ ...current, ...next }))
   }
-  const pluginRows = candidates(snapshot.plugins, draft.plugins)
+  // Synthetic installed-disabled bundle rows are not loader entries; scenes cannot apply them.
+  const pluginRows = candidates(snapshot.plugins.filter(row => row.bundleName === undefined), draft.plugins)
   const skillRows = candidates(snapshot.skills, draft.skills)
   const presetOptions = [
     { value: '', label: t('scenes.editor.presetNone') },

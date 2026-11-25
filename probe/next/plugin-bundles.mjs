@@ -48,24 +48,37 @@ await check('listBundles keeps installed and rowId members', async () => {
 })
 
 await check('installed disabled bundle becomes a switchable row', () => {
-  const rows = plugins.withInstalledBundles([], [disabled])
-  equal(rows.map(row => [row.id, row.name, row.bundleName, row.enabled, row.manageable]), [
+  const result = plugins.withInstalledBundles([], [disabled])
+  equal(result.plugins.map(row => [row.id, row.name, row.bundleName, row.enabled, row.manageable]), [
     ['bundle:dsh-univer-office', 'dsh-univer-office', 'dsh-univer-office', false, true],
   ])
-  equal(disabled.rows, ['bundle:dsh-univer-office'])
+  equal(disabled.rows, [], 'the cached bundle object must not be mutated')
+  equal(result.bundles[0].rows, ['bundle:dsh-univer-office'])
 })
 
 await check('a loaded member prevents a duplicate synthetic row', () => {
   const bundle = { ...disabled, rows: ['loaded-member'] }
-  const rows = plugins.withInstalledBundles([{ id: 'loaded-member', name: 'member' }], [bundle])
-  equal(rows.map(row => row.id), ['loaded-member'])
+  const result = plugins.withInstalledBundles([{ id: 'loaded-member', name: 'member' }], [bundle])
+  equal(result.plugins.map(row => row.id), ['loaded-member'])
   equal(bundle.rows, ['loaded-member'])
 })
 
 await check('an enabled or uninstalled bundle is not synthesized', () => {
   const enabled = { ...disabled, name: 'enabled', enabled: true, rows: [] }
   const missing = { ...disabled, name: 'missing', installed: false, rows: [] }
-  equal(plugins.withInstalledBundles([], [enabled, missing]), [])
+  equal(plugins.withInstalledBundles([], [enabled, missing]).plugins, [])
+})
+
+await check('bundle toggle validates id and self-protection', async () => {
+  const calls = []
+  const env = { now: () => 1, services: { get: () => ({ listBundles: async () => [{ name: 'other-bundle', installed: true, enabled: false, rows: [] }], setBundleEnabled: async (name, enabled) => { calls.push([name, enabled]); return { application: 'applied' } } }) } }
+  const self = await plugins.toggleOne(env, 'plugin', 'bundle:dsh-tool-hub', false, 'dsh-tool-hub').then(() => null, error => error)
+  equal(self && self.code, 'self-protected')
+  const mismatch = await plugins.toggleOne(env, 'plugin', 'bundle:wrong', true, 'other-bundle').then(() => null, error => error)
+  equal(mismatch && mismatch.code, 'bad-bundle')
+  const ok = await plugins.toggleOne(env, 'plugin', 'bundle:other-bundle', true, 'other-bundle')
+  equal(ok.ok, true)
+  equal(calls, [['other-bundle', true]])
 })
 
 await check('setBundleEnabled calls the host manager and invalidates', async () => {

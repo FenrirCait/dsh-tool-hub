@@ -142,6 +142,12 @@ check('lock: locking asks first, unlocking does not', () => {
 
 // ── 4. the editor exposes the four sections and the preset ─────────────────
 
+check('editor: synthetic bundle rows are not scene members', () => {
+  const editor = code(source('views/scene-editor.tsx'))
+  assert(editor.includes('row.bundleName === undefined'), 'the scene plugin picker must exclude synthetic bundle rows')
+  return 'bundle rows excluded'
+})
+
 check('editor: every section is opt-in and the preset is a select', () => {
   const editor = code(source('views/scene-editor.tsx'))
   for (const [id, part] of [['th-scene-plugins', 'plugins'], ['th-scene-skills', 'skills'], ['th-scene-tools', 'tools'], ['th-scene-mcp', 'mcp']]) {

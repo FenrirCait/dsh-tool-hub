@@ -263,9 +263,11 @@ export async function listBundles(env: HostEnv, fresh = false): Promise<{ rows: 
  * only loaded entries; without this pass a disabled package exists in node_modules but never reaches
  * the panel. The row carries the bundle name, so toggling it goes through setBundleEnabled().
  */
-export function withInstalledBundles(plugins: PluginRow[], bundles: BundleRow[]): PluginRow[] {
+export function withInstalledBundles(plugins: PluginRow[], bundles: BundleRow[]): { plugins: PluginRow[]; bundles: BundleRow[] } {
   const out = [...plugins]
-  for (const bundle of bundles) {
+  // listBundles() is cached: never mutate its rows, or each snapshot appends another synthetic id.
+  const copied = bundles.map(bundle => ({ ...bundle, rows: [...bundle.rows] }))
+  for (const bundle of copied) {
     if (!bundle.installed || bundle.enabled || bundle.name === '') continue
     if (bundle.rows.some(id => out.some(row => row.id === id))) continue
     const id = 'bundle:' + bundle.name
@@ -292,7 +294,7 @@ export function withInstalledBundles(plugins: PluginRow[], bundles: BundleRow[])
     })
     bundle.rows.push(id)
   }
-  return out
+  return { plugins: out, bundles: copied }
 }
 
 /** Whether this entry is the panel itself — the one row it must not switch off. */
@@ -414,7 +416,15 @@ function normalizeMember(raw: unknown): { kind: 'plugin' | 'skill'; id: string; 
 
 /** The switchboard: a plugin goes through the manager, a skill through its SKILL.md rename. */
 export async function toggleOne(env: HostEnv, kind: string, id: string, enabled: boolean, bundleName?: string): Promise<unknown> {
-  if (kind === 'plugin' && typeof bundleName === 'string' && bundleName !== '') return await setBundleEnabled(env, bundleName, enabled)
+  if (kind === 'plugin' && typeof bundleName === 'string' && bundleName !== '') {
+    if (id !== 'bundle:' + bundleName) fail('bad-bundle', 'a bundle row id must match bundle:<name>')
+    if (bundleName === SELF_MODULE) fail('self-protected', 'this panel cannot disable itself')
+    const bundles = await listBundles(env, true)
+    const bundle = bundles.rows.find(row => row.name === bundleName)
+    if (bundle === undefined || !bundle.installed) fail('unknown-bundle', 'no installed bundle named "' + bundleName + '"')
+    if (bundle.enabled) fail('not-disabled-bundle', 'bundle "' + bundleName + '" is already enabled')
+    return await setBundleEnabled(env, bundleName, enabled)
+  }
   if (kind === 'plugin') return await setPluginEnabled(env, id, enabled)
   if (kind === 'skill') return await setSkillEnabled(env, id, enabled)
   fail('bad-kind', 'unknown kind ' + String(kind))

@@ -287,12 +287,13 @@ export async function buildSnapshot(deps: SnapshotDeps): Promise<Record<string, 
   const groups = normalizeGroups(env.state.groups)
   const presets = normalizePresets(env.state.presets)
 
-  const plugins = withInstalledBundles(enriched, bundles.rows)
+  const installedBundles = withInstalledBundles(enriched, bundles.rows)
+  const plugins = installedBundles.plugins
 
   return {
     plugins,
     skills,
-    bundles: bundles.rows,
+    bundles: installedBundles.bundles,
     bundleError: bundles.error,
     groups,
     // Drawers are part of state but were never in the snapshot; the groups view needs names.
