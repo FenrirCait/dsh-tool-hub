@@ -19,6 +19,7 @@ import type { OpDefinition } from '../shared/types.js'
 import {
   backupsDir,
   commitMcpRowSpan,
+  findMcpRow,
   parseMcpRows,
   patchPathFor,
   readPatchText,
@@ -54,6 +55,8 @@ export interface McpBackupRow {
   bytes: number
   modifiedAt: number
   ids: string[]
+  /** Duplicate ids are separate rows; the UI sends this occurrence with the id. */
+  rows: Array<{ id: string; occurrence: number; name: string }>
 }
 
 function locations(): Array<{ kind: 'state' | 'patch'; dir: string }> {
@@ -155,14 +158,17 @@ export async function mcpBackupIndex(): Promise<{ backups: McpBackupRow[] }> {
     // Unreadable, binary and non-patch backups are not restorable rows; they simply are not listed.
     if (text === null) continue
     const ids: string[] = []
+    const rows: Array<{ id: string; occurrence: number; name: string }> = []
     const seen = new Set<string>()
     for (const mcpRow of parseMcpRows(text)) {
+      const name = typeof mcpRow.config.serverName === 'string' ? mcpRow.config.serverName : mcpRow.id
+      rows.push({ id: mcpRow.id, occurrence: mcpRow.occurrence, name })
       if (seen.has(mcpRow.id)) continue
       seen.add(mcpRow.id)
       ids.push(mcpRow.id)
     }
     if (ids.length === 0) continue
-    backups.push({ name: row.name, kind: row.kind, bytes: row.bytes, modifiedAt: row.modifiedAt, ids })
+    backups.push({ name: row.name, kind: row.kind, bytes: row.bytes, modifiedAt: row.modifiedAt, ids, rows })
   }
   return { backups }
 }
@@ -177,9 +183,9 @@ async function namedBackup(name: string): Promise<{ text: string; row: BackupRow
   return { text, row }
 }
 
-function findRow(text: string, id: string, where: string): McpRow {
-  const row = parseMcpRows(text).find(candidate => candidate.id === id)
-  if (row === undefined) throw fail('unknown-mcp', where + ' has no MCP row "' + id + '"')
+function findRow(text: string, id: string, where: string, occurrence = 0): McpRow {
+  const row = findMcpRow(parseMcpRows(text), id, occurrence)
+  if (row === undefined) throw fail('unknown-mcp', where + ' has no MCP row "' + id + '" at occurrence ' + String(occurrence))
   return row
 }
 
@@ -228,17 +234,18 @@ function diffHandler(): OpHandler {
     const body = asRecord(payload)
     const name = askedText(body, 'backup')
     const id = askedText(body, 'id')
+    const occurrence = typeof body.occurrence === 'number' && Number.isInteger(body.occurrence) && body.occurrence >= 0 ? body.occurrence : 0
     if (name === '') throw fail('bad-payload', 'backup is required')
     if (id === '') throw fail('bad-payload', 'id is required')
     const entry = await namedBackup(name)
-    const backupRow = findRow(entry.text, id, 'the backup')
+    const backupRow = findRow(entry.text, id, 'the backup', occurrence)
     const patch = patchPathFor(env)
     if (patch === null) throw fail('no-patch', 'this profile has no cordis.patch.yml to compare against')
     const current = await readPatchText(patch)
-    const liveRow = findRow(current, id, 'the profile patch')
+    const liveRow = findRow(current, id, 'the profile patch', occurrence)
     const before = rowText(entry.text, backupRow)
     const after = rowText(current, liveRow)
-    return { backup: name, id, changed: before !== after, before, after, lines: diffLines(before, after) }
+    return { backup: name, id, occurrence, changed: before !== after, before, after, lines: diffLines(before, after) }
   }
 }
 
@@ -247,10 +254,12 @@ function restoreHandler(): OpHandler {
     const body = asRecord(payload)
     const name = askedText(body, 'backup')
     const id = askedText(body, 'id')
+    const occurrence = typeof body.occurrence === 'number' && Number.isInteger(body.occurrence) && body.occurrence >= 0 ? body.occurrence : 0
     if (name === '') throw fail('bad-payload', 'backup is required')
     if (id === '') throw fail('bad-payload', 'id is required')
     const entry = await namedBackup(name)
-    const backupRow = findRow(entry.text, id, 'the backup')
+    const backupRow = findRow(entry.text, id, 'the backup', occurrence)
+    if (backupRow.managedBy !== null) throw fail('read-only', 'mcp row "' + id + '" is inside ' + backupRow.managedBy + "'s managed block")
     const patch = patchPathFor(env)
     if (patch === null) throw fail('no-patch', 'this profile has no cordis.patch.yml to edit')
     const doc = splitDocument(entry.text)
@@ -258,9 +267,10 @@ function restoreHandler(): OpHandler {
     const expectedName = typeof backupRow.config.serverName === 'string' ? backupRow.config.serverName : backupRow.id
     const written = await commitMcpRowSpan(env, patch, id, (current) => {
       // The row has to exist in the file as it is now, not just in the backup.
-      findRow(current, id, 'the profile patch')
-      return { next: replaceMcpRowSpan(current, id, rowLines), expectedName }
-    }, { op: 'restoreRow' })
+      const live = findRow(current, id, 'the profile patch', occurrence)
+      if (live.managedBy !== null) throw fail('read-only', 'mcp row "' + id + '" is inside ' + live.managedBy + "'s managed block")
+      return { next: replaceMcpRowSpan(current, id, rowLines, occurrence), expectedName }
+    }, { op: 'restoreRow' }, occurrence)
     return { ok: true, id, backup: name, verify: written.verify }
   }
 }

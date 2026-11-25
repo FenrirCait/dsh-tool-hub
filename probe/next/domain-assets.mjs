@@ -547,6 +547,28 @@ async function main() {
     eq('mcp: stale duplicate rolled back', await readFile(patchPath, 'utf8'), before)
   })
 
+  await step('mcp: a missing earlier duplicate cannot be verified by a later sibling', async () => {
+    const duplicate = [
+      '- insert:',
+      '  - id: dup-reverse',
+      '    name: "@deepseek-ai/dsh-mcp-client"',
+      '    config:',
+      '      serverName: first',
+      '  - id: dup-reverse',
+      '    name: "@deepseek-ai/dsh-mcp-client"',
+      '    config:',
+      '      serverName: second',
+    ].join('\n') + '\n'
+    await writeFile(patchPath, duplicate, 'utf8')
+    const host = pluginManager([
+      { entryId: 'loader-second', patchId: 'dup-reverse', name: 'second', moduleName: '@deepseek-ai/dsh-mcp-client', enabled: true },
+    ])
+    const before = await readFile(patchPath, 'utf8')
+    const res = await call(mcpDomain, 'mcp.save', { id: 'dup-reverse', occurrence: 0, config: { serverName: 'first' } }, makeEnv({ profileContext: { dir: profile }, pluginManager: host }))
+    eq('mcp: missing earlier duplicate refused', res.ok, false)
+    eq('mcp: missing earlier duplicate rolled back', await readFile(patchPath, 'utf8'), before)
+  })
+
   await step('mcp: a managed-block row is read-only for host writes', async () => {
     const managed = [
       '# >>> dsh-skill-mcp-panel:mcp:begin',

@@ -22,12 +22,37 @@ const RESTORE_OPS = {
   restore: 'backup.restoreRow',
 } as const
 
+interface BackupRowRef {
+  id: string
+  occurrence: number
+  name: string
+}
+
 interface BackupEntry {
   name: string
   kind: string
   bytes: number
   modifiedAt: number
-  ids: string[]
+  rows: BackupRowRef[]
+}
+
+/** A JSON key keeps duplicate ids apart in the picker without relying on a reserved separator. */
+function rowKeyOf(row: BackupRowRef): string {
+  return JSON.stringify([row.id, row.occurrence])
+}
+
+function rowRefOf(key: string): BackupRowRef {
+  try {
+    const parsed = JSON.parse(key) as unknown
+    if (Array.isArray(parsed) && typeof parsed[0] === 'string') {
+      const occurrence = Number(parsed[1])
+      return { id: parsed[0], occurrence: Number.isInteger(occurrence) && occurrence >= 0 ? occurrence : 0, name: '' }
+    }
+  }
+  catch {
+    /* a hand-typed id is not JSON */
+  }
+  return { id: key, occurrence: 0, name: key }
 }
 
 type DiffKind = 'same' | 'add' | 'del'
@@ -63,7 +88,13 @@ function indexOf(value: unknown): BackupEntry[] {
     kind: typeof item.kind === 'string' ? item.kind : '',
     bytes: typeof item.bytes === 'number' ? item.bytes : 0,
     modifiedAt: typeof item.modifiedAt === 'number' ? item.modifiedAt : 0,
-    ids: asStrings(item.ids),
+    rows: Array.isArray(item.rows)
+      ? item.rows.map(ref => asRecord(ref)).filter(ref => typeof ref.id === 'string').map(ref => ({
+          id: String(ref.id),
+          occurrence: typeof ref.occurrence === 'number' && Number.isInteger(ref.occurrence) && ref.occurrence >= 0 ? ref.occurrence : 0,
+          name: typeof ref.name === 'string' ? ref.name : String(ref.id),
+        }))
+      : asStrings(item.ids).map(id => ({ id, occurrence: 0, name: id })),
   }))
 }
 
@@ -175,7 +206,7 @@ export function BackupRestoreDialog(props: BackupRestoreProps): React.ReactEleme
       const first = next[0]
       setEntries(next)
       setBackup(first === undefined ? '' : first.name)
-      setRow(first === undefined ? '' : first.ids[0] ?? '')
+      setRow(first === undefined || first.rows[0] === undefined ? '' : rowKeyOf(first.rows[0]))
     })
   }, [])
 
@@ -184,7 +215,7 @@ export function BackupRestoreDialog(props: BackupRestoreProps): React.ReactEleme
   }, [open, load])
 
   const entry = entries.find(item => item.name === backup) ?? null
-  const ids = entry === null ? [] : entry.ids
+  const rows = entry === null ? [] : entry.rows
   const canRestore = diff !== null && confirmed && backup !== '' && row !== ''
   const restoreBusy = RESTORE_OPS.restore + ':' + row
   /** A pair cannot be swapped mid-write: the payload already sent names the old backup and row. */
@@ -201,7 +232,7 @@ export function BackupRestoreDialog(props: BackupRestoreProps): React.ReactEleme
   const pickBackup = (name: string): void => {
     const next = entries.find(item => item.name === name) ?? null
     setBackup(name)
-    setRow(next === null ? '' : next.ids[0] ?? '')
+    setRow(next === null || next.rows[0] === undefined ? '' : rowKeyOf(next.rows[0]))
     resetDiff()
   }
 
@@ -230,7 +261,8 @@ export function BackupRestoreDialog(props: BackupRestoreProps): React.ReactEleme
   /** The only write in this dialog: it cannot run without a diff on screen and a ticked box. */
   const restore = (): void => {
     if (!canRestore || writing) return
-    void run(RESTORE_OPS.restore, { backup, id: row }).then(async ok => {
+    const target = rowRefOf(row)
+    void run(RESTORE_OPS.restore, { backup, id: target.id, occurrence: target.occurrence }).then(async ok => {
       if (!ok) return
       await reload()
       setConfirmed(false)
@@ -257,7 +289,7 @@ export function BackupRestoreDialog(props: BackupRestoreProps): React.ReactEleme
         label={copy(lang, '行 id', 'Row id')}
         hint={copy(lang, '这份备份里记录的 MCP 行。', 'An MCP row this backup holds.')}
       >
-        {ids.length === 0 ? (
+        {rows.length === 0 ? (
           <input
             id="th-restore-row"
             className="th-input"
@@ -275,7 +307,7 @@ export function BackupRestoreDialog(props: BackupRestoreProps): React.ReactEleme
           <Select
             id="th-restore-row"
             value={row}
-            options={ids.map(id => ({ value: id, label: id }))}
+            options={rows.map(ref => ({ value: rowKeyOf(ref), label: ref.name + (ref.occurrence === 0 ? '' : ' (' + String(ref.occurrence + 1) + ')') }))}
             label={copy(lang, '行 id', 'Row id')}
             disabled={writing}
             onChange={pickRow}

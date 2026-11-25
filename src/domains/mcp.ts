@@ -796,12 +796,24 @@ async function verifyWritten(
   }
   const hasHost = typeof manager?.listPlugins === 'function'
   if (hasHost) {
+    let patchCount: number | null = null
+    try {
+      patchCount = parseMcpRows(await readPatchText(patch)).filter(row => row.id === id).length
+    }
+    catch {
+      patchCount = null
+    }
     for (let attempt = 0; attempt < 3; attempt += 1) {
       await new Promise(done => setTimeout(done, attempt === 0 ? RAW_VERIFY_DELAY_MS : VERIFY_RETRY_MS))
       try {
         const rows = await (manager?.listPlugins as () => Promise<unknown>).call(manager)
         if (!Array.isArray(rows)) continue
         const candidates = rows.filter(row => isRecord(row) && row.patchId === id)
+        // If the host list omits a duplicate, its positional index cannot be trusted. Refuse
+        // rather than let a sibling at the compressed index certify the write.
+        if (patchCount === null || candidates.length !== patchCount) {
+          return { mode: 'host', ok: false, detail: 'the host lists ' + String(candidates.length) + ' of ' + String(patchCount ?? '?') + ' duplicate rows; cannot verify the occurrence' }
+        }
         // Trust the requested occurrence first. A stale target must fail verification even when
         // some other duplicate happens to carry the same server name.
         const live = candidates[occurrence]
@@ -909,11 +921,12 @@ export async function commitMcpRowSpan(
   id: string,
   build: (current: string) => { next: string; expectedName: string },
   note: Record<string, unknown> = {},
+  occurrence = 0,
 ): Promise<{ backup: string; verify: { mode: 'host' | 'parse'; ok: boolean; detail: string }; stateSaved: boolean; warn: string | null }> {
   return await withPatchLock(patch, async () => {
     const current = await readPatchText(patch)
     const built = build(current)
-    const written = await commitPatch(env, patch, id, built.next, current, built.expectedName)
+    const written = await commitPatch(env, patch, id, built.next, current, built.expectedName, occurrence)
     const noted = await noteWrite(env, { id, backup: written.backup, patch, ...note })
     return { backup: written.backup, verify: written.verify, stateSaved: noted.saved, warn: noted.warn }
   })
@@ -930,6 +943,8 @@ interface OauthPending {
   at: number
   id: string
   occurrence: number
+  expectedName: string
+  rowText: string
   verifier: string
   meta: Record<string, unknown>
   clientId: string
@@ -1243,6 +1258,8 @@ export function createMcpDomain(): DomainRegistration {
           at: Date.now(),
           id,
           occurrence: row.occurrence,
+          expectedName: typeof row.config.serverName === 'string' ? row.config.serverName : id,
+          rowText: rowText(text, row),
           verifier: pkce.verifier,
           meta,
           clientId,
@@ -1286,6 +1303,10 @@ export function createMcpDomain(): DomainRegistration {
           const row = findMcpRow(parseMcpRows(text), pending.id, pending.occurrence)
           if (row === undefined) fail('unknown-mcp', 'no MCP server "' + pending.id + '" in the profile patch')
           if (row.managedBy !== null) fail('read-only', 'mcp row "' + pending.id + '" is inside ' + row.managedBy + "'s managed block")
+          const currentName = typeof row.config.serverName === 'string' ? row.config.serverName : row.id
+          if (currentName !== pending.expectedName || rowText(text, row) !== pending.rowText) {
+            fail('oauth-target-changed', 'the MCP row changed while OAuth was in flight; refusing to write the token')
+          }
           const headers = isRecord(row.config.headers) ? row.config.headers : {}
           const config: Record<string, unknown> = { ...row.config, headers: { ...headers, Authorization: 'Bearer ' + accessToken } }
           const next = replaceMcpConfig(text, pending.id, config, pending.occurrence)

@@ -125,7 +125,7 @@ check('index-read', () => {
   assert(has(source, 'void runOp(RESTORE_OPS.index, {})'), 'backup.mcpIndex is a read: it must go through runOp with an empty payload')
   assert(has(source, 'function indexOf(value: unknown): BackupEntry[]'), 'the index answer needs one normaliser')
   assert(has(source, "const rows = asRecord(value).backups"), 'the index reads backups[] off the answer')
-  assert(has(source, 'ids: asStrings(item.ids)'), 'each backup entry keeps its row ids')
+  assert(has(source, 'rows: Array.isArray(item.rows)'), 'each backup entry keeps occurrence-aware row refs')
   return 'runOp(backup.mcpIndex, {})'
 })
 
@@ -140,7 +140,7 @@ check('diff-read', () => {
 check('restore-write', () => {
   const handlerAt = source.indexOf('const restore = (): void => {')
   assert(handlerAt !== -1, 'the dialog must own a restore() handler')
-  const callAt = source.indexOf('void run(RESTORE_OPS.restore, { backup, id: row })')
+  const callAt = source.indexOf('void run(RESTORE_OPS.restore, { backup, id: target.id, occurrence: target.occurrence })')
   assert(callAt !== -1, 'the view never sends backup.restoreRow')
   assert(count(source, 'run(RESTORE_OPS.restore') === 1, 'backup.restoreRow must be sent from exactly one place')
   assert(callAt > handlerAt, 'the write must be sent from restore(), never from a render path')
