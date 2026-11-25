@@ -39,6 +39,17 @@ export interface PluginRow {
   readOnlyReason: string | null
   manageable: boolean
   mcp: boolean
+  /** Present for MCP rows: patch config + occurrence + managed-block owner, joined by snapshot. */
+  mcpPatchId?: string | null
+  mcpOccurrence?: number
+  mcpEditable?: boolean
+  mcpManagedBy?: string | null
+  mcpReadOnlyReason?: string | null
+  config?: Record<string, unknown> | null
+  secretKeys?: { env: string[]; headers: string[] }
+  transport?: string | null
+  command?: string | null
+  url?: string | null
   self: boolean
   official: boolean
   /** A UI plugin that ships inside the client bundle: no profile row, so the loader cannot flip it. */

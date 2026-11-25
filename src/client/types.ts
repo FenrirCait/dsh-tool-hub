@@ -44,7 +44,10 @@ export interface PluginRow {
   builtinUi?: boolean
   mcp?: boolean
   mcpPatchId?: string | null
+  mcpOccurrence?: number
   mcpEditable?: boolean
+  mcpManagedBy?: string | null
+  mcpReadOnlyReason?: string | null
   transport?: string | null
   command?: string | null
   url?: string | null

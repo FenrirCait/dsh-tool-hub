@@ -20,6 +20,7 @@ import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { withFileLock, writeFileAtomic } from '../core/atomic.js'
+import { scanPatchBlocks } from '../core/patch-blocks.js'
 import { stateDir } from '../core/io.js'
 import type { DomainRegistration, HostEnv, OpHandler } from '../shared/contract.js'
 import type { OpDefinition } from '../shared/types.js'
@@ -54,6 +55,10 @@ export interface McpRow {
   configStart: number
   configEnd: number
   indent: number
+  /** 0-based position among rows that share this id, in file order. */
+  occurrence: number
+  /** The other panel that owns this row's managed block, or null. */
+  managedBy: string | null
 }
 
 /** What the loader knows about one MCP entry; the join half of mergeMcpRows. */
@@ -70,6 +75,9 @@ export interface McpServerRow {
   id: string
   patchId: string | null
   entryId: string | null
+  occurrence: number
+  managedBy: string | null
+  readOnlyReason: string | null
   name: string
   transport: string
   command: string
@@ -304,6 +312,8 @@ export function parseMcpRows(text: string): McpRow[] {
       configStart: -1,
       configEnd: -1,
       indent,
+      occurrence: 0,
+      managedBy: null,
     }
     let configLine = -1
     for (let cursor = index + 1; cursor < end; cursor += 1) {
@@ -346,7 +356,34 @@ export function parseMcpRows(text: string): McpRow[] {
     }
     rows.push(row)
   }
+  const seen = new Map<string, number>()
+  for (const row of rows) {
+    const occurrence = seen.get(row.id) ?? 0
+    row.occurrence = occurrence
+    seen.set(row.id, occurrence + 1)
+  }
+  try {
+    const blocks = scanPatchBlocks(text).blocks
+    for (const row of rows) {
+      const block = blocks.find(candidate => row.startLine > candidate.beginLine && row.endLine <= candidate.endLine)
+      row.managedBy = block?.name ?? null
+    }
+  }
+  catch {
+    // A document the block scanner cannot read still yields the rows; they just lose the owner hint.
+  }
   return rows
+}
+
+/** A 0-based occurrence among duplicate ids; anything invalid means the first row. */
+export function occurrenceOf(value: unknown): number {
+  const n = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : 0
+  return Number.isInteger(n) && n >= 0 ? n : 0
+}
+
+/** Select one row by id plus its file-order occurrence, not just the first id match. */
+export function findMcpRow(rows: readonly McpRow[], id: string, occurrence = 0): McpRow | undefined {
+  return rows.filter(row => row.id === id)[occurrence]
 }
 
 function scalarText(value: unknown): string {
@@ -413,8 +450,8 @@ export function configLines(config: Record<string, unknown>, indent: number): st
 }
 
 /** Replace one row's config block, keeping every other byte of the file. */
-export function replaceMcpConfig(text: string, id: string, config: Record<string, unknown>): string {
-  const row = parseMcpRows(text).find(candidate => candidate.id === id)
+export function replaceMcpConfig(text: string, id: string, config: Record<string, unknown>, occurrence = 0): string {
+  const row = findMcpRow(parseMcpRows(text), id, occurrence)
   if (row === undefined) fail('unknown-mcp', 'mcp row "' + id + '" is not in this profile patch')
   if (row.configStart < 0) fail('read-only', 'mcp row "' + id + '" has no config block to edit')
   const doc = splitDocument(text)
@@ -451,8 +488,8 @@ export function appendMcpRow(text: string, id: string, config: Record<string, un
 }
 
 /** Remove one MCP entry by id, keeping every other byte of the file. */
-export function removeMcpRow(text: string, id: string): string {
-  const row = parseMcpRows(text).find(candidate => candidate.id === id)
+export function removeMcpRow(text: string, id: string, occurrence = 0): string {
+  const row = findMcpRow(parseMcpRows(text), id, occurrence)
   if (row === undefined) fail('unknown-mcp', 'mcp row "' + id + '" is not in this profile patch')
   const doc = splitDocument(text)
   let lines = [...doc.lines.slice(0, row.startLine), ...doc.lines.slice(row.endLine)]
@@ -515,14 +552,19 @@ export async function backupPatch(patch: string, text: string): Promise<string> 
 
 /** Join patch rows with the loader's view, so a row keeps its entry id (needed for the switch). */
 export function mergeMcpRows(patchRows: McpRow[], loaderRows: LoaderRow[]): McpServerRow[] {
-  const byPatchId = new Map<string, LoaderRow>()
+  // Duplicate patch ids are legal in a hand-written file. Keep the loader rows in order and
+  // consume one per patch row; a Map of one value would attach both rows to the same loader entry.
+  const byPatchId = new Map<string, LoaderRow[]>()
   for (const row of loaderRows) {
     if (row.moduleName !== MCP_MODULE) continue
-    if (typeof row.patchId === 'string') byPatchId.set(row.patchId, row)
+    if (typeof row.patchId === 'string') {
+      const list = byPatchId.get(row.patchId) ?? []
+      list.push(row)
+      byPatchId.set(row.patchId, list)
+    }
   }
   const merged: McpServerRow[] = patchRows.map((row) => {
-    const loader = byPatchId.get(row.id)
-    byPatchId.delete(row.id)
+    const loader = byPatchId.get(row.id)?.shift()
     const config = row.config
     const name = typeof config.serverName === 'string' ? config.serverName : row.id
     const transport = typeof config.transport === 'string' ? config.transport : 'stdio'
@@ -533,35 +575,43 @@ export function mergeMcpRows(patchRows: McpRow[], loaderRows: LoaderRow[]): McpS
       id: loader?.id ?? 'patch:' + row.id,
       patchId: row.id,
       entryId: loader?.id ?? null,
+      occurrence: row.occurrence,
+      managedBy: row.managedBy,
+      readOnlyReason: row.managedBy !== null ? 'managed by ' + row.managedBy : row.configStart < 0 ? 'no config block' : null,
       name,
       transport,
       command,
       url,
       enabled: loader?.enabled === true,
       manageable: loader?.manageable === true,
-      // A row without a config block has nothing this panel may write.
-      editable: row.configStart >= 0,
+      // A row without a config block, or inside another panel's managed block, is not ours to write.
+      editable: row.configStart >= 0 && row.managedBy === null,
       config: masked.config,
       secretKeys: masked.secretKeys,
       disabled: row.disabled,
     }
   })
-  for (const leftover of byPatchId.values()) {
-    merged.push({
-      id: leftover.id,
-      patchId: null,
-      entryId: leftover.id,
-      name: leftover.id,
-      transport: 'stdio',
-      command: '',
-      url: '',
-      enabled: leftover.enabled === true,
-      manageable: leftover.manageable,
-      editable: false,
-      config: null,
-      secretKeys: { env: [], headers: [] },
-      disabled: false,
-    })
+  for (const leftovers of byPatchId.values()) {
+    for (const leftover of leftovers) {
+      merged.push({
+        id: leftover.id,
+        patchId: null,
+        entryId: leftover.id,
+        occurrence: 0,
+        managedBy: null,
+        readOnlyReason: 'no patch row',
+        name: leftover.id,
+        transport: 'stdio',
+        command: '',
+        url: '',
+        enabled: leftover.enabled === true,
+        manageable: leftover.manageable,
+        editable: false,
+        config: null,
+        secretKeys: { env: [], headers: [] },
+        disabled: false,
+      })
+    }
   }
   return merged
 }
@@ -732,6 +782,7 @@ async function verifyWritten(
   patch: string,
   id: string,
   expectedName: string,
+  occurrence = 0,
 ): Promise<{ mode: 'host' | 'parse'; ok: boolean; detail: string }> {
   let manager: { listPlugins?: unknown } | undefined
   try {
@@ -760,7 +811,7 @@ async function verifyWritten(
     return { mode: 'host', ok: false, detail: 'the host did not list the row after three attempts' }
   }
   const rows = parseMcpRows(await readPatchText(patch))
-  const row = rows.find(candidate => candidate.id === id)
+  const row = findMcpRow(rows, id, occurrence)
   if (row === undefined) return { mode: 'parse', ok: false, detail: 'the written row is not in the patch' }
   const name = typeof row.config.serverName === 'string' ? row.config.serverName : row.id
   if (expectedName !== '' && name !== expectedName) {
@@ -793,10 +844,11 @@ async function commitPatch(
   next: string,
   previous: string,
   expectedName: string,
+  occurrence = 0,
 ): Promise<{ backup: string; verify: { mode: 'host' | 'parse'; ok: boolean; detail: string } }> {
   const backup = await backupPatch(patch, previous)
   await writePatchText(patch, next)
-  const verify = await verifyWritten(env, patch, id, expectedName)
+  const verify = await verifyWritten(env, patch, id, expectedName, occurrence)
   if (!verify.ok) {
     const current = await readPatchText(patch)
     if (current !== next) {
@@ -821,8 +873,8 @@ async function commitPatch(
  * is refused instead of being re-indented: a caller that wants a different indent is editing, not
  * restoring.
  */
-export function replaceMcpRowSpan(text: string, id: string, rowLines: string[]): string {
-  const row = parseMcpRows(text).find(candidate => candidate.id === id)
+export function replaceMcpRowSpan(text: string, id: string, rowLines: string[], occurrence = 0): string {
+  const row = findMcpRow(parseMcpRows(text), id, occurrence)
   if (row === undefined) fail('unknown-mcp', 'mcp row "' + id + '" is not in this profile patch')
   const first = rowLines[0]
   if (first === undefined) fail('bad-payload', 'a restored row needs at least one line')
@@ -870,6 +922,7 @@ const OAUTH_PENDING_LIMIT = 20
 interface OauthPending {
   at: number
   id: string
+  occurrence: number
   verifier: string
   meta: Record<string, unknown>
   clientId: string
@@ -1037,8 +1090,10 @@ export function createMcpDomain(): DomainRegistration {
         if (!isRecord(asked)) fail('bad-config', 'config must be an object')
         return await withPatchLock(patch, async () => {
           const text = await readPatchText(patch)
-          const row = parseMcpRows(text).find(item => item.id === id)
+          const occurrence = occurrenceOf(payload.occurrence)
+          const row = findMcpRow(parseMcpRows(text), id, occurrence)
           if (row === undefined) fail('unknown-mcp', 'no MCP server "' + id + '" in the profile patch')
+          if (row.managedBy !== null) fail('read-only', 'mcp row "' + id + '" is inside ' + row.managedBy + "'s managed block")
           if (row.configStart < 0) fail('read-only', 'mcp row "' + id + '" has no config block to edit')
           // The existing config is what makes an empty credential mean "keep it" instead of "erase it".
           const cleaned = cleanMcpConfig(asked, row.config)
@@ -1047,9 +1102,9 @@ export function createMcpDomain(): DomainRegistration {
             if (value === null) delete config[key]
             else config[key] = value
           }
-          const next = replaceMcpConfig(text, id, config)
+          const next = replaceMcpConfig(text, id, config, occurrence)
           const expectedName = typeof config.serverName === 'string' ? config.serverName : id
-          const written = await commitPatch(env, patch, id, next, text, expectedName)
+          const written = await commitPatch(env, patch, id, next, text, expectedName, occurrence)
           const note = await noteWrite(env, { op: 'save', id, backup: written.backup, patch })
           return { ok: true, id, patch, route: 'hmr', config, backup: written.backup, verify: written.verify, stateSaved: note.saved, warn: note.warn }
         })
@@ -1061,9 +1116,11 @@ export function createMcpDomain(): DomainRegistration {
         if (!MCP_ID_PATTERN.test(id)) fail('bad-id', 'mcp row id cannot be used')
         return await withPatchLock(patch, async () => {
           const text = await readPatchText(patch)
-          const row = parseMcpRows(text).find(item => item.id === id)
+          const occurrence = occurrenceOf(payload.occurrence)
+          const row = findMcpRow(parseMcpRows(text), id, occurrence)
           if (row === undefined) fail('unknown-mcp', 'no MCP server "' + id + '" in the profile patch')
-          const next = removeMcpRow(text, id)
+          if (row.managedBy !== null) fail('read-only', 'mcp row "' + id + '" is inside ' + row.managedBy + "'s managed block")
+          const next = removeMcpRow(text, id, occurrence)
           const backup = await backupPatch(patch, text)
           await writePatchText(patch, next)
           const note = await noteWrite(env, { op: 'delete', id, backup, patch })
@@ -1076,14 +1133,15 @@ export function createMcpDomain(): DomainRegistration {
         const id = field(payload, 'id')
         if (!MCP_ID_PATTERN.test(id)) fail('bad-id', 'mcp row id cannot be used')
         const text = await readPatchText(patch)
-        const row = parseMcpRows(text).find(item => item.id === id)
+        const row = findMcpRow(parseMcpRows(text), id, occurrenceOf(payload.occurrence))
         if (row === undefined) fail('unknown-mcp', 'no MCP server "' + id + '" in the profile patch')
-        return { ok: true, id, text: rowText(text, row) }
+        return { ok: true, id, occurrence: row.occurrence, text: rowText(text, row) }
       }),
       'mcp.rawSave': guarded(async (payload, env) => {
         const patch = patchPathFor(env)
         if (patch === null) fail('no-patch', 'this profile has no cordis.patch.yml to edit')
         const askedId = field(payload, 'id')
+        const askedOccurrence = occurrenceOf(payload.occurrence)
         if (askedId !== '' && !MCP_ID_PATTERN.test(askedId)) fail('bad-id', 'mcp row id cannot be used')
         const snippet = typeof payload.text === 'string' ? payload.text : ''
         if (snippet.trim() === '') fail('raw-invalid', 'the edited text is empty')
@@ -1104,7 +1162,7 @@ export function createMcpDomain(): DomainRegistration {
           const rows = parseMcpRows(text)
           let existing: McpRow | null = null
           if (askedId !== '') {
-            existing = rows.find(item => item.id === askedId) ?? null
+            existing = findMcpRow(rows, askedId, askedOccurrence) ?? null
           }
           else {
             // No id: the server name has to pick exactly one row, otherwise "which row" is a guess.
@@ -1113,6 +1171,7 @@ export function createMcpDomain(): DomainRegistration {
             if (matches.length === 1) existing = matches[0] ?? null
           }
           if (existing === null) fail('unknown-mcp', 'no MCP server matches that id')
+          if (existing.managedBy !== null) fail('read-only', 'mcp row "' + existing.id + '" is inside ' + existing.managedBy + "'s managed block")
           if (nextRow.id !== existing.id) fail('raw-id', 'the row id must stay "' + existing.id + '"')
           if (nextRow.indent !== existing.indent) fail('raw-indent', 'the row must stay indented by ' + String(existing.indent) + ' spaces')
           const doc = splitDocument(text)
@@ -1122,7 +1181,7 @@ export function createMcpDomain(): DomainRegistration {
 
           const expectedName = typeof nextRow.config.serverName === 'string' ? nextRow.config.serverName : nextRow.id
           const merged = finishDocument(doc, [...doc.lines.slice(0, existing.startLine), ...snippetLines, ...doc.lines.slice(existing.endLine)])
-          const written = await commitPatch(env, patch, existing.id, merged, text, expectedName)
+          const written = await commitPatch(env, patch, existing.id, merged, text, expectedName, existing.occurrence)
           const note = await noteWrite(env, { op: 'rawSave', id: existing.id, backup: written.backup, patch })
           return { ok: true, id: existing.id, saved: true, backup: written.backup, verify: written.verify, stateSaved: note.saved, warn: note.warn }
         })
@@ -1133,8 +1192,9 @@ export function createMcpDomain(): DomainRegistration {
         const id = field(payload, 'id')
         if (!MCP_ID_PATTERN.test(id)) fail('bad-id', 'mcp row id cannot be used')
         const text = await readPatchText(patch)
-        const row = parseMcpRows(text).find(item => item.id === id)
+        const row = findMcpRow(parseMcpRows(text), id, occurrenceOf(payload.occurrence))
         if (row === undefined) fail('unknown-mcp', 'no MCP server "' + id + '" in the profile patch')
+        if (row.managedBy !== null) fail('read-only', 'mcp row "' + id + '" is inside ' + row.managedBy + "'s managed block")
         const raw = typeof row.config.url === 'string' ? row.config.url.trim() : ''
         let endpoint: URL
         try {
@@ -1175,6 +1235,7 @@ export function createMcpDomain(): DomainRegistration {
         OAUTH_PENDING.set(state, {
           at: Date.now(),
           id,
+          occurrence: row.occurrence,
           verifier: pkce.verifier,
           meta,
           clientId,
@@ -1215,11 +1276,12 @@ export function createMcpDomain(): DomainRegistration {
         if (patch === null) fail('no-patch', 'this profile has no cordis.patch.yml to edit')
         return await withPatchLock(patch, async () => {
           const text = await readPatchText(patch)
-          const row = parseMcpRows(text).find(item => item.id === pending.id)
+          const row = findMcpRow(parseMcpRows(text), pending.id, pending.occurrence)
           if (row === undefined) fail('unknown-mcp', 'no MCP server "' + pending.id + '" in the profile patch')
+          if (row.managedBy !== null) fail('read-only', 'mcp row "' + pending.id + '" is inside ' + row.managedBy + "'s managed block")
           const headers = isRecord(row.config.headers) ? row.config.headers : {}
           const config: Record<string, unknown> = { ...row.config, headers: { ...headers, Authorization: 'Bearer ' + accessToken } }
-          const next = replaceMcpConfig(text, pending.id, config)
+          const next = replaceMcpConfig(text, pending.id, config, pending.occurrence)
           const expectedName = typeof config.serverName === 'string' ? config.serverName : pending.id
           const written = await commitPatch(env, patch, pending.id, next, text, expectedName)
           const note = await noteWrite(env, { op: 'oauth', id: pending.id, backup: written.backup, patch })

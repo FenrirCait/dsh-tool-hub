@@ -7,7 +7,7 @@
  */
 import * as React from 'react'
 import { OPS, runOp } from '../api.js'
-import { Badge, Button, Callout, Card, Dialog, Empty, Field, SearchBox, Select, Switch, monoStyle } from '../components.js'
+import { Badge, Button, Callout, Card, Dialog, Empty, Field, RowBoundary, SearchBox, Select, Switch, monoStyle } from '../components.js'
 import { McpOauthDialog } from './mcp-oauth.js'
 import type { PluginRow, ViewProps } from '../types.js'
 
@@ -33,108 +33,7 @@ const STACK: React.CSSProperties = { display: 'flex', flexDirection: 'column', g
 const ACTIONS: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }
 const RAW_BOX: React.CSSProperties = { ...monoStyle, width: '100%', minHeight: 200, resize: 'vertical' }
 
-/** One editable row: the patch row id plus the fields cleanMcpConfig keeps. */
-interface Draft {
-  id: string
-  name: string
-  transport: string
-  command: string
-  args: string
-  cwd: string
-  url: string
-  env: string
-  headers: string
-}
-
-interface RawState {
-  id: string
-  text: string
-  error: string
-  loading: boolean
-}
-
-/** The catalogs carry the mcp.* nouns only, so a form caption that is not one is bilingual here. */
-function copy(lang: ViewProps['lang'], zh: string, en: string): string {
-  return lang === 'zh' ? zh : en
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
-}
-
-/** The patch row id a write needs; '' when the row only exists in the loader. */
-function patchIdOf(row: PluginRow): string {
-  const direct = row.patchId ?? row.mcpPatchId ?? ''
-  return typeof direct === 'string' ? direct : ''
-}
-
-function stringOf(record: Record<string, unknown>, key: string): string {
-  const value = record[key]
-  return typeof value === 'string' ? value : ''
-}
-
-/** Masked secret maps arrive as { KEY: '' }; the key is shown so a new value can be typed in. */
-function pairsText(value: unknown, glue: string): string {
-  return Object.keys(asRecord(value)).map(key => key + glue).join('\n')
-}
-
-/** A blank value is skipped: to the host, empty means "keep the one already stored". */
-function parsePairs(source: string, separator: string): Record<string, string> {
-  const out: Record<string, string> = {}
-  for (const line of source.split('\n')) {
-    const trimmed = line.trim()
-    if (trimmed === '') continue
-    const at = trimmed.indexOf(separator)
-    if (at <= 0) continue
-    const key = trimmed.slice(0, at).trim()
-    const value = trimmed.slice(at + separator.length).trim()
-    if (key === '' || value === '') continue
-    out[key] = value
-  }
-  return out
-}
-
-function draftOf(row: PluginRow): Draft {
-  const config = asRecord(row.config)
-  const declared = stringOf(config, 'serverName')
-  const transport = stringOf(config, 'transport')
-  return {
-    id: patchIdOf(row),
-    name: declared === '' ? row.name : declared,
-    transport: transport === '' ? 'stdio' : transport,
-    command: stringOf(config, 'command'),
-    args: Array.isArray(config.args) ? config.args.filter(item => typeof item === 'string').join(' ') : '',
-    cwd: stringOf(config, 'cwd'),
-    url: stringOf(config, 'url'),
-    env: pairsText(config.env, '='),
-    headers: pairsText(config.headers, ': '),
-  }
-}
-
-function emptyDraft(): Draft {
-  return { id: '', name: '', transport: 'stdio', command: '', args: '', cwd: '', url: '', env: '', headers: '' }
-}
-
-/**
- * Only the keys the domain keeps, in its shape: a filled field is written, a field the user
- * cleared on a row that still carries it becomes null (delete), anything else is left alone.
- */
-function buildConfig(draft: Draft, current: Record<string, unknown>): Record<string, unknown> {
-  const config: Record<string, unknown> = { serverName: draft.name.trim(), transport: draft.transport }
-  for (const key of ['command', 'cwd', 'url'] as const) {
-    const value = draft[key].trim()
-    if (value !== '') config[key] = value
-    else if (stringOf(current, key) !== '') config[key] = null
-  }
-  const args = draft.args.trim() === '' ? [] : draft.args.trim().split(/\s+/)
-  if (args.length > 0) config.args = args
-  else if (Array.isArray(current.args) && current.args.length > 0) config.args = null
-  const env = parsePairs(draft.env, '=')
-  if (Object.keys(env).length > 0) config.env = env
-  const headers = parsePairs(draft.headers, ':')
-  if (Object.keys(headers).length > 0) config.headers = headers
-  return config
-}
+import { Draft, RawState, asRecord, buildConfig, copy, draftOf, emptyDraft, occurrenceOf, patchIdOf } from './mcp-helpers.js'
 
 export function McpView(props: ViewProps): React.ReactElement {
   const { snapshot, t, lang, busy, run } = props
@@ -173,8 +72,9 @@ export function McpView(props: ViewProps): React.ReactElement {
    */
   const openRaw = (row: PluginRow): void => {
     const id = patchIdOf(row)
-    setRaw({ id, text: '', error: '', loading: true })
-    void runOp(MCP_OPS.raw, { id }).then(result => {
+    const occurrence = occurrenceOf(row)
+    setRaw({ id, occurrence, text: '', error: '', loading: true })
+    void runOp(MCP_OPS.raw, { id, occurrence }).then(result => {
       if (!result.ok) {
         setRaw(current => (current === null ? current : { ...current, loading: false, error: result.message }))
         return
@@ -187,19 +87,19 @@ export function McpView(props: ViewProps): React.ReactElement {
 
   const submitDraft = (): void => {
     if (draft === null || !NAME_PATTERN.test(draft.name.trim())) return
-    const existing = servers.find(row => patchIdOf(row) === draft.id)
+    const existing = servers.find(row => patchIdOf(row) === draft.id && occurrenceOf(row) === draft.occurrence)
     const config = buildConfig(draft, existing === undefined ? {} : asRecord(existing.config))
     const done = (ok: boolean): void => {
       if (ok) setDraft(null)
     }
     // The shell keys its busy state off payload.id, so a create (no id) reads as just the op.
     if (draft.id === '') void run(MCP_OPS.create, { config }).then(done)
-    else void run(MCP_OPS.save, { id: draft.id, config }).then(done)
+    else void run(MCP_OPS.save, { id: draft.id, occurrence: draft.occurrence, config }).then(done)
   }
 
   const saveRaw = (): void => {
     if (raw === null || raw.text.trim() === '') return
-    void run(MCP_OPS.rawSave, { id: raw.id, text: raw.text }).then(ok => {
+    void run(MCP_OPS.rawSave, { id: raw.id, occurrence: raw.occurrence, text: raw.text }).then(ok => {
       if (ok) setRaw(null)
     })
   }
@@ -275,13 +175,15 @@ export function McpView(props: ViewProps): React.ReactElement {
           <div className="th-list">
             {rows.map(row => {
               const id = patchIdOf(row)
-              const editable = patchReady && id !== ''
+              const occurrence = occurrenceOf(row)
+              const editable = patchReady && id !== '' && row.mcpEditable !== false
               const secrets = (row.secretKeys?.env.length ?? 0) + (row.secretKeys?.headers.length ?? 0)
               const command = row.command ?? ''
               const detail = command !== '' ? command : row.url ?? ''
               const rawBusy = raw !== null && raw.loading && raw.id === id
               return (
-                <div className="th-row" key={row.id}>
+                <RowBoundary key={id + ':' + String(occurrence)} label={copy(lang, '这一条 MCP 行渲染失败：' + row.name, 'This MCP row failed to render: ' + row.name)} retry={t('action.retry')}>
+                <div className="th-row">
                   <div className="th-row-body">
                     <span className="th-row-name">{row.name}</span>
                     <span className="th-row-meta">
@@ -291,6 +193,7 @@ export function McpView(props: ViewProps): React.ReactElement {
                       )}
                       {secrets > 0 ? <Badge tone="warn">{t('mcp.secrets', { n: secrets })}</Badge> : null}
                       {id === '' ? <Badge tone="warn">{t('mcp.orphan')}</Badge> : null}
+                      {row.mcpManagedBy === undefined || row.mcpManagedBy === null ? null : <Badge tone="warn">{copy(lang, '受管块：' + row.mcpManagedBy, 'managed: ' + row.mcpManagedBy)}</Badge>}
                       {detail === '' ? null : <span className="th-mono">{detail}</span>}
                       {id === '' ? null : <span className="th-mono">{id}</span>}
                     </span>
@@ -305,10 +208,10 @@ export function McpView(props: ViewProps): React.ReactElement {
                         void run(OPS.toggle, { kind: 'plugin', id: row.id, enabled: next })
                       }}
                     />
-                    <Button variant="ghost" disabled={!editable} onClick={() => { setDraft(draftOf(row)) }}>
+                    <Button variant="ghost" disabled={!editable} title={row.mcpReadOnlyReason ?? undefined} onClick={() => { setDraft(draftOf(row)) }}>
                       {t('action.edit')}
                     </Button>
-                    <Button variant="ghost" disabled={!editable} busy={rawBusy} onClick={() => { openRaw(row) }}>
+                    <Button variant="ghost" disabled={!editable} title={row.mcpReadOnlyReason ?? undefined} busy={rawBusy} onClick={() => { openRaw(row) }}>
                       {copy(lang, '原文', 'Raw')}
                     </Button>
                     {editable && (row.transport === 'streamable-http' || (row.url ?? '') !== '') ? (
@@ -316,11 +219,12 @@ export function McpView(props: ViewProps): React.ReactElement {
                         {t('mcp.oauth')}
                       </Button>
                     ) : null}
-                    <Button variant="danger" disabled={!editable} onClick={() => { setPending(row) }}>
+                    <Button variant="danger" disabled={!editable} title={row.mcpReadOnlyReason ?? undefined} onClick={() => { setPending(row) }}>
                       {t('action.delete')}
                     </Button>
                   </div>
                 </div>
+                </RowBoundary>
               )
             })}
           </div>
@@ -422,8 +326,9 @@ export function McpView(props: ViewProps): React.ReactElement {
               onClick={() => {
                 if (pending === null) return
                 const id = patchIdOf(pending)
+                const occurrence = occurrenceOf(pending)
                 setPending(null)
-                void run(MCP_OPS.remove, { id })
+                void run(MCP_OPS.remove, { id, occurrence })
               }}
             >
               {t('action.delete')}
@@ -438,6 +343,7 @@ export function McpView(props: ViewProps): React.ReactElement {
         open={oauthRow !== null}
         row={oauthRow}
         id={oauthRow === null ? '' : patchIdOf(oauthRow)}
+        occurrence={oauthRow === null ? 0 : occurrenceOf(oauthRow)}
         t={t}
         busy={busy}
         run={run}

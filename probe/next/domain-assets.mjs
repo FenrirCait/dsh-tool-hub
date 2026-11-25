@@ -457,6 +457,45 @@ async function main() {
     eq('mcp: missing profile code', noPatch.code, 'no-patch')
   })
 
+  await step('mcp: duplicate ids write the requested occurrence only', async () => {
+    const duplicate = [
+      '- insert:',
+      '  - id: dup-mcp',
+      '    name: "@deepseek-ai/dsh-mcp-client"',
+      '    config:',
+      '      serverName: first',
+      '  - id: dup-mcp',
+      '    name: "@deepseek-ai/dsh-mcp-client"',
+      '    config:',
+      '      serverName: second',
+    ].join('\n') + '\n'
+    await writeFile(patchPath, duplicate, 'utf8')
+    const res = await call(mcpDomain, 'mcp.save', { id: 'dup-mcp', occurrence: 1, config: { serverName: 'second-changed' } }, mcpEnv())
+    eq('mcp: duplicate save ok', res.ok, true)
+    const rows = mcp.parseMcpRows(await readFile(patchPath, 'utf8'))
+    eq('mcp: duplicate first untouched', rows[0].config.serverName, 'first')
+    eq('mcp: duplicate second changed', rows[1].config.serverName, 'second-changed')
+  })
+
+  await step('mcp: a managed-block row is read-only for host writes', async () => {
+    const managed = [
+      '# >>> dsh-skill-mcp-panel:mcp:begin',
+      '- insert:',
+      '  - id: panel-mcp-owned',
+      '    name: "@deepseek-ai/dsh-mcp-client"',
+      '    config:',
+      '      serverName: owned',
+      '# <<< dsh-skill-mcp-panel:mcp:end',
+    ].join('\n') + '\n'
+    await writeFile(patchPath, managed, 'utf8')
+    const res = await call(mcpDomain, 'mcp.save', { id: 'panel-mcp-owned', config: { serverName: 'changed' } }, mcpEnv())
+    eq('mcp: managed save refused', res.ok, false)
+    eq('mcp: managed save code', res.code, 'read-only')
+    const listed = await call(mcpDomain, 'mcp.list', {}, mcpEnv())
+    eq('mcp: managed owner visible', listed.rows[0].managedBy, 'dsh-skill-mcp-panel:mcp')
+    eq('mcp: managed not editable', listed.rows[0].editable, false)
+  })
+
   await step('mcp: empty state is an empty list', async () => {
     const missing = await call(mcpDomain, 'mcp.list', {}, makeEnv({ profileContext: { dir: join(work, 'no-profile') } }))
     eq('mcp: empty list ok', missing.ok, true)
