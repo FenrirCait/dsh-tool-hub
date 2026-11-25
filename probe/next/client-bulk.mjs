@@ -107,7 +107,7 @@ check('existing-single-switch-kept', () => {
   assert(/<Switch/.test(body), 'the per-row switch must stay')
   assert(/checked=\{row\.enabled\}/.test(body), 'the row switch must read the row state')
   assert(/label=\{t\('a11y\.switch', \{ name: row\.name \}\)\}/.test(body), 'the row switch keeps its accessible name')
-  assert(/run\(OPS\.toggle, \{ kind: 'plugin', id: row\.id, enabled: next \}\)/.test(body),
+  assert(/run\(OPS\.toggle, \{ kind: 'plugin', id: row\.id, enabled: next/.test(body),
     'a single row must still flip through toggle with { kind: plugin, id, enabled }')
   return 'Switch -> toggle, unchanged'
 })
@@ -124,9 +124,9 @@ check('existing-search-and-states-kept', () => {
 })
 
 check('bulk-op-and-payload', () => {
-  assert(/runDetailed\(OPS\.bulk, \{ items: bulkItems\(ids\), enabled \}\)/.test(body),
-    'the batch must go through runDetailed(OPS.bulk, { items: bulkItems(ids), enabled }) to keep the host counts')
-  assert(/bulkItems\(ids\)/.test(commitBlock), 'the payload is built by bulkItems, not inline literals')
+  assert(/runDetailed\(OPS\.bulk, \{ items: bulkItems\(ids, snapshot\.plugins\), enabled \}\)/.test(body),
+    'the batch must go through runDetailed(OPS.bulk, { items: bulkItems(ids, snapshot.plugins), enabled }) to keep the host counts')
+  assert(/bulkItems\(ids, snapshot\.plugins\)/.test(commitBlock), 'the payload is built by bulkItems with bundle names, not inline literals')
   assert(/if \(ids\.length === 0 \|\| ids\.length > cap\) return/.test(commitBlock),
     'an empty or over-cap batch must not be sent')
   assert(!/\{\s*ids\s*:/.test(body), 'the host takes items, not a bare ids array')
@@ -185,8 +185,8 @@ check('selection-clears-on-success', () => {
 check('detailed-write-path', () => {
   const detailed = [...body.matchAll(/\brunDetailed\(OPS\.([A-Za-z0-9_]+)/g)].map(match => match[1])
   assert(detailed.length === 1 && detailed[0] === 'bulk', 'only the batch needs the host answer, found ' + detailed.join(', '))
-  assert(/runDetailed\(OPS\.bulk, \{ items: bulkItems\(ids\), enabled \}\)/.test(commitBlock),
-    'the batch payload is unchanged; only the call keeps its answer')
+  assert(/runDetailed\(OPS\.bulk, \{ items: bulkItems\(ids, snapshot\.plugins\), enabled \}\)/.test(commitBlock),
+    'the batch payload keeps bundle names; only the call keeps its answer')
   assert(!/\brun\(OPS\.bulk/.test(body), 'the batch must not fall back to run(), which drops the counts')
   return 'bulk -> runDetailed; toggle and third-party stay on run'
 })
@@ -344,6 +344,7 @@ check('runtime-bulk-items', () => {
     'bulkItems must produce { kind: plugin, id } in the picked order, got ' + JSON.stringify(items))
   assert(items !== input, 'bulkItems must build new objects, not pass ids through')
   assert(JSON.stringify(mod.bulkItems([])) === '[]', 'an empty selection must produce an empty items array')
+  assert(JSON.stringify(mod.bulkItems(['bundle:dsh-univer-office'], [{ id: 'bundle:dsh-univer-office', bundleName: 'dsh-univer-office' }])) === JSON.stringify([{ kind: 'plugin', id: 'bundle:dsh-univer-office', bundleName: 'dsh-univer-office' }]), 'a bundle row must carry its bundleName into the bulk payload')
   const later = mod.bulkItems(['alpha'])
   assert(later[0].id === 'alpha' && later[0].kind === 'plugin', 'the member shape is kind + id')
   return '2 members, exact host shape'

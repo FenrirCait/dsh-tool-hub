@@ -478,6 +478,7 @@ export function normalizeSnapshot(raw: unknown): HubSnapshot {
           ...(typeof item.version === 'string' ? { version: item.version } : {}),
           enabled: asBoolean(item.enabled),
           official: asBoolean(item.official),
+          installed: asBoolean(item.installed),
           rows: asStringList(item.rows),
         }))
       : [],

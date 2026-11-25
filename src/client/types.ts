@@ -54,6 +54,8 @@ export interface PluginRow {
   config?: Record<string, unknown> | null
   secretKeys?: SecretKeys
   root?: string | null
+  /** Set on a synthetic row for an installed but disabled bundle. */
+  bundleName?: string
 }
 
 /** One skill folder the host found under a configured root. */

@@ -170,8 +170,8 @@ check('parent-switch-acts-on-its-own-children', () => {
 check('one-bulk-payload', () => {
   assert(/\(enabled: boolean, ids: string\[\] = picked\)/.test(commitBlock),
     'commit must take an explicit batch and default to the selection')
-  assert(/runDetailed\(OPS\.bulk, \{ items: bulkItems\(ids\), enabled \}\)/.test(commitBlock),
-    'the payload stays { items: bulkItems(ids), enabled }')
+  assert(/runDetailed\(OPS\.bulk, \{ items: bulkItems\(ids, snapshot\.plugins\), enabled \}\)/.test(commitBlock),
+    'the payload carries bundle names via bulkItems(ids, snapshot.plugins)')
   assert(/if \(ids\.length === 0 \|\| ids\.length > cap\) return/.test(commitBlock),
     'an empty or over-cap batch must not be sent')
   assert(!/\{\s*ids\s*:/.test(body), 'the host takes items, not a bare ids array')
@@ -185,7 +185,7 @@ check('row-switch-kept', () => {
   assert(/<Switch/.test(renderRowBlock), 'the per-row switch must stay')
   assert(/checked=\{row\.enabled\}/.test(renderRowBlock), 'the row switch must read the row state')
   assert(/label=\{t\('a11y\.switch', \{ name: row\.name \}\)\}/.test(renderRowBlock), 'the row switch keeps its accessible name')
-  assert(/run\(OPS\.toggle, \{ kind: 'plugin', id: row\.id, enabled: next \}\)/.test(renderRowBlock),
+  assert(/run\(OPS\.toggle, \{ kind: 'plugin', id: row\.id, enabled: next/.test(renderRowBlock),
     'a single row still flips through toggle with { kind: plugin, id, enabled }')
   assert(/aria-label=\{zh \? `选择 \$\{row\.name\}`/.test(renderRowBlock), 'each row checkbox keeps its accessible name')
   return 'Switch -> toggle, checkbox -> selection, unchanged'
