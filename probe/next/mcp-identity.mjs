@@ -83,6 +83,18 @@ check('managed block marks its row and leaves the outside row ours', () => {
   ])
 })
 
+check('a top-level row inside a closed block is still owned', () => {
+  const top = [
+    '# >>> dsh-skill-mcp-panel:mcp:begin',
+    '- id: panel-mcp-top',
+    '  name: "@deepseek-ai/dsh-mcp-client"',
+    '  config:',
+    '    serverName: top',
+    '# <<< dsh-skill-mcp-panel:mcp:end',
+  ].join('\n') + '\n'
+  equal(mcp.parseMcpRows(top).map(row => [row.id, row.managedBy]), [['panel-mcp-top', 'dsh-skill-mcp-panel:mcp']])
+})
+
 check('an unclosed managed block also marks rows read-only', () => {
   const unclosed = [
     '# >>> dsh-skill-mcp-panel:mcp:begin',

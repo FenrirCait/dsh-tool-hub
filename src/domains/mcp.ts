@@ -365,7 +365,7 @@ export function parseMcpRows(text: string): McpRow[] {
   try {
     const layout = scanPatchBlocks(text)
     for (const row of rows) {
-      const block = layout.blocks.find(candidate => row.startLine > candidate.beginLine && row.endLine <= candidate.endLine)
+      const block = layout.blocks.find(candidate => row.startLine > candidate.beginLine && row.startLine < candidate.endLine)
       const unclosed = block === undefined
         ? layout.unclosedBlocks.find(candidate => row.startLine > candidate.beginLine)
         : undefined
@@ -802,9 +802,10 @@ async function verifyWritten(
         const rows = await (manager?.listPlugins as () => Promise<unknown>).call(manager)
         if (!Array.isArray(rows)) continue
         const candidates = rows.filter(row => isRecord(row) && row.patchId === id)
-        // The host list is in load order. Pick the occurrence this write targeted, but let a
-        // matching server name win when the loader reordered or omitted a sibling.
-        const live = (expectedName === '' ? undefined : candidates.find(row => isRecord(row) && row.name === expectedName))
+        // The host list is in load order. A name is only a disambiguator when exactly one
+        // candidate carries it; duplicate server names must use the requested occurrence.
+        const named = expectedName === '' ? [] : candidates.filter(row => isRecord(row) && row.name === expectedName)
+        const live = (named.length === 1 ? named[0] : undefined)
           ?? candidates[occurrence]
           ?? (candidates.length === 1 ? candidates[0] : undefined)
         if (live === undefined || !isRecord(live)) continue

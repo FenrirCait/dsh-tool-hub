@@ -501,6 +501,29 @@ async function main() {
     eq('mcp: host duplicate second changed', rows[1].config.serverName, 'second-changed')
   })
 
+  await step('mcp: ambiguous duplicate names use the occurrence on the host path', async () => {
+    const duplicate = [
+      '- insert:',
+      '  - id: dup-name',
+      '    name: "@deepseek-ai/dsh-mcp-client"',
+      '    config:',
+      '      serverName: same-name',
+      '  - id: dup-name',
+      '    name: "@deepseek-ai/dsh-mcp-client"',
+      '    config:',
+      '      serverName: same-name',
+    ].join('\n') + '\n'
+    await writeFile(patchPath, duplicate, 'utf8')
+    const host = pluginManager([
+      { entryId: 'loader-one', patchId: 'dup-name', name: 'same-name', moduleName: '@deepseek-ai/dsh-mcp-client', enabled: true },
+      { entryId: 'loader-two', patchId: 'dup-name', name: 'same-name', moduleName: '@deepseek-ai/dsh-mcp-client', enabled: true },
+    ])
+    const res = await call(mcpDomain, 'mcp.save', { id: 'dup-name', occurrence: 1, config: { serverName: 'same-name', url: 'http://second/mcp' } }, makeEnv({ profileContext: { dir: profile }, pluginManager: host }))
+    eq('mcp: ambiguous host save ok', res.ok, true)
+    const rows = mcp.parseMcpRows(await readFile(patchPath, 'utf8'))
+    eq('mcp: ambiguous host second row changed', rows[1].config.url, 'http://second/mcp')
+  })
+
   await step('mcp: a managed-block row is read-only for host writes', async () => {
     const managed = [
       '# >>> dsh-skill-mcp-panel:mcp:begin',

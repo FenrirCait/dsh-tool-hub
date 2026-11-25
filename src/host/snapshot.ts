@@ -241,7 +241,9 @@ export async function buildSnapshot(deps: SnapshotDeps): Promise<Record<string, 
       patchText = await readFile(patch, 'utf8')
     }
     catch (error) {
-      patchError = (error as Error).message
+      // A profile without a patch file is a valid empty MCP config; mcp.create can initialize it.
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') patchText = ''
+      else patchError = (error as Error).message
     }
   }
   // Managed blocks belong to other panels; the client shows their foreign rows without touching them.
