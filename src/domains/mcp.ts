@@ -363,7 +363,7 @@ export function parseMcpRows(text: string): McpRow[] {
     seen.set(row.id, occurrence + 1)
   }
   try {
-    const layout = scanPatchBlocks(text)
+    const layout = scanPatchBlocks(text.replace(/\r\n?/g, '\n'))
     for (const row of rows) {
       const block = layout.blocks.find(candidate => row.startLine > candidate.beginLine && row.startLine < candidate.endLine)
       const unclosed = block === undefined
@@ -809,7 +809,7 @@ async function verifyWritten(
       try {
         const rows = await (manager?.listPlugins as () => Promise<unknown>).call(manager)
         if (!Array.isArray(rows)) continue
-        const candidates = rows.filter(row => isRecord(row) && row.patchId === id && (row.moduleName === undefined || row.moduleName === MCP_MODULE))
+        const candidates = rows.filter(row => isRecord(row) && row.patchId === id && row.moduleName === MCP_MODULE)
         // A fresh HMR list can lag; retry a count mismatch instead of rolling back a just-written row.
         if (patchCount === null || candidates.length !== patchCount) {
           lastProblem = 'the host lists ' + String(candidates.length) + ' of ' + String(patchCount ?? '?') + ' duplicate MCP rows; cannot verify the occurrence'

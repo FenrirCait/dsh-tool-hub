@@ -251,7 +251,7 @@ export async function buildSnapshot(deps: SnapshotDeps): Promise<Record<string, 
     ? { path: null, rows: 0, blocks: [], unclosed: [], foreignTotal: 0 }
     : patchText === null
       ? { path: patch, rows: 0, blocks: [], unclosed: [], error: patchError ?? 'unreadable' }
-      : { path: patch, ...scanPatchBlocks(patchText) }
+      : { path: patch, ...scanPatchBlocks(patchText.replace(/\r\n?/g, '\n')) }
   const loaderRows = basePlugins.filter(row => row.mcp === true).map(row => ({
     id: row.id,
     moduleName: row.moduleName === '' ? MCP_MODULE : row.moduleName,
@@ -272,6 +272,8 @@ export async function buildSnapshot(deps: SnapshotDeps): Promise<Record<string, 
       mcpOccurrence: merged.occurrence,
       mcpEditable: merged.editable,
       mcpManagedBy: merged.managedBy,
+      manageable: row.manageable && merged.managedBy === null,
+      readOnlyReason: merged.managedBy === null ? row.readOnlyReason : (row.readOnlyReason ?? 'managed-block:' + merged.managedBy),
       mcpReadOnlyReason: merged.readOnlyReason,
       config: merged.config,
       secretKeys: merged.secretKeys,

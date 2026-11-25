@@ -114,6 +114,13 @@ check('an unclosed managed block also marks rows read-only', () => {
   ])
 })
 
+check('CRLF managed blocks keep their owner', () => {
+  equal(mcp.parseMcpRows(managed.replace(/\n/g, '\r\n')).map(row => [row.id, row.managedBy]), [
+    ['panel-mcp-x', 'dsh-skill-mcp-panel:mcp'],
+    ['ours', null],
+  ])
+})
+
 check('mergeMcpRows carries occurrence and read-only owner', () => {
   const rows = mcp.mergeMcpRows(mcp.parseMcpRows(managed), [
     { id: 'loader-x', moduleName: '@deepseek-ai/dsh-mcp-client', patchId: 'panel-mcp-x', enabled: true, manageable: true },

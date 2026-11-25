@@ -76,7 +76,7 @@ const env = {
   services: {
     get(name) {
       if (name === 'profileContext') return { dir: root }
-      if (name === 'pluginManager') return { listPlugins: async () => [{ patchId: 'probe-mcp', name: 'probe', enabled: true }] }
+      if (name === 'pluginManager') return { listPlugins: async () => [{ patchId: 'probe-mcp', moduleName: '@deepseek-ai/dsh-mcp-client', name: 'probe', enabled: true }] }
       return undefined
     },
   },

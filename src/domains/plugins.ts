@@ -15,6 +15,7 @@
  */
 import type { DomainRegistration, HostEnv, OpHandler } from '../shared/contract.js'
 import type { OpDefinition } from '../shared/types.js'
+import { parseMcpRows, patchPathFor, readPatchText } from './mcp.js'
 import { setSkillEnabled } from './skills.js'
 
 /** This plugin's own module name: the one entry a panel must not switch off (it is the panel). */
@@ -260,6 +261,20 @@ async function isSelfEntry(env: HostEnv, id: string): Promise<boolean> {
   }
 }
 
+/** The owner of a managed block containing this loader row, or null when it is ours. */
+async function managedMcpOwner(env: HostEnv, row: PluginRow): Promise<string | null> {
+  if (row.mcp !== true || row.patchId === null) return null
+  const patch = patchPathFor(env)
+  if (patch === null) return null
+  try {
+    const managed = parseMcpRows(await readPatchText(patch)).find(candidate => candidate.id === row.patchId && candidate.managedBy !== null)
+    return managed?.managedBy ?? null
+  }
+  catch {
+    return null
+  }
+}
+
 /** Flip one loader entry through the host's own manager, with the guards 1.x had. */
 export async function setPluginEnabled(
   env: HostEnv,
@@ -270,9 +285,14 @@ export async function setPluginEnabled(
   if (typeof manager.setPluginEnabled !== 'function') {
     fail('no-plugin-manager', 'pluginManager has no setPluginEnabled()')
   }
+  const listed = await listPluginRows(env, true).catch(() => [] as PluginRow[])
+  const listedRow = listed.find(item => item.id === id)
+  if (listedRow !== undefined && listedRow.mcp) {
+    const owner = await managedMcpOwner(env, listedRow)
+    if (owner !== null) fail('read-only', 'mcp row "' + id + '" is inside ' + owner + "'s managed block")
+  }
   if (!enabled) {
-    const rows = await listPluginRows(env, true).catch(() => [] as PluginRow[])
-    const row = rows.find(item => item.id === id)
+    const row = listedRow
     if (row === undefined) fail('unknown-plugin', 'no plugin entry answers to ' + id)
     if (row.readOnlyReason !== null) fail('read-only', row.readOnlyReason)
     if (row.builtinUi) {

@@ -586,6 +586,10 @@ async function main() {
     const listed = await call(mcpDomain, 'mcp.list', {}, mcpEnv())
     eq('mcp: managed owner visible', listed.rows[0].managedBy, 'dsh-skill-mcp-panel:mcp')
     eq('mcp: managed not editable', listed.rows[0].editable, false)
+    const host = pluginManager([{ entryId: 'p-managed', moduleName: '@deepseek-ai/dsh-mcp-client', patchId: 'panel-mcp-owned', name: 'owned', enabled: true }])
+    const toggle = await call(pluginsDomain, 'toggle', { kind: 'plugin', id: 'p-managed', enabled: true }, makeEnv({ profileContext: { dir: profile }, pluginManager: host }))
+    eq('plugins: managed mcp toggle refused', toggle.ok, false)
+    eq('plugins: managed mcp toggle code', toggle.code, 'read-only')
   })
 
   await step('mcp: empty state is an empty list', async () => {
