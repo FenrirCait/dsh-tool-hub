@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.4.1
+
+- Bundle child plugins now follow their parent package in group management: the parent is the selectable candidate, child rows are read-only/derived, and adding a child resolves to the whole bundle.
+- Skill trees remain independent; prefix grouping is presentation only.
+
 ## 2.4.0
 
 - Group membership entry points: plugin, MCP and skill rows can join or leave groups; the group page can manage members; MCP tools are derived read-only under their server; read-only/bundle rows cannot be silently added.
