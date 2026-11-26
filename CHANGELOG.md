@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.4.2
+
+- Group state now distinguishes partially enabled groups and renders a mixed switch state instead of "off".
+- Group members can move to another group through the atomic group.transfer op; bundle members move as a package.
+- Installed official extension packs no longer appear a second time in the local extension list.
+
 ## 2.4.1
 
 - Bundle child plugins now follow their parent package in group management: the parent is the selectable candidate, child rows are read-only/derived, and adding a child resolves to the whole bundle.
