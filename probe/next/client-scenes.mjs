@@ -142,6 +142,16 @@ check('lock: locking asks first, unlocking does not', () => {
 
 // ── 4. the editor exposes the four sections and the preset ─────────────────
 
+check('groups: members expand with individual switches', () => {
+  const groups = code(source('views/groups.tsx'))
+  assert(groups.includes('memberViews(group, snapshot)'), 'group members must be resolved from the snapshot')
+  assert(groups.includes("member.kind === 'mcp'"), 'MCP members need their own badge/identity')
+  assert(groups.includes('void run(\'toggle\', { kind: member.actionKind'), 'member switches must use the individual toggle op')
+  assert(groups.includes("member.kind === 'tool' || !member.manageable"), 'tool members are read-only')
+  assert(groups.includes('toggleExpanded(group.id)'), 'groups need an expand control')
+  return 'expand + MCP badge + member switch'
+})
+
 check('editor: synthetic bundle rows are not scene members', () => {
   const editor = code(source('views/scene-editor.tsx'))
   assert(editor.includes('row.bundleName === undefined'), 'the scene plugin picker must exclude synthetic bundle rows')
