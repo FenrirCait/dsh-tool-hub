@@ -108,7 +108,8 @@ check('row-boundary', () => {
 })
 
 check('mcp-tools-panel', () => {
-  assert(has('snapshot.tools.filter(tool => tool.server === row.name)'), 'tool details must come from the server join')
+  assert(has("tool.name.startsWith('mcp__' + row.name + '__')"), 'tool details must preserve full server names, including embedded __')
+  assert(has('snapshot.lazyServers'), 'lazy state must not depend on a tool row being present')
   assert(has('MCP_OPS.toolToggle') && has('MCP_OPS.lazySet') && has('MCP_OPS.lazyLoad'), 'tool and lazy controls need their op ids')
   assert(has('name: tool.name, enabled: next'), 'a tool switch must write the immediate toggle payload')
   assert(has('server: row.name, on: next'), 'the lazy switch must target the server')

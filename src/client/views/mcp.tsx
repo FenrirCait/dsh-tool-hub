@@ -187,9 +187,9 @@ export function McpView(props: ViewProps): React.ReactElement {
               const command = row.command ?? ''
               const detail = command !== '' ? command : row.url ?? ''
               const rawBusy = raw !== null && raw.loading && raw.id === id
-              const serverTools = snapshot.tools.filter(tool => tool.server === row.name)
+              const serverTools = snapshot.tools.filter(tool => tool.server === row.name || tool.name.startsWith('mcp__' + row.name + '__'))
               const toolsOpen = openTools[mcpRowKey(id === '' ? 'loader:' + row.id : id, occurrence)] === true
-              const lazy = serverTools.some(tool => tool.lazy === true)
+              const lazy = (snapshot.lazyServers ?? []).includes(row.name) || serverTools.some(tool => tool.lazy === true)
               const serverKey = mcpRowKey(id === '' ? 'loader:' + row.id : id, occurrence)
               return (
                 <RowBoundary key={id === '' ? 'loader:' + row.id : mcpRowKey(id, occurrence)} label={copy(lang, '这一条 MCP 行渲染失败：' + row.name, 'This MCP row failed to render: ' + row.name)} retry={t('action.retry')}>
