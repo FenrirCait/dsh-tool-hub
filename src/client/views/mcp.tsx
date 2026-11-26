@@ -10,6 +10,7 @@ import { OPS, runOp } from '../api.js'
 import { mcpRowKey } from '../identity.js'
 import { Badge, Button, Callout, Card, Dialog, Empty, Field, RowBoundary, SearchBox, Select, Switch, monoStyle } from '../components.js'
 import { McpOauthDialog } from './mcp-oauth.js'
+import { GroupMembershipDialog, type GroupMemberRef } from './group-membership.js'
 import type { PluginRow, ViewProps } from '../types.js'
 
 /**
@@ -44,6 +45,7 @@ export function McpView(props: ViewProps): React.ReactElement {
   const [query, setQuery] = React.useState('')
   const [draft, setDraft] = React.useState<Draft | null>(null)
   const [openTools, setOpenTools] = React.useState<Record<string, boolean>>({})
+  const [assignMember, setAssignMember] = React.useState<GroupMemberRef | null>(null)
   const [pending, setPending] = React.useState<PluginRow | null>(null)
   const [raw, setRaw] = React.useState<RawState | null>(null)
   const [oauthRow, setOauthRow] = React.useState<PluginRow | null>(null)
@@ -218,6 +220,7 @@ export function McpView(props: ViewProps): React.ReactElement {
                         void run(OPS.toggle, { kind: 'plugin', id: row.id, enabled: next })
                       }}
                     />
+                    <Button variant="ghost" disabled={row.manageable === false} onClick={() => { setAssignMember({ kind: 'plugin', id: row.id, name: row.name, mcp: true }) }}>{copy(lang, '分组', 'Groups')}</Button>
                     <Button variant="ghost" onClick={() => { setOpenTools(current => ({ ...current, [serverKey]: !toolsOpen })) }}>
                       {copy(lang, `工具 (${serverTools.length})`, `Tools (${serverTools.length})`)}
                     </Button>

@@ -196,6 +196,15 @@ check('no-literal-colours', () => {
   return 'tokens only, ' + inline + ' inline style blocks'
 })
 
+check('membership-ui', () => {
+  const dialog = code(readFileSync(join(ROOT, 'src', 'client', 'views', 'group-membership.tsx'), 'utf8'))
+  assert(dialog.includes('group.add') && dialog.includes('group.remove'), 'membership changes must use the atomic add/remove ops')
+  assert(dialog.includes("'mcp' as const"), 'the picker must expose MCP as a distinct selectable kind')
+  assert(dialog.includes("row.kind !== 'tool'"), 'tool members must stay out of the writable membership set')
+  assert(body.includes('GroupMembershipDialog'), 'group rows must mount the membership dialog')
+  return 'member picker + MCP + tool read-only'
+})
+
 check('file-length', () => {
   const bytes = statSync(VIEW).size
   assert(lineCount <= 480, 'groups.tsx is ' + lineCount + ' lines (limit 480)')

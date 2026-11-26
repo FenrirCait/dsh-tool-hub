@@ -16,6 +16,7 @@ import { runOp } from '../api.js'
 import { groupOnReader } from '../group-state.js'
 import type { GroupMember, GroupRow, ViewProps } from '../types.js'
 import { GroupMembers } from './group-members.js'
+import { GroupMembershipDialog } from './group-membership.js'
 /** Op ids this view owns; api.ts keeps the shell's shared table, not the groups domain. */
 const OPS = {
   save: 'group.save',
@@ -91,6 +92,7 @@ export function GroupsView(props: ViewProps): React.ReactElement {
   const [autoPlan, setAutoPlan] = React.useState<Array<{ name: string; members: unknown[] }>>([])
   const [market, setMarket] = React.useState<MarketStatus | null>(null)
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set())
+  const [membershipGroup, setMembershipGroup] = React.useState<GroupRow | null>(null)
   const toggleExpanded = (id: string): void => { setExpanded(current => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next }) }
   const drawers = React.useMemo(() => {
     const seen = new Map<string, string>()
@@ -368,6 +370,7 @@ export function GroupsView(props: ViewProps): React.ReactElement {
                       {t('groups.clean')}
                     </Button>
                   ) : null}
+                  <Button variant="ghost" onClick={() => { setMembershipGroup(group) }}>{lang === 'zh' ? '管理成员' : 'Members'}</Button>
                   <Button variant="ghost" onClick={() => { toggleExpanded(group.id) }}>
                     {lang === 'zh' ? `成员 ${group.members.length}` : `Members ${group.members.length}`}
                   </Button>
@@ -425,6 +428,7 @@ export function GroupsView(props: ViewProps): React.ReactElement {
       >
         {body}
       </Dialog>
+      <GroupMembershipDialog open={membershipGroup !== null} mode="group" group={membershipGroup ?? undefined} groups={groups} snapshot={snapshot} lang={lang} t={t} busy={busy} run={run} onClose={() => { setMembershipGroup(null) }} />
     </div>
   )
 }

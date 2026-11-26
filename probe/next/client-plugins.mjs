@@ -181,6 +181,12 @@ check('one-bulk-payload', () => {
   return 'both entry points send the same payload'
 })
 
+check('group-entry', () => {
+  const viewSource = body
+  assert(viewSource.includes('GroupMembershipDialog'), 'the row view must mount the group picker')
+  return 'group picker mounted'
+})
+
 check('row-switch-kept', () => {
   assert(/<Switch/.test(renderRowBlock), 'the per-row switch must stay')
   assert(/checked=\{row\.enabled\}/.test(renderRowBlock), 'the row switch must read the row state')

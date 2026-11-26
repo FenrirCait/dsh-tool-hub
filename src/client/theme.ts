@@ -294,6 +294,8 @@ const CSS = `
   padding: 8px 0 8px 12px;
   border-left: 2px solid var(--dsw-alias-border-secondary, rgba(127, 127, 127, 0.24));
 }
+.th-group-tools { display: flex; flex-direction: column; gap: 2px; margin: 2px 0 4px 20px; opacity: 0.88; }
+.th-group-member-picker { max-height: 420px; overflow: auto; display: flex; flex-direction: column; gap: 4px; }
 .th-group-members {
   display: flex;
   flex-direction: column;

@@ -107,6 +107,12 @@ check('row-boundary', () => {
   return 'per-row fallback + read-only reason'
 })
 
+check('group-entry', () => {
+  const viewSource = source
+  assert(viewSource.includes('GroupMembershipDialog'), 'the row view must mount the group picker')
+  return 'group picker mounted'
+})
+
 check('mcp-tools-panel', () => {
   assert(has("tool.name.startsWith('mcp__' + row.name + '__')"), 'tool details must preserve full server names, including embedded __')
   assert(has('snapshot.lazyServers'), 'lazy state must not depend on a tool row being present')
@@ -276,7 +282,7 @@ check('oauth-surface', () => {
 })
 
 check('imports', () => {
-  const allowed = new Set(['../api.js', '../components.js', '../types.js', '../identity.js', './mcp-oauth.js', './mcp-helpers.js'])
+  const allowed = new Set(['../api.js', '../components.js', '../types.js', '../identity.js', './mcp-oauth.js', './mcp-helpers.js', './group-membership.js'])
   for (const line of source.split('\n')) {
     if (!line.startsWith('import ')) continue
     const at = line.indexOf("'")

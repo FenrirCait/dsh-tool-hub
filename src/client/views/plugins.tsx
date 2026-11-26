@@ -23,6 +23,7 @@ import { Badge, Button, Card, Dialog, Empty, RowBoundary, SearchBox, Switch } fr
 import type { PluginRow, ViewProps } from '../types.js'
 import type { TreeGroup } from './package-tree.js'
 import { pluginTreeGroups, PluginsTree } from './plugins-tree.js'
+import { GroupMembershipDialog, type GroupMemberRef } from './group-membership.js'
 
 // #region bulk-helpers
 /** The 1.x confirmation line: a batch larger than this asks before writing. */
@@ -133,6 +134,7 @@ export function rollbackCount(snapshot: ThirdSnapshot | null): number {
 export function PluginsView(props: ViewProps): React.ReactElement {
   const { snapshot, lang, t, busy, run, runDetailed } = props
   const [query, setQuery] = React.useState('')
+  const [assignMember, setAssignMember] = React.useState<GroupMemberRef | null>(null)
   const [selected, setSelected] = React.useState<string[]>([])
   const [confirming, setConfirming] = React.useState<boolean | null>(null)
   const [third, setThird] = React.useState<ThirdStatus | null>(null)
@@ -291,6 +293,7 @@ export function PluginsView(props: ViewProps): React.ReactElement {
             {disabled ? <Badge tone="warn">{row.readOnlyReason ?? 'read-only'}</Badge> : null}
           </span>
         </div>
+        <Button variant="ghost" disabled={row.manageable === false} onClick={() => { setAssignMember({ kind: 'plugin', id: row.id, name: row.name, mcp: row.mcp === true }) }}>{zh ? '分组' : 'Groups'}</Button>
         <Switch
           checked={row.enabled}
           busy={rowBusy}
@@ -429,6 +432,7 @@ export function PluginsView(props: ViewProps): React.ReactElement {
       <div style={{ marginTop: 12 }}>
         <Button variant="ghost" onClick={() => { void props.reload() }}>{t('action.retry')}</Button>
       </div>
+      <GroupMembershipDialog open={assignMember !== null} mode="member" member={assignMember ?? undefined} groups={snapshot.groups} snapshot={snapshot} lang={lang} t={t} busy={busy} run={run} onClose={() => { setAssignMember(null) }} />
     </div>
   )
 }

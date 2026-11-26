@@ -14,6 +14,7 @@ export interface MemberView {
   enabled: boolean
   manageable: boolean
   readOnlyReason: string | null
+  tools?: Array<{ name: string; enabled: boolean }>
 }
 
 export function memberViews(group: GroupRow, snapshot: ViewProps['snapshot']): MemberView[] {
@@ -28,7 +29,8 @@ export function memberViews(group: GroupRow, snapshot: ViewProps['snapshot']): M
       return { key, label: skill?.name ?? member.id, kind: 'skill', actionKind: 'skill', id: member.id, enabled: skill?.enabled === true, manageable: skill !== undefined, readOnlyReason: skill === undefined ? 'missing skill' : null }
     }
     const plugin = snapshot.plugins.find(row => row.id === member.id)
-    return { key, label: plugin?.name ?? member.id, kind: plugin?.mcp === true ? 'mcp' : 'plugin', actionKind: 'plugin', id: member.id, enabled: plugin?.enabled === true, manageable: plugin !== undefined && plugin.manageable !== false, readOnlyReason: plugin === undefined ? 'missing plugin' : plugin.readOnlyReason ?? null, ...(plugin?.bundleName === undefined ? {} : { bundleName: plugin.bundleName }) }
+    const tools = plugin?.mcp === true ? snapshot.tools.filter(tool => tool.name.startsWith('mcp__' + plugin.name + '__')).map(tool => ({ name: tool.name, enabled: tool.enabled })) : undefined
+    return { key, label: plugin?.name ?? member.id, kind: plugin?.mcp === true ? 'mcp' : 'plugin', actionKind: 'plugin', id: member.id, enabled: plugin?.enabled === true, manageable: plugin !== undefined && plugin.manageable !== false, readOnlyReason: plugin === undefined ? 'missing plugin' : plugin.readOnlyReason ?? null, ...(plugin?.bundleName === undefined ? {} : { bundleName: plugin.bundleName }), ...(tools === undefined ? {} : { tools }) }
   })
 }
 
@@ -64,6 +66,7 @@ export function GroupMembers(props: GroupMembersProps): React.ReactElement {
               }}
             />
           )}
+          {member.tools === undefined ? null : <div className="th-group-tools">{member.tools.map(tool => <div className="th-row-meta" key={tool.name}><span className="th-row-name">{tool.name}</span><Badge>{lang === 'zh' ? '只读' : 'read-only'}</Badge></div>)}</div>}
         </div>
       ))}
     </div>

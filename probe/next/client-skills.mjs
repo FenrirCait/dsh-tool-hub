@@ -445,8 +445,14 @@ check('colour-tokens-only', () => {
   return 'no hex, rgb(), hsl() or color: in either file'
 })
 
+check('group-entry', () => {
+  const viewSource = body
+  assert(viewSource.includes('GroupMembershipDialog'), 'the row view must mount the group picker')
+  return 'group picker mounted'
+})
+
 check('imports', () => {
-  const allowed = new Set(['react', '../api.js', '../components.js', '../types.js', '../i18n.js', './package-tree.js', './skills-tree.js'])
+  const allowed = new Set(['react', '../api.js', '../components.js', '../types.js', '../i18n.js', './package-tree.js', './skills-tree.js', './group-membership.js'])
   for (const match of source.matchAll(/from '([^']+)'/g)) {
     const spec = match[1]
     if (!spec.startsWith('.')) continue
