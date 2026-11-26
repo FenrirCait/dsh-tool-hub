@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.3.0
+
+- MCP rows now expose a tool panel: every tool is listed with its state, an immediate enable switch, and the server's lazy-start switch. Tool toggles use the new atomic `tool.toggle` op; server switches show an inline loading ring.
+
 ## 2.2.1
 
 - Patch-only MCP rows (rows present in `cordis.patch.yml` before the loader creates an entry) now appear in the MCP view and remain editable, instead of disappearing from the snapshot.

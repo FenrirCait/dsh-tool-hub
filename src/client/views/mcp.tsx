@@ -22,6 +22,9 @@ const MCP_OPS = {
   raw: 'mcp.raw',
   rawSave: 'mcp.rawSave',
   remove: 'mcp.delete',
+  toolToggle: 'tool.toggle',
+  lazySet: 'lazy.set',
+  lazyLoad: 'lazy.load',
 } as const
 
 /** The transports the host's MCP client accepts; the domain passes the string straight through. */
@@ -40,6 +43,7 @@ export function McpView(props: ViewProps): React.ReactElement {
   const { snapshot, t, lang, busy, run } = props
   const [query, setQuery] = React.useState('')
   const [draft, setDraft] = React.useState<Draft | null>(null)
+  const [openTools, setOpenTools] = React.useState<Record<string, boolean>>({})
   const [pending, setPending] = React.useState<PluginRow | null>(null)
   const [raw, setRaw] = React.useState<RawState | null>(null)
   const [oauthRow, setOauthRow] = React.useState<PluginRow | null>(null)
@@ -183,6 +187,10 @@ export function McpView(props: ViewProps): React.ReactElement {
               const command = row.command ?? ''
               const detail = command !== '' ? command : row.url ?? ''
               const rawBusy = raw !== null && raw.loading && raw.id === id
+              const serverTools = snapshot.tools.filter(tool => tool.server === row.name)
+              const toolsOpen = openTools[mcpRowKey(id === '' ? 'loader:' + row.id : id, occurrence)] === true
+              const lazy = serverTools.some(tool => tool.lazy === true)
+              const serverKey = mcpRowKey(id === '' ? 'loader:' + row.id : id, occurrence)
               return (
                 <RowBoundary key={id === '' ? 'loader:' + row.id : mcpRowKey(id, occurrence)} label={copy(lang, '这一条 MCP 行渲染失败：' + row.name, 'This MCP row failed to render: ' + row.name)} retry={t('action.retry')}>
                 <div className="th-row">
@@ -210,6 +218,9 @@ export function McpView(props: ViewProps): React.ReactElement {
                         void run(OPS.toggle, { kind: 'plugin', id: row.id, enabled: next })
                       }}
                     />
+                    <Button variant="ghost" onClick={() => { setOpenTools(current => ({ ...current, [serverKey]: !toolsOpen })) }}>
+                      {copy(lang, `工具 (${serverTools.length})`, `Tools (${serverTools.length})`)}
+                    </Button>
                     <Button variant="ghost" disabled={!editable} title={row.mcpReadOnlyReason ?? undefined} onClick={() => { setDraft(draftOf(row)) }}>
                       {t('action.edit')}
                     </Button>
@@ -226,6 +237,45 @@ export function McpView(props: ViewProps): React.ReactElement {
                     </Button>
                   </div>
                 </div>
+                {toolsOpen ? (
+                  <div className="th-mcp-tools">
+                    <div className="th-row-meta">
+                      <span>{copy(lang, '懒启动', 'Lazy start')}</span>
+                      <Switch
+                        checked={lazy}
+                        busy={busy === `${MCP_OPS.lazySet}:${row.name}`}
+                        label={copy(lang, '懒启动：' + row.name, 'Lazy start: ' + row.name)}
+                        onChange={next => { void run(MCP_OPS.lazySet, { server: row.name, on: next, id: row.name }) }}
+                      />
+                      {lazy ? (
+                        <Button variant="ghost" busy={busy === `${MCP_OPS.lazyLoad}:${row.name}`} onClick={() => { void run(MCP_OPS.lazyLoad, { names: serverTools.map(tool => tool.name), load: true, id: row.name }) }}>
+                          {copy(lang, '加载全部', 'Load all')}
+                        </Button>
+                      ) : null}
+                    </div>
+                    {serverTools.length === 0 ? (
+                      <div className="th-row-meta">{copy(lang, '宿主还没有上报这个 server 的工具。', 'The host has not reported any tool for this server yet.')}</div>
+                    ) : serverTools.map(tool => (
+                      <div className="th-row" key={tool.name}>
+                        <div className="th-row-body">
+                          <span className="th-row-name">{tool.name}</span>
+                          <span className="th-row-meta">
+                            <Badge tone={tool.enabled ? 'on' : 'off'}>{tool.enabled ? t('state.on') : t('state.off')}</Badge>
+                            {tool.lazyHidden === true ? <Badge tone="off">{copy(lang, '懒加载隐藏', 'Lazy hidden')}</Badge> : null}
+                            {tool.fixed === true ? <Badge tone="warn">{copy(lang, '固定', 'Fixed')}</Badge> : null}
+                          </span>
+                        </div>
+                        <Switch
+                          checked={tool.enabled}
+                          busy={busy === `${MCP_OPS.toolToggle}:${tool.name}`}
+                          disabled={tool.fixed === true}
+                          label={t('a11y.switch', { name: tool.name })}
+                          onChange={next => { void run(MCP_OPS.toolToggle, { name: tool.name, enabled: next, id: tool.name }) }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
                 </RowBoundary>
               )
             })}

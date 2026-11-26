@@ -36,7 +36,7 @@
 推荐固定 release：
 
 ```bash
-dsh plugin --profile <profile> add github:FenrirCait/dsh-tool-hub#v2.2.1
+dsh plugin --profile <profile> add github:FenrirCait/dsh-tool-hub#v2.3.0
 ```
 
 从本地目录安装：
@@ -66,7 +66,7 @@ dsh plugin --profile <profile> add ./dsh-tool-hub
 
 ### 扩展 API v2 与实验包 thirdparty-lazy
 
-Tool Hub `2.2.1` 提供 **Extension API v2**：官方包可以声明 `apiVersion: 2`，拿到受信任的
+Tool Hub `2.3.0` 提供 **Extension API v2**：官方包可以声明 `apiVersion: 2`，拿到受信任的
 宿主根上下文和 `api.onDispose`，从而在不改核心插件的情况下安装 per-agent 生命周期钩子。扩展包是
 本机受信任代码，只安装你信任的包。
 
@@ -80,7 +80,7 @@ Tool Hub `2.2.1` 提供 **Extension API v2**：官方包可以声明 `apiVersion
   `screen_`、`window_`）。
 - 实验限制：启用状态只在内存中，进程重启后重置；保护名单是静态 allowlist，不是 owner 注册表，
   名单外的工具可能被误隐藏。
-- 需要 Tool Hub `2.2.1` 或更新版本；主包不内置该实验包。
+- 需要 Tool Hub `2.3.0` 或更新版本；主包不内置该实验包。
 
 ### 官方插件基线
 

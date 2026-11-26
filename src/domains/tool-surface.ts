@@ -966,6 +966,22 @@ const toolSave: OpHandler = async (payload, env) => {
   return { deny: request, backup, mask: await maskAfter(env.state, env) }
 }
 
+const toolToggle: OpHandler = async (payload, env) => {
+  const body = asRecord(payload)
+  const name = toolNames([body.name])[0] ?? ''
+  if (name === '') throw fail('bad-payload', 'name is required')
+  if (RESERVED_TOOLS.has(name)) throw fail('reserved-tool', 'this name is reserved and cannot be masked: ' + name)
+  const port = resolveSurfacePort(env.services)
+  const known = port?.known() ?? null
+  if (known !== null && !known.includes(name)) throw fail('unknown-tool', 'not a tool of this host: ' + name)
+  const next = new Set(env.state.toolDeny)
+  if (body.enabled === true) next.delete(name)
+  else next.add(name)
+  env.state.toolDeny = [...next]
+  const backup = await env.save('tool-toggle')
+  return { name, enabled: body.enabled === true, deny: env.state.toolDeny, backup, mask: await maskAfter(env.state, env) }
+}
+
 const toolImport: OpHandler = async (payload, env) => {
   void payload
   const port = resolveSurfacePort(env.services)
@@ -1223,6 +1239,7 @@ export function toolSurfaceDomain(): DomainRegistration {
       title: { zh: '工具面', en: 'Tool surface' },
       ops: [
         { id: 'tool.save', write: true, audit: false, note: 'Replaces the installation tool deny list and re-applies the one merged mask.' },
+        { id: 'tool.toggle', write: true, audit: false, note: 'Adds or removes one installation tool name and re-applies the merged mask.' },
         { id: 'tool.import', write: true, audit: false, note: 'Merges another panel tool deny list into state.json, filtered to tools this host can restrict.' },
         { id: 'tool.plan', write: false, audit: false, note: 'Reports the merged deny list and its per-source attribution; touches nothing.' },
         { id: 'tool.describe', write: false, audit: false, note: 'Renders the surface report plus the lazy catalog prompt; touches nothing.' },
@@ -1240,6 +1257,7 @@ export function toolSurfaceDomain(): DomainRegistration {
     },
     handlers: {
       'tool.save': toolSave,
+      'tool.toggle': toolToggle,
       'tool.import': toolImport,
       'tool.plan': toolPlan,
       'tool.describe': toolDescribe,

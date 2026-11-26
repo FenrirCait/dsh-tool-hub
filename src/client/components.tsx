@@ -67,10 +67,12 @@ export interface SwitchProps {
 export function Switch(props: SwitchProps): React.ReactElement {
   const disabled = props.disabled === true || props.busy === true
   return (
-    <button
-      type="button"
-      role="switch"
-      className="th-switch"
+    <span className="th-switch-wrap">
+      {props.busy === true ? <span className="th-spin" aria-hidden="true" /> : null}
+      <button
+        type="button"
+        role="switch"
+        className="th-switch"
       aria-checked={props.checked}
       aria-label={props.label}
       aria-busy={props.busy === true}
@@ -79,8 +81,9 @@ export function Switch(props: SwitchProps): React.ReactElement {
         props.onChange(!props.checked)
       }}
     >
-      <span className="th-knob" aria-hidden="true" />
-    </button>
+        <span className="th-knob" aria-hidden="true" />
+      </button>
+    </span>
   )
 }
 

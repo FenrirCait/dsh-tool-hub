@@ -286,6 +286,28 @@ const CSS = `
   outline: 2px solid var(--dsw-alias-brand-primary, rgba(76, 111, 255, 1));
   outline-offset: 0;
 }
+.th-mcp-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 12px 10px 24px;
+  padding: 8px 0 8px 12px;
+  border-left: 2px solid var(--dsw-alias-border-secondary, rgba(127, 127, 127, 0.24));
+}
+.th-group-members {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 12px 10px 24px;
+  padding: 6px 0 6px 12px;
+  border-left: 2px solid var(--dsw-alias-border-secondary, rgba(127, 127, 127, 0.24));
+}
+.th-switch-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
 .th-switch {
   position: relative;
   flex: 0 0 auto;
