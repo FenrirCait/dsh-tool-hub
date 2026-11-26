@@ -148,6 +148,7 @@ let bundlesCache: { at: number; value: { rows: BundleRow[]; error: string | null
 /** Clear the short-lived caches; a switch always invalidates them so the next list is fresh. */
 export function invalidatePluginCache(): void {
   rowsCache = null
+  bundlesCache = null
 }
 
 /**

@@ -247,6 +247,7 @@ function pluginOf(row: Record<string, unknown>): PluginRow | null {
     config: row.config === null || row.config === undefined ? null : asRecord(row.config),
     secretKeys: secretKeysOf(row.secretKeys),
     root: asStringOrNull(row.root),
+    bundleName: asStringOrNull(row.bundleName) ?? undefined,
   }
 }
 

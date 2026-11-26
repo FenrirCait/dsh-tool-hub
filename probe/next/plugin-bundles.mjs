@@ -81,6 +81,20 @@ await check('bundle toggle validates id and self-protection', async () => {
   equal(calls, [['other-bundle', true]])
 })
 
+await check('a bundle toggle clears the bundle cache', async () => {
+  let enabled = false
+  const manager = {
+    listBundles: async () => [{ name: 'cached-bundle', installed: true, enabled, rows: [] }],
+    setBundleEnabled: async () => { enabled = true; return { application: 'applied' } },
+  }
+  const env = { now: () => 1, services: { get: () => manager } }
+  const before = await plugins.listBundles(env, true)
+  equal(before.rows[0].enabled, false)
+  await plugins.setBundleEnabled(env, 'cached-bundle', true)
+  const after = await plugins.listBundles(env)
+  equal(after.rows[0].enabled, true)
+})
+
 await check('setBundleEnabled calls the host manager and invalidates', async () => {
   const calls = []
   const env = { services: { get: name => name === 'pluginManager' ? { setBundleEnabled: async (name, enabled) => { calls.push([name, enabled]); return { application: 'applied' } } } : undefined } }

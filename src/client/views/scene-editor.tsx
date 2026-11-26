@@ -92,7 +92,7 @@ export function draftFromEnvironment(snapshot: HubSnapshot): SceneDraft {
 /** The `scene.save` payload: only the sections that are switched on, plus a preset when bound. */
 export function scenePayload(draft: SceneDraft): Record<string, unknown> {
   const body: Record<string, unknown> = { name: draft.name.trim() }
-  if (draft.pluginsOn) body.plugins = draft.plugins
+  if (draft.pluginsOn) body.plugins = draft.plugins.filter(id => !id.startsWith('bundle:'))
   if (draft.skillsOn) body.skills = draft.skills
   if (draft.toolsOn) body.tools = { deny: namesOf(draft.tools) }
   if (draft.mcpOn) body.mcp = { off: namesOf(draft.mcpOff), on: namesOf(draft.mcpAdd) }
@@ -185,7 +185,9 @@ export function SceneEditor(props: SceneEditorProps): React.ReactElement {
     setDraft(current => ({ ...current, ...next }))
   }
   // Synthetic installed-disabled bundle rows are not loader entries; scenes cannot apply them.
-  const pluginRows = candidates(snapshot.plugins.filter(row => row.bundleName === undefined), draft.plugins)
+  // Old drafts may still carry a synthetic bundle id; it is not a loader member.
+  const selectedPlugins = draft.plugins.filter(id => !id.startsWith('bundle:'))
+  const pluginRows = candidates(snapshot.plugins.filter(row => row.bundleName === undefined), selectedPlugins)
   const skillRows = candidates(snapshot.skills, draft.skills)
   const presetOptions = [
     { value: '', label: t('scenes.editor.presetNone') },
@@ -225,7 +227,7 @@ export function SceneEditor(props: SceneEditorProps): React.ReactElement {
       </Field>
       <Section id="th-scene-plugins" label={t('scenes.editor.plugins')} hint={t('scenes.editor.sectionOff')} on={draft.pluginsOn} onToggle={on => patch({ pluginsOn: on })}>
         <span className="th-field-hint">{t('scenes.editor.pluginsHint')}</span>
-        <MemberList id="th-scene-plugins-list" rows={pluginRows} selected={draft.plugins} onChange={next => patch({ plugins: next })} empty={t('scenes.editor.noRows')} extraLabel={t('scenes.editor.extra')} />
+        <MemberList id="th-scene-plugins-list" rows={pluginRows} selected={selectedPlugins} onChange={next => patch({ plugins: next })} empty={t('scenes.editor.noRows')} extraLabel={t('scenes.editor.extra')} />
       </Section>
       <Section id="th-scene-skills" label={t('scenes.editor.skills')} hint={t('scenes.editor.sectionOff')} on={draft.skillsOn} onToggle={on => patch({ skillsOn: on })}>
         <span className="th-field-hint">{t('scenes.editor.skillsHint')}</span>

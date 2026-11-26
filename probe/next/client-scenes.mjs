@@ -145,6 +145,7 @@ check('lock: locking asks first, unlocking does not', () => {
 check('editor: synthetic bundle rows are not scene members', () => {
   const editor = code(source('views/scene-editor.tsx'))
   assert(editor.includes('row.bundleName === undefined'), 'the scene plugin picker must exclude synthetic bundle rows')
+  assert(editor.includes("draft.plugins.filter(id => !id.startsWith('bundle:'))"), 'old synthetic selections must be removed from the draft and payload')
   return 'bundle rows excluded'
 })
 

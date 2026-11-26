@@ -564,6 +564,8 @@ check('runtime-snapshot-contract', () => {
     ['bundle:alpha', 'alpha', '1.2.3', 'p1|p2', 1, true, false],
     ['ungrouped', '未分组', null, 'p3', 1, false, false],
   ]), 'the normalised snapshot must drive the tree: ' + JSON.stringify(shape(groups)))
+  const synthetic = normalise({ plugins: [{ id: 'bundle:x', name: 'X', bundleName: 'x', enabled: false }] })
+  assert(synthetic.plugins[0].bundleName === 'x', 'normalizeSnapshot must preserve bundleName for synthetic rows')
   const plain = normalise({ plugins: [{ id: 'lonely', name: 'Lonely', enabled: true }] })
   assert(plain.bundles.length === 0, 'an older host without bundles normalises to an empty list')
   const fallback = mod.pluginTreeGroups({ rows: plain.plugins, bundles: plain.bundles, term: '', ungrouped: '未分组', matches: () => true })
