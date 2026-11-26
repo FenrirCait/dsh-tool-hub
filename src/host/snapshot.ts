@@ -7,7 +7,7 @@ import { stateFile } from '../core/io.js'
 import { applySettingsDefaults, normalizeSettings, settingsFields } from '../core/settings.js'
 import { normalizeGroups } from '../domains/groups.js'
 import { normalizePresets } from '../domains/presets.js'
-import { listBundles, listPluginRows } from '../domains/plugins.js'
+import { listBundles, listPluginRows, withInstalledBundles } from '../domains/plugins.js'
 import { listSkills, skillRoots } from '../domains/skills.js'
 import { MCP_MODULE, mcpRowsByEntryId, mergeMcpRows, parseMcpRows, patchPathFor } from '../domains/mcp.js'
 import { scanPatchBlocks } from '../core/patch-blocks.js'
@@ -261,7 +261,7 @@ export async function buildSnapshot(deps: SnapshotDeps): Promise<Record<string, 
   }))
   const mcpRows = patchText === null ? [] : mergeMcpRows(parseMcpRows(patchText), loaderRows)
   const mcpById = mcpRowsByEntryId(mcpRows)
-  const plugins = basePlugins.map(row => {
+  const enriched = basePlugins.map(row => {
     if (row.mcp !== true) return row
     const merged = mcpById.get(row.id)
     if (merged === undefined) return row
@@ -287,10 +287,13 @@ export async function buildSnapshot(deps: SnapshotDeps): Promise<Record<string, 
   const groups = normalizeGroups(env.state.groups)
   const presets = normalizePresets(env.state.presets)
 
+  const installedBundles = withInstalledBundles(enriched, bundles.rows)
+  const plugins = installedBundles.plugins
+
   return {
     plugins,
     skills,
-    bundles: bundles.rows,
+    bundles: installedBundles.bundles,
     bundleError: bundles.error,
     groups,
     // Drawers are part of state but were never in the snapshot; the groups view needs names.

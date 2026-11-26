@@ -51,6 +51,8 @@ export interface PluginRow {
   transport?: string | null
   command?: string | null
   url?: string | null
+  /** Set only on a synthetic row standing in for an installed-but-disabled bundle. */
+  bundleName?: string
   self: boolean
   official: boolean
   /** A UI plugin that ships inside the client bundle: no profile row, so the loader cannot flip it. */
@@ -64,6 +66,7 @@ export interface BundleRow {
   version?: string
   enabled: boolean
   official: boolean
+  installed: boolean
   rows: string[]
 }
 
@@ -122,6 +125,7 @@ interface ManagerLike {
   listPlugins?: unknown
   listBundles?: unknown
   setPluginEnabled?: unknown
+  setBundleEnabled?: unknown
 }
 
 function managerOf(env: HostEnv): ManagerLike {
@@ -144,6 +148,7 @@ let bundlesCache: { at: number; value: { rows: BundleRow[]; error: string | null
 /** Clear the short-lived caches; a switch always invalidates them so the next list is fresh. */
 export function invalidatePluginCache(): void {
   rowsCache = null
+  bundlesCache = null
 }
 
 /**
@@ -225,7 +230,11 @@ export async function listBundles(env: HostEnv, fresh = false): Promise<{ rows: 
       const row = isRecord(entry) ? entry : {}
       const members = Array.isArray(row.rows)
         ? row.rows
-            .map(item => (typeof item === 'string' ? item : isRecord(item) && typeof item.entryId === 'string' ? item.entryId : undefined))
+            .map(item => (typeof item === 'string'
+              ? item
+              : isRecord(item)
+                ? (typeof item.entryId === 'string' ? item.entryId : typeof item.rowId === 'string' ? item.rowId : undefined)
+                : undefined))
             .filter((item): item is string => typeof item === 'string')
         : []
       const name = typeof row.name === 'string' ? row.name : ''
@@ -235,6 +244,7 @@ export async function listBundles(env: HostEnv, fresh = false): Promise<{ rows: 
         ...(typeof row.version === 'string' ? { version: row.version } : {}),
         enabled: row.enabled === true,
         official: row.official === true,
+        installed: row.installed === true,
         rows: members,
       })
     }
@@ -247,6 +257,45 @@ export async function listBundles(env: HostEnv, fresh = false): Promise<{ rows: 
     bundlesCache = { at: now, value }
     return value
   }
+}
+
+/**
+ * Add one visible row for an installed bundle that is not enabled. The loader intentionally lists
+ * only loaded entries; without this pass a disabled package exists in node_modules but never reaches
+ * the panel. The row carries the bundle name, so toggling it goes through setBundleEnabled().
+ */
+export function withInstalledBundles(plugins: PluginRow[], bundles: BundleRow[]): { plugins: PluginRow[]; bundles: BundleRow[] } {
+  const out = [...plugins]
+  // listBundles() is cached: never mutate its rows, or each snapshot appends another synthetic id.
+  const copied = bundles.map(bundle => ({ ...bundle, rows: [...bundle.rows] }))
+  for (const bundle of copied) {
+    if (!bundle.installed || bundle.enabled || bundle.name === '') continue
+    if (bundle.rows.some(id => out.some(row => row.id === id))) continue
+    const id = 'bundle:' + bundle.name
+    if (out.some(row => row.id === id)) continue
+    out.push({
+      kind: 'plugin',
+      id,
+      name: bundle.name,
+      moduleName: bundle.name,
+      description: '',
+      descriptionSource: '',
+      enabled: false,
+      phase: null,
+      patchId: null,
+      readOnlyReason: null,
+      manageable: true,
+      mcp: false,
+      self: false,
+      official: bundle.official,
+      builtinUi: false,
+      role: bundle.official ? 'official' : 'rest',
+      surface: null,
+      bundleName: bundle.name,
+    })
+    bundle.rows.push(id)
+  }
+  return { plugins: out, bundles: copied }
 }
 
 /** Whether this entry is the panel itself — the one row it must not switch off. */
@@ -280,6 +329,31 @@ async function managedMcpOwner(env: HostEnv, row: PluginRow, listed: PluginRow[]
   catch (error) {
     // A patch we cannot read cannot prove the row is ours.
     fail('mcp-read-failed', 'cannot check managed ownership: ' + (error as Error).message)
+  }
+}
+
+/** Flip a whole installed bundle; this is what a disabled bundle row stands for. */
+export async function setBundleEnabled(
+  env: HostEnv,
+  name: string,
+  enabled: boolean,
+): Promise<{ id: string; ok: boolean; application: string; message: string; warnings: unknown[] }> {
+  const manager = managerOf(env)
+  if (typeof manager.setBundleEnabled !== 'function') {
+    fail('no-plugin-manager', 'pluginManager has no setBundleEnabled()')
+  }
+  const result: unknown = await (manager.setBundleEnabled as (bundleName: string, on: boolean) => Promise<unknown>)
+    .call(manager, name, enabled)
+  const record = isRecord(result) ? result : {}
+  const application = typeof record.application === 'string' ? record.application : 'unknown'
+  const ok = application !== 'failed' && application !== 'cancelled'
+  invalidatePluginCache()
+  return {
+    id: 'bundle:' + name,
+    ok,
+    application,
+    message: typeof record.error === 'string' ? record.error : application,
+    warnings: Array.isArray(record.warnings) ? record.warnings : [],
   }
 }
 
@@ -332,16 +406,26 @@ export async function setPluginEnabled(
 }
 
 /** One member of a `toggle` / `bulk` request, or null when the payload is not a member. */
-function normalizeMember(raw: unknown): { kind: 'plugin' | 'skill'; id: string } | null {
+function normalizeMember(raw: unknown): { kind: 'plugin' | 'skill'; id: string; bundleName?: string } | null {
   if (!isRecord(raw)) return null
   const kind = raw.kind === 'skill' ? 'skill' : raw.kind === 'plugin' ? 'plugin' : null
   const id = typeof raw.id === 'string' ? raw.id.trim() : ''
   if (kind === null || id === '') return null
-  return { kind, id }
+  const bundleName = typeof raw.bundleName === 'string' ? raw.bundleName.trim() : ''
+  return { kind, id, ...(bundleName === '' ? {} : { bundleName }) }
 }
 
 /** The switchboard: a plugin goes through the manager, a skill through its SKILL.md rename. */
-export async function toggleOne(env: HostEnv, kind: string, id: string, enabled: boolean): Promise<unknown> {
+export async function toggleOne(env: HostEnv, kind: string, id: string, enabled: boolean, bundleName?: string): Promise<unknown> {
+  if (kind === 'plugin' && typeof bundleName === 'string' && bundleName !== '') {
+    if (id !== 'bundle:' + bundleName) fail('bad-bundle', 'a bundle row id must match bundle:<name>')
+    if (bundleName === SELF_MODULE) fail('self-protected', 'this panel cannot disable itself')
+    const bundles = await listBundles(env, true)
+    const bundle = bundles.rows.find(row => row.name === bundleName)
+    if (bundle === undefined || !bundle.installed) fail('unknown-bundle', 'no installed bundle named "' + bundleName + '"')
+    if (bundle.enabled) fail('not-disabled-bundle', 'bundle "' + bundleName + '" is already enabled')
+    return await setBundleEnabled(env, bundleName, enabled)
+  }
   if (kind === 'plugin') return await setPluginEnabled(env, id, enabled)
   if (kind === 'skill') return await setSkillEnabled(env, id, enabled)
   fail('bad-kind', 'unknown kind ' + String(kind))
@@ -380,7 +464,7 @@ export async function toggleMany(
       continue
     }
     try {
-      results.push(await toggleOne(env, member.kind, member.id, enabled))
+      results.push(await toggleOne(env, member.kind, member.id, enabled, member.bundleName))
     }
     catch (error) {
       results.push({ id: member.id, ...failureOf(error) })
@@ -453,7 +537,8 @@ export function createPluginsDomain(): DomainRegistration {
         const kind = field(payload, 'kind')
         const id = field(payload, 'id')
         if (kind === '' || id === '') fail('bad-payload', 'toggle needs kind and id')
-        return await toggleOne(env, kind, id, payload.enabled === true)
+        const bundleName = field(payload, 'bundleName')
+        return await toggleOne(env, kind, id, payload.enabled === true, bundleName === '' ? undefined : bundleName)
       }),
       'bulk': guarded(async (payload, env) => await toggleMany(env, payload.items, payload.enabled === true)),
     },

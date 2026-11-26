@@ -7,6 +7,8 @@
 - Rows inside another panel's managed block are read-only in the MCP view and rejected by the host.
 - A malformed plugin/MCP row is contained by a row-level error boundary instead of replacing the
   whole view.
+- Installed-but-disabled bundles (present in `listBundles()` but absent from `listPlugins()`) now
+  appear as switchable bundle rows and toggle through `setBundleEnabled()`.
 - Panels narrower than 820px switch to a stacked sidebar layout; below 560px the brand/status line
   is reduced further.
 

@@ -31,8 +31,9 @@ export const BULK_CONFIRM_ABOVE = 20
 export const BULK_CAP = 400
 
 /** The host's member shape for one plugin id; this view never batches skills. */
-export function bulkItems(ids: string[]): { kind: 'plugin'; id: string }[] {
-  return ids.map(id => ({ kind: 'plugin', id }))
+export function bulkItems(ids: string[], rows: PluginRow[] = []): { kind: 'plugin'; id: string; bundleName?: string }[] {
+  const bundles = new Map(rows.filter(row => row.bundleName !== undefined).map(row => [row.id, row.bundleName as string]))
+  return ids.map(id => ({ kind: 'plugin', id, ...(bundles.has(id) ? { bundleName: bundles.get(id) } : {}) }))
 }
 
 /** Whether a batch needs the dialog. The host documents "confirms past 20", so strictly greater. */
@@ -169,7 +170,7 @@ export function PluginsView(props: ViewProps): React.ReactElement {
     (enabled: boolean, ids: string[] = picked): void => {
       if (ids.length === 0 || ids.length > cap) return
       setBulkReport(null)
-      void runDetailed(OPS.bulk, { items: bulkItems(ids), enabled }).then(outcome => {
+      void runDetailed(OPS.bulk, { items: bulkItems(ids, snapshot.plugins), enabled }).then(outcome => {
         setBulkGroup(null)
         setSelected(current => selectionAfter(outcome.ok, current))
         if (!outcome.ok) return
@@ -296,7 +297,7 @@ export function PluginsView(props: ViewProps): React.ReactElement {
           disabled={disabled || bulkBusy}
           label={t('a11y.switch', { name: row.name })}
           onChange={next => {
-            void run(OPS.toggle, { kind: 'plugin', id: row.id, enabled: next })
+            void run(OPS.toggle, { kind: 'plugin', id: row.id, enabled: next, ...(row.bundleName === undefined ? {} : { bundleName: row.bundleName }) })
           }}
         />
       </div>
