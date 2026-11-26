@@ -764,6 +764,14 @@ async function main() {
     eq('plugins: bundles error named', bundles.error, 'this host has no pluginManager.listBundles')
   })
 
+  await step('plugins: a failed list refuses the toggle', async () => {
+    const calls = []
+    const broken = { listPlugins: async () => { throw new Error('transient host list') }, setPluginEnabled: async (id, enabled) => { calls.push([id, enabled]); return { application: 'applied' } } }
+    const res = await call(pluginsDomain, 'toggle', { kind: 'plugin', id: 'p-normal', enabled: true }, makeEnv({ pluginManager: broken }))
+    eq('plugins: list failure code', res.code, 'list-failed')
+    eq('plugins: list failure never writes', calls, [])
+  })
+
   await rm(work, { recursive: true, force: true })
 
   console.log('')

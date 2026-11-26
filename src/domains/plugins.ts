@@ -292,7 +292,14 @@ export async function setPluginEnabled(
   if (typeof manager.setPluginEnabled !== 'function') {
     fail('no-plugin-manager', 'pluginManager has no setPluginEnabled()')
   }
-  const listed = await listPluginRows(env, true).catch(() => [] as PluginRow[])
+  let listed: PluginRow[]
+  try {
+    listed = await listPluginRows(env, true)
+  }
+  catch (error) {
+    // A failed list means ownership cannot be checked; never turn that into "no managed rows".
+    fail('list-failed', 'cannot list plugins before toggling: ' + (error as Error).message)
+  }
   const listedRow = listed.find(item => item.id === id)
   if (listedRow !== undefined && listedRow.mcp) {
     const owner = await managedMcpOwner(env, listedRow, listed)
