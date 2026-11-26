@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.0
+
+- Group membership entry points: plugin, MCP and skill rows can join or leave groups; the group page can manage members; MCP tools are derived read-only under their server; read-only/bundle rows cannot be silently added.
+
 ## 2.3.0
 
 - Groups can expand to show plugin, skill, MCP and tool members; plugin/skill/MCP members have individual switches and tool members stay read-only.
