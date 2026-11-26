@@ -100,6 +100,7 @@ check('action-save', () => {
 check('row-boundary', () => {
   assert(has('<RowBoundary'), 'each MCP row must be wrapped in its own error boundary')
   assert(has('mcpReadOnlyReason'), 'a managed block row must carry its read-only reason')
+  assert(has('mcp.external'), 'the view must warn about MCP servers owned by other plugins')
   assert(has("mcpRowKey(id, occurrence)"), 'duplicate rows need the shared collision-free identity key')
   assert(has("id === '' ? 'loader:' + row.id"), 'orphan rows need a loader-id key, not :0')
   assert(helper.includes('mcpPatchId === null'), 'an explicit null patch id must not fall back to a stale loader patch id')

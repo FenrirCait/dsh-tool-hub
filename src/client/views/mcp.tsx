@@ -140,6 +140,7 @@ export function McpView(props: ViewProps): React.ReactElement {
 
   return (
     <div>
+      {(snapshot.externalMcp ?? []).length === 0 ? null : <Callout tone="info">{t('mcp.external', { names: (snapshot.externalMcp ?? []).join(', ') })}</Callout>}
       {snapshot.mcpError === null ? null : <Callout>{t('mcp.patchError', { message: snapshot.mcpError })}</Callout>}
       {patchReady ? null : <Callout tone="info">{t('mcp.patchMissing')}</Callout>}
       <div className="th-toolbar">

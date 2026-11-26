@@ -9,6 +9,7 @@ import { join } from 'node:path'
 
 const distRoot = process.env.TOOL_HUB_DIST ?? join(process.cwd(), 'dist')
 const mcp = await import(pathToFileURL(join(distRoot, 'domains', 'mcp.js')).href)
+const snapshotHost = await import(pathToFileURL(join(distRoot, 'host', 'snapshot.js')).href)
 
 let pass = 0
 let fail = 0
@@ -144,6 +145,12 @@ check('pairMcpRows resolves duplicate loader rows by occurrence', () => {
     ['loader-inside', 0, 'dsh-skill-mcp-panel:mcp'],
     ['loader-outside', 1, null],
   ])
+})
+
+check('patch-only MCP rows become MCP plugin rows', () => {
+  const row = { id: 'patch:x', patchId: 'x', entryId: null, occurrence: 1, managedBy: null, readOnlyReason: null, name: 'x', config: { serverName: 'x' }, secretKeys: { env: [], headers: [] }, transport: 'stdio', command: 'node', url: '', editable: true }
+  const [plugin] = snapshotHost.patchOnlyMcpPlugins([row])
+  equal([plugin.id, plugin.mcp, plugin.mcpPatchId, plugin.mcpOccurrence, plugin.manageable, plugin.mcpEditable], ['mcp:x:1', true, 'x', 1, false, true])
 })
 
 check('mcpRowsByEntryId never lets a patch-only display id shadow a loader entry', () => {

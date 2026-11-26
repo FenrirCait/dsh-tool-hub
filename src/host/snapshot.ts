@@ -9,7 +9,7 @@ import { normalizeGroups } from '../domains/groups.js'
 import { normalizePresets } from '../domains/presets.js'
 import { listBundles, listPluginRows, withInstalledBundles } from '../domains/plugins.js'
 import { listSkills, skillRoots } from '../domains/skills.js'
-import { MCP_MODULE, mcpRowsByEntryId, mergeMcpRows, parseMcpRows, patchPathFor } from '../domains/mcp.js'
+import { MCP_MODULE, mcpRowsByEntryId, mergeMcpRows, parseMcpRows, patchPathFor, type McpServerRow } from '../domains/mcp.js'
 import { scanPatchBlocks } from '../core/patch-blocks.js'
 import { readMode } from '../domains/scenes.js'
 import { readLazy, serverOf, toolDenyReasons, type PresetDenySource, type ToolDenyReason } from '../domains/tool-surface.js'
@@ -217,6 +217,39 @@ function toolRows(
   })
 }
 
+/** Patch rows with no loader entry still belong in the MCP view; they are read/write patch rows, not loader toggles. */
+export function patchOnlyMcpPlugins(rows: McpServerRow[]) {
+  return rows.filter(row => row.entryId === null).map(row => ({
+    kind: 'plugin' as const,
+    id: 'mcp:' + row.patchId + ':' + String(row.occurrence),
+    name: row.name,
+    moduleName: MCP_MODULE,
+    description: '',
+    descriptionSource: '' as const,
+    enabled: false,
+    phase: null,
+    patchId: null,
+    readOnlyReason: row.readOnlyReason ?? 'patch-only MCP row',
+    manageable: false,
+    mcp: true,
+    mcpPatchId: row.patchId,
+    mcpOccurrence: row.occurrence,
+    mcpEditable: row.editable,
+    mcpManagedBy: row.managedBy,
+    mcpReadOnlyReason: row.readOnlyReason,
+    config: row.config,
+    secretKeys: row.secretKeys,
+    transport: row.transport,
+    command: row.command,
+    url: row.url,
+    self: false,
+    official: false,
+    builtinUi: false,
+    role: 'mcp' as const,
+    surface: null,
+  }))
+}
+
 /**
  * One read for the whole panel. Domains own their readers; this file only arranges the answer in
  * the shape the client normalises, so no view has to know where a field came from.
@@ -287,8 +320,11 @@ export async function buildSnapshot(deps: SnapshotDeps): Promise<Record<string, 
   const groups = normalizeGroups(env.state.groups)
   const presets = normalizePresets(env.state.presets)
 
-  const installedBundles = withInstalledBundles(enriched, bundles.rows)
+  const installedBundles = withInstalledBundles([...enriched, ...patchOnlyMcpPlugins(mcpRows)], bundles.rows)
   const plugins = installedBundles.plugins
+  const tools = toolRows(env, groups, presets)
+  const configuredMcp = new Set(mcpRows.map(row => row.name))
+  const externalMcp = [...new Set(tools.map(row => row.server).filter((name): name is string => name !== null && !configuredMcp.has(name)))].sort()
 
   return {
     plugins,
@@ -304,7 +340,8 @@ export async function buildSnapshot(deps: SnapshotDeps): Promise<Record<string, 
       tool: preset.enabled.tool,
       ...(preset.toolPolicy === undefined ? {} : { toolPolicy: preset.toolPolicy }),
     }])),
-    tools: toolRows(env, groups, presets),
+    tools,
+    externalMcp,
     sessions: env.state.sessions,
     sessionList: await sessionOptions(env),
     scene: {

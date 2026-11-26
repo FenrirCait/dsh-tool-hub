@@ -557,7 +557,9 @@ check('runtime-snapshot-contract', () => {
     ],
     bundles: [{ name: 'alpha', version: '1.2.3', enabled: true, official: true, rows: ['p1', 'p2'] }],
   }
+  raw.externalMcp = ['wincu']
   const snapshot = normalise(raw)
+  assert(snapshot.externalMcp[0] === 'wincu', 'normalizeSnapshot must preserve externalMcp')
   assert(Array.isArray(snapshot.bundles) && snapshot.bundles.length === 1, 'normalizeSnapshot must carry the bundles through')
   const groups = mod.pluginTreeGroups({ rows: snapshot.plugins, bundles: snapshot.bundles, term: '', ungrouped: '未分组', matches: () => true })
   assert(same(groups, [

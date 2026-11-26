@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.2.1
+
+- Patch-only MCP rows (rows present in `cordis.patch.yml` before the loader creates an entry) now appear in the MCP view and remain editable, instead of disappearing from the snapshot.
+
 ## 2.2.0
 
 - MCP rows now carry their patch config, file-order occurrence and managed-block owner into the

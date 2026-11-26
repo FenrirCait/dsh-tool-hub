@@ -513,6 +513,7 @@ export function normalizeSnapshot(raw: unknown): HubSnapshot {
     meta: metaOf(record.meta),
     settingsSchema: settingsFieldsOf(record.settingsSchema),
     mcpError: asStringOrNull(record.mcpError),
+    externalMcp: asStringList(record.externalMcp),
     limits: typeof limits.bulk === 'number' ? { bulk: limits.bulk } : null,
     fetchedAt: Date.now(),
   }
