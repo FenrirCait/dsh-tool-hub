@@ -2,6 +2,7 @@
 
 ## 2.3.0
 
+- Groups can expand to show plugin, skill, MCP and tool members; plugin/skill/MCP members have individual switches and tool members stay read-only.
 - MCP rows now expose a tool panel: every tool is listed with its state, an immediate enable switch, and the server's lazy-start switch. Tool toggles use the new atomic `tool.toggle` op; server switches show an inline loading ring.
 
 ## 2.2.1
