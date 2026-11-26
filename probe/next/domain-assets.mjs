@@ -772,6 +772,15 @@ async function main() {
     eq('plugins: list failure never writes', calls, [])
   })
 
+  await step('plugins: an unreadable patch refuses the toggle', async () => {
+    const brokenProfile = join(work, 'broken-profile')
+    await mkdir(join(brokenProfile, 'cordis.patch.yml'), { recursive: true })
+    const host = pluginManager([{ entryId: 'p-read-fail', moduleName: '@deepseek-ai/dsh-mcp-client', patchId: 'p-read-fail', name: 'broken', enabled: true }])
+    const res = await call(pluginsDomain, 'toggle', { kind: 'plugin', id: 'p-read-fail', enabled: true }, makeEnv({ profileContext: { dir: brokenProfile }, pluginManager: host }))
+    eq('plugins: unreadable patch code', res.code, 'mcp-read-failed')
+    eq('plugins: unreadable patch never writes', host.calls, [])
+  })
+
   await rm(work, { recursive: true, force: true })
 
   console.log('')

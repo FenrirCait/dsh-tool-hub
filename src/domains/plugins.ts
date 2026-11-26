@@ -277,8 +277,9 @@ async function managedMcpOwner(env: HostEnv, row: PluginRow, listed: PluginRow[]
     // An unmatched loader-only row has no patch occurrence and therefore no owner to borrow.
     return pair?.row.managedBy ?? null
   }
-  catch {
-    return null
+  catch (error) {
+    // A patch we cannot read cannot prove the row is ours.
+    fail('mcp-read-failed', 'cannot check managed ownership: ' + (error as Error).message)
   }
 }
 
