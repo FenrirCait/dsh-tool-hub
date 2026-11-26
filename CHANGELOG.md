@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.2.0
 
 - MCP rows now carry their patch config, file-order occurrence and managed-block owner into the
   snapshot, so duplicate patch ids can be edited one at a time.
