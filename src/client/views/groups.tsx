@@ -15,7 +15,7 @@ import { Badge, Button, Card, Dialog, Empty, Field, SearchBox, Select, Switch, T
 import { runOp } from '../api.js'
 import { groupOnReader } from '../group-state.js'
 import type { GroupMember, GroupRow, ViewProps } from '../types.js'
-
+import { GroupMembers } from './group-members.js'
 /** Op ids this view owns; api.ts keeps the shell's shared table, not the groups domain. */
 const OPS = {
   save: 'group.save',
@@ -29,7 +29,6 @@ const OPS = {
   marketStatus: 'market.status',
   marketImport: 'market.import',
 } as const
-
 /** Sentinels for the drawer filter: a drawer id matches /^[a-z0-9][a-z0-9_-]{0,31}$/, so neither collides. */
 const ALL = '*'
 const NONE = '-none-'
@@ -37,14 +36,11 @@ const NAME_MAX = 60
 const DRAWER_NAME_MAX = 40
 const DRAWER_ID_MAX = 32
 const DRAWER_ID = /^[a-z0-9][a-z0-9_-]*$/
-
 type DialogKind = 'create' | 'edit' | 'delete' | 'clean' | 'drawer' | 'auto' | 'market'
-
 interface Drawer {
   id: string
   name: string
 }
-
 /** The drawer id derived from a typed name; empty means the name cannot become an id. */
 function slugify(value: string): string {
   const base = value
@@ -55,7 +51,6 @@ function slugify(value: string): string {
     .slice(0, DRAWER_ID_MAX)
   return DRAWER_ID.test(base) ? base : ''
 }
-
 /** group.save's payload: the handler drops members it is not sent, so an edit resends them. */
 function savePayload(id: string | null, name: string, drawer: string, members: GroupMember[] | null): Record<string, unknown> {
   return {
@@ -65,11 +60,9 @@ function savePayload(id: string | null, name: string, drawer: string, members: G
     collection: drawer === NONE ? null : drawer,
   }
 }
-
 // #region market-helpers
 export type MarketGroup = { name: string; members: number; missing: number }
 export type MarketStatus = { available: boolean; file: string | null; groups: MarketGroup[]; error: string | null }
-
 /** market.status, made total: the dialog previews before a single group is written. */
 export function normalizeMarket(raw: unknown): MarketStatus {
   const record = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {}
@@ -81,7 +74,6 @@ export function normalizeMarket(raw: unknown): MarketStatus {
   return { available: record.available === true, file: typeof record.file === 'string' ? record.file : null, groups, error: typeof record.error === 'string' ? record.error : null }
 }
 // #endregion market-helpers
-
 export function GroupsView(props: ViewProps): React.ReactElement {
   const { snapshot, lang, t, busy, run } = props
   const groups = snapshot.groups
@@ -98,7 +90,8 @@ export function GroupsView(props: ViewProps): React.ReactElement {
   const [created, setCreated] = React.useState<Drawer[]>([])
   const [autoPlan, setAutoPlan] = React.useState<Array<{ name: string; members: unknown[] }>>([])
   const [market, setMarket] = React.useState<MarketStatus | null>(null)
-
+  const [expanded, setExpanded] = React.useState<Set<string>>(new Set())
+  const toggleExpanded = (id: string): void => { setExpanded(current => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next }) }
   const drawers = React.useMemo(() => {
     const seen = new Map<string, string>()
     for (const drawer of snapshot.collections) seen.set(drawer.id, drawer.name)
@@ -109,7 +102,6 @@ export function GroupsView(props: ViewProps): React.ReactElement {
     for (const drawer of created) if (!seen.has(drawer.id)) seen.set(drawer.id, drawer.name)
     return [...seen.entries()].map(([id, name]) => ({ id, name }))
   }, [groups, created, snapshot.collections])
-
   // A group has no stored on/off flag: read the live state of its members instead.
   const isOn = React.useMemo(() => groupOnReader(snapshot), [snapshot])
   const term = query.trim().toLowerCase()
@@ -119,10 +111,8 @@ export function GroupsView(props: ViewProps): React.ReactElement {
     if (term === '') return true
     return group.name.toLowerCase().includes(term) || group.id.toLowerCase().includes(term)
   })
-
   const drawerLabel = (id: string | null | undefined): string =>
     typeof id === 'string' && id !== '' ? id : t('groups.ungrouped')
-
   const openCreate = (): void => {
     setTargetId('')
     setTargetName('')
@@ -130,7 +120,6 @@ export function GroupsView(props: ViewProps): React.ReactElement {
     setFormDrawer(filter === ALL || filter === NONE ? NONE : filter)
     setDialog('create')
   }
-
   const openEdit = (group: GroupRow): void => {
     setTargetId(group.id)
     setTargetName(group.name)
@@ -138,17 +127,14 @@ export function GroupsView(props: ViewProps): React.ReactElement {
     setFormDrawer(typeof group.collection === 'string' && group.collection !== '' ? group.collection : NONE)
     setDialog('edit')
   }
-
   const openConfirm = (kind: 'delete' | 'clean', group: GroupRow): void => {
     setTargetId(group.id)
     setTargetName(group.name)
     setDialog(kind)
   }
-
   const close = (): void => {
     setDialog(null)
   }
-
   // auto.preview is a read; the plan is only shown, the write leaves from confirmAction.
   const openAuto = async (): Promise<void> => {
     const result = await runOp(OPS.autoPreview, {})
@@ -161,7 +147,6 @@ export function GroupsView(props: ViewProps): React.ReactElement {
     }))
     setDialog('auto')
   }
-
   // market.status is a read; the import itself only leaves from the dialog's confirm button.
   const openMarket = async (): Promise<void> => {
     const result = await runOp(OPS.marketStatus, {})
@@ -169,7 +154,6 @@ export function GroupsView(props: ViewProps): React.ReactElement {
     setMarket(normalizeMarket(result.data))
     setDialog('market')
   }
-
   // Every write leaves from here: the row buttons only open a dialog, they never send an op.
   const confirmAction = (): void => {
     if (dialog === 'delete') {
@@ -213,10 +197,8 @@ export function GroupsView(props: ViewProps): React.ReactElement {
     close()
     void run(OPS.save, savePayload(editing === undefined ? null : editing.id, name, formDrawer, editing?.members ?? null))
   }
-
   const newDrawerLabel = lang === 'zh' ? '新建抽屉' : 'New drawer'
   const drawerIdHint = `${lang === 'zh' ? '用途 id' : 'id'}: ${slugify(drawerName) || '—'}`
-
   const drawerOptions = [
     { value: NONE, label: t('groups.ungrouped') },
     ...drawers.map(drawer => ({ value: drawer.id, label: drawer.name })),
@@ -224,14 +206,12 @@ export function GroupsView(props: ViewProps): React.ReactElement {
   const filterOptions = [{ value: ALL, label: lang === 'zh' ? '全部抽屉' : 'All drawers' }, ...drawerOptions]
   const emptyQuery = term !== '' ? query.trim() : filter === ALL ? '' : filter === NONE ? t('groups.ungrouped') : filter
   const staleCount = groups.find(group => group.id === targetId)?.stale ?? 0
-
   let title = ''
   let body: React.ReactNode = null
   let confirmLabel = t('action.confirm')
   let confirmVariant: 'primary' | 'danger' = 'primary'
   let confirmBusy = false
   let confirmDisabled = false
-
   if (dialog === 'create' || dialog === 'edit') {
     title = dialog === 'create' ? t('groups.create') : `${t('action.edit')} · ${targetName}`
     body = (
@@ -302,7 +282,6 @@ export function GroupsView(props: ViewProps): React.ReactElement {
     confirmBusy = busy === `${OPS.collection}:${slugify(drawerName)}`
     confirmDisabled = slugify(drawerName) === ''
   }
-
   return (
     <div>
       <Toolbar>
@@ -344,7 +323,6 @@ export function GroupsView(props: ViewProps): React.ReactElement {
           {t('groups.create')}
         </Button>
       </Toolbar>
-
       {groups.length === 0 ? (
         // Rendered inside the same subtree as the dialog: deleting the last group must leave
         // the New group dialog usable, not strand it behind an early return.
@@ -366,7 +344,8 @@ export function GroupsView(props: ViewProps): React.ReactElement {
               const stale = group.stale ?? 0
               const on = isOn(group)
               return (
-                <div className="th-row" key={group.id}>
+                <React.Fragment key={group.id}>
+                <div className="th-row">
                   <div className="th-row-body">
                     <span className="th-row-name">{group.name}</span>
                     <span className="th-row-meta">
@@ -389,6 +368,9 @@ export function GroupsView(props: ViewProps): React.ReactElement {
                       {t('groups.clean')}
                     </Button>
                   ) : null}
+                  <Button variant="ghost" onClick={() => { toggleExpanded(group.id) }}>
+                    {lang === 'zh' ? `成员 ${group.members.length}` : `Members ${group.members.length}`}
+                  </Button>
                   <Button
                     variant="ghost"
                     label={`${t('action.edit')}: ${group.name}`}
@@ -419,12 +401,13 @@ export function GroupsView(props: ViewProps): React.ReactElement {
                     }}
                   />
                 </div>
+                {expanded.has(group.id) ? <GroupMembers group={group} snapshot={snapshot} lang={lang} t={t} busy={busy} run={run} /> : null}
+                </React.Fragment>
               )
             })}
           </div>
         </Card>
       )}
-
       <Dialog
         open={dialog !== null}
         title={title}
