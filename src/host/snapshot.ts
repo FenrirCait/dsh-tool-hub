@@ -325,6 +325,7 @@ export async function buildSnapshot(deps: SnapshotDeps): Promise<Record<string, 
   const tools = toolRows(env, groups, presets)
   const configuredMcp = new Set(mcpRows.map(row => row.name))
   const externalMcp = [...new Set(tools.map(row => row.server).filter((name): name is string => name !== null && !configuredMcp.has(name)))].sort()
+  const lazyServers = readLazy(env.state).servers
 
   return {
     plugins,
@@ -342,6 +343,7 @@ export async function buildSnapshot(deps: SnapshotDeps): Promise<Record<string, 
     }])),
     tools,
     externalMcp,
+    lazyServers,
     sessions: env.state.sessions,
     sessionList: await sessionOptions(env),
     scene: {

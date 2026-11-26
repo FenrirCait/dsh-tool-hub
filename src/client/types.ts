@@ -262,6 +262,7 @@ export interface HubSnapshot {
   mcpError: string | null
   /** MCP server names seen in tools but absent from this profile's MCP rows. */
   externalMcp: string[]
+  lazyServers: string[]
   limits: { bulk: number } | null
   /** Declared settings values, flat keys like "settings.appearance.theme". */
   settings: Record<string, unknown>

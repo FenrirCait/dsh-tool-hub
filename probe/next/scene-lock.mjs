@@ -159,7 +159,7 @@ const ALL_OPS = [
   'mcp.save', 'mcp.create', 'mcp.delete', 'mcp.rawSave', 'toggle', 'bulk',
   'skill.toggle', 'skill.delete', 'skill.import', 'skill.move', 'skill.restore', 'skill.trashClean',
   'preset.save', 'preset.update', 'preset.delete', 'preset.apply',
-  'tool.save', 'tool.import', 'lazy.set', 'lazy.load', 'lazy.unload',
+  'tool.save', 'tool.toggle', 'tool.import', 'lazy.set', 'lazy.load', 'lazy.unload',
 ]
 check('table: the environment ops are exactly the designed list, all scope "all"',
   equal(ALL_OPS.every(op => FROZEN_OPS[op] === 'all') && Object.values(FROZEN_OPS).filter(scope => scope === 'all').length, ALL_OPS.length),

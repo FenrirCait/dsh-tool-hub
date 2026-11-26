@@ -594,6 +594,17 @@ check('lazy: pruneLazy expires old loads and keeps fresh ones',
 check('lazy: serverOf splits an MCP name and rejects the rest',
   serverOf('mcp__a__b') === 'a' && serverOf('plain') === null)
 
+const toggleState = makeState({ toolDeny: ['mcp__a__1'] })
+const toggleEnv = makeEnv({ state: toggleState, services: { 'toolHub.surface': surfacePort(['mcp__a__1', 'mcp__a__2']) } })
+await toolSurfaceDomain().handlers['tool.toggle']({ name: 'mcp__a__1', enabled: false }, toggleEnv)
+check('tool.toggle: disabling adds one name and re-applies the mask',
+  equal(toggleState.toolDeny, ['mcp__a__1']) && toggleEnv.saves.includes('tool-toggle'))
+await toolSurfaceDomain().handlers['tool.toggle']({ name: 'mcp__a__1', enabled: true }, toggleEnv)
+check('tool.toggle: enabling removes that name only', equal(toggleState.toolDeny, []))
+let reservedToggle = null
+try { await toolSurfaceDomain().handlers['tool.toggle']({ name: 'run_code', enabled: false }, toggleEnv) } catch (error) { reservedToggle = error }
+check('tool.toggle: reserved names are refused', reservedToggle?.code === 'reserved-tool')
+
 // ---- 4. lineage: 8 levels, cycle-safe, union -------------------------------
 
 const parents = new Map()

@@ -49,6 +49,7 @@ export const FROZEN_OPS: Readonly<Record<string, FrozenScope>> = {
   'preset.delete': 'all',
   'preset.apply': 'all',
   'tool.save': 'all',
+  'tool.toggle': 'all',
   'tool.import': 'all',
   'lazy.set': 'all',
   'lazy.load': 'all',
