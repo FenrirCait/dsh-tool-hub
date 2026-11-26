@@ -58,6 +58,17 @@ function assert(condition, message) {
 const source = readFileSync(VIEW, 'utf8')
 const OFFICIAL = join(ROOT, 'src', 'client', 'views', 'plugins-official.ts')
 const officialSource = readFileSync(OFFICIAL, 'utf8')
+let officialApi = null
+try {
+  const bundled = await build({ entryPoints: [OFFICIAL], bundle: true, write: false, platform: 'node', format: 'esm' })
+  const text = bundled.outputFiles?.[0]?.text ?? ''
+  assert(text !== '', 'esbuild produced no bundle for plugins-official.ts')
+  officialApi = await import('data:text/javascript;base64,' + Buffer.from(text, 'utf8').toString('base64'))
+} catch (error) {
+  failed += 1
+  failedNames.push('official-view-bundle')
+  console.log('FAIL official-view-bundle -- ' + (error instanceof Error ? error.message : String(error)))
+}
 const treeSource = readFileSync(TREE, 'utf8')
 const sharedSource = readFileSync(SHARED, 'utf8')
 const themeSource = readFileSync(THEME, 'utf8')
@@ -129,15 +140,16 @@ check('visible-rows-drive-the-toolbar', () => {
     'official groups must be resolved through the shared helper')
   assert(/visibleGroups\.flatMap\(group => group\.rows\)/.test(officialSource),
     'visibleRows must be flattened from the filtered groups')
-  assert(/t\('plugins\.count', \{ n: visibleRows\.length \}\)/.test(body),
-    'the count badge must count the rows the tree shows, not a second filter')
+  assert(/t\('plugins\.count', \{ n: totalRows\.length \}\)/.test(body),
+    'the count badge must count every matched row even while official rows are folded')
   assert(/selectableIds\(visibleRows\)/.test(body), 'select-all must use the visible rows')
   assert(/visibleRows\.length === 0 \?/.test(body), 'the filtered-empty state must key off the visible rows')
+  assert(/totalRows = groups\.flatMap\(group => group\.rows\)/.test(body), 'the toolbar count must include folded official rows')
   assert(/t\('plugins\.emptyFiltered', \{ query \}\)/.test(body), 'the filtered-empty state stays')
   assert(/title=\{t\('plugins\.empty'\)\}/.test(body), 'the no-plugins empty state stays')
   assert(!/const rows = /.test(body), 'the old row-local filter must not come back beside the tree')
   assert(!/rows\.map\(/.test(body), 'the view must not map rows itself; the shared GroupTree does')
-  assert((body.match(/visibleRows\.length/g) ?? []).length >= 2, 'the count badge and the empty state both read visibleRows')
+  assert((body.match(/visibleRows\.length/g) ?? []).length >= 1, 'the empty state still reads visibleRows')
   return 'count, select-all and empty state follow the tree'
 })
 
@@ -457,6 +469,21 @@ check('runtime-membership-first-wins', () => {
   assert(membership.get('z') === 1, 'z belongs to the second bundle')
   assert(membership.get('nope') === undefined, 'an unlisted id has no owner')
   return 'first bundle wins, unlisted ids have no owner'
+})
+
+check('runtime-official-view', () => {
+  assert(officialApi !== null, 'plugins-official.ts did not compile')
+  const group = (key, rows) => ({ key, rows, enabled: 1, allEnabled: false, label: key })
+  const groups = [group('solid', [{ id: 'a', official: true }]), group('third', [{ id: 'b', official: false }]), group('mixed', [{ id: 'c', official: true }, { id: 'd', official: false }])]
+  const folded = officialApi.officialView(groups, false, '')
+  assert(folded.officialExpanded === false && folded.visibleGroups.map(item => item.key).join(',') === 'third,mixed', 'folded official groups are wrong')
+  assert(folded.officialRows.map(row => row.id).join(',') === 'a' && folded.officialIds.has('a'), 'official ids are wrong')
+  const open = officialApi.officialView(groups, true, '')
+  assert(open.visibleGroups.length === 3 && open.visibleRows.length === 4, 'expanded official groups are wrong')
+  const searched = officialApi.officialView(groups, false, 'a')
+  assert(searched.officialExpanded === true && searched.visibleRows.length === 4, 'search must force official groups open')
+  const empty = officialApi.officialView([], false, '')
+  assert(empty.visibleRows.length === 0 && empty.officialRows.length === 0, 'an empty snapshot must not crash')
 })
 
 check('runtime-grouping', () => {

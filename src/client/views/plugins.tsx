@@ -154,7 +154,8 @@ export function PluginsView(props: ViewProps): React.ReactElement {
     setShowOfficial(next)
   }
   const known = new Set(snapshot.plugins.map(row => row.id))
-  const picked = selected.filter(id => known.has(id))
+  const picked = selected.filter(id => known.has(id) && (officialExpanded || !officialIds.has(id)))
+  const totalRows = groups.flatMap(group => group.rows)
   const visibleIds = selectableIds(visibleRows)
   const allVisible = visibleIds.length > 0 && visibleIds.every(id => picked.includes(id))
   const cap = snapshot.limits === null ? BULK_CAP : snapshot.limits.bulk
@@ -311,10 +312,10 @@ export function PluginsView(props: ViewProps): React.ReactElement {
     <div>
       <div className="th-toolbar">
         <SearchBox value={query} onChange={setQuery} placeholder={t('plugins.search')} label={t('plugins.search')} onClear={() => { setQuery('') }} clearLabel={t('action.clear')} />
-        <Badge tone="brand">{t('plugins.count', { n: visibleRows.length })}</Badge>
+        <Badge tone="brand">{t('plugins.count', { n: totalRows.length })}</Badge>
         {officialRows.length === 0 ? null : (
           <Button variant="ghost" disabled={term !== ''} onClick={toggleOfficial} title={term === '' ? undefined : (zh ? '搜索时自动展开官方插件' : 'Official plugins stay open while searching')}>
-            {officialExpanded ? (zh ? '收起官方插件' : 'Collapse official') : (zh ? `官方插件（${officialRows.length}）` : `Official (${officialRows.length})`)}
+            {officialExpanded ? (term !== '' ? (zh ? '搜索中展开官方插件' : 'Official shown in search') : (zh ? '收起官方插件' : 'Collapse official')) : (zh ? `官方插件（${officialRows.length}）` : `Official (${officialRows.length})`)}
           </Button>
         )}
         <Button variant="ghost" label={t('third.title')} onClick={() => { void openThird() }}>
