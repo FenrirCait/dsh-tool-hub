@@ -144,11 +144,13 @@ check('lock: locking asks first, unlocking does not', () => {
 
 check('groups: members expand with individual switches', () => {
   const groups = code(source('views/groups.tsx'))
-  assert(groups.includes('memberViews(group, snapshot)'), 'group members must be resolved from the snapshot')
-  assert(groups.includes("member.kind === 'mcp'"), 'MCP members need their own badge/identity')
-  assert(groups.includes('void run(\'toggle\', { kind: member.actionKind'), 'member switches must use the individual toggle op')
-  assert(groups.includes("member.kind === 'tool' || !member.manageable"), 'tool members are read-only')
+  const members = code(source('views/group-members.tsx'))
+  assert(groups.includes('<GroupMembers group={group}'), 'group rows must mount the member view')
   assert(groups.includes('toggleExpanded(group.id)'), 'groups need an expand control')
+  assert(members.includes('memberViews(group, snapshot)'), 'group members must be resolved from the snapshot')
+  assert(members.includes("member.kind === 'mcp'"), 'MCP members need their own badge/identity')
+  assert(members.includes('void run(MEMBER_TOGGLE, { kind: member.actionKind'), 'member switches must use the individual toggle op')
+  assert(members.includes("member.kind === 'tool' || !member.manageable"), 'tool members are read-only')
   return 'expand + MCP badge + member switch'
 })
 
