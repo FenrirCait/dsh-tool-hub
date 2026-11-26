@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.4.3
+
+- Collapse official DSH plugin groups behind one control by default; third-party plugins stay visible and a search temporarily opens the official set.
+- The plugin count includes folded official rows, and bulk actions never include official rows hidden by the fold (including after clearing a search).
+- Add a runtime probe for the official-group resolver and guard the hidden-selection predicate.
+
 ## 2.4.2
 
 - Group state now distinguishes partially enabled groups and renders a mixed switch state instead of "off".
