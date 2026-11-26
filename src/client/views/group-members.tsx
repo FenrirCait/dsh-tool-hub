@@ -55,7 +55,7 @@ export function GroupMembers(props: GroupMembersProps): React.ReactElement {
               <Badge tone={member.kind === 'mcp' ? 'brand' : 'neutral'}>{member.kind}</Badge>
               {member.readOnlyReason === null ? null : <Badge tone="warn">{member.readOnlyReason}</Badge>}
             </span>
-            {member.tools === undefined ? null : <div className="th-group-tools">{member.tools.map(tool => <div className="th-row-meta" key={tool.name}><span className="th-row-name">{tool.name}</span><Badge tone={tool.enabled ? 'on' : 'off'}>{tool.enabled ? 'on' : 'off'}</Badge><Badge>{lang === 'zh' ? '只读' : 'read-only'}</Badge></div>)}</div>}
+            {member.tools === undefined ? null : <div className="th-group-tools">{member.tools.map(tool => <div className="th-row-meta" key={tool.name}><span className="th-row-name">{tool.name}</span><Badge tone={tool.enabled ? 'on' : 'off'}>{tool.enabled ? t('state.on') : t('state.off')}</Badge><Badge>{lang === 'zh' ? '只读' : 'read-only'}</Badge></div>)}</div>}
           </div>
           {member.kind === 'tool' || !member.manageable ? <Badge>{lang === 'zh' ? '只读' : 'read-only'}</Badge> : (
             <Switch

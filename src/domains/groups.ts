@@ -24,7 +24,7 @@ import { readFile } from 'node:fs/promises'
 import { writeFileAtomic } from '../core/atomic.js'
 import { listBundles, listPluginRows, toggleOne, invalidatePluginCache } from './plugins.js'
 import { listSkills, setSkillEnabled } from './skills.js'
-import { patchPathFor } from './mcp.js'
+import { MCP_MODULE, patchPathFor } from './mcp.js'
 import { insertOutsideBlocks } from '../core/patch-blocks.js'
 import { removeRow, setRowDisabled } from '../../lib/patch-rows.js'
 
@@ -315,8 +315,6 @@ export function cleanMembers(value: unknown, known: ReadonlySet<string>, knownTo
  * Whoever a caller picks, the whole package comes along: a group never holds half of a tree.
  * Skills have no children, so they pass through untouched.
  */
-const MCP_MODULE = '@deepseek-ai/dsh-mcp-client'
-
 export function expandBundles(members: readonly Member[], rows: readonly CatalogRow[]): Member[] {
   const rootOf = new Map<string, string>()
   const tree = new Map<string, string[]>()

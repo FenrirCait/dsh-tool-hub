@@ -102,6 +102,10 @@ export function GroupMembershipDialog(props: Props): React.ReactElement {
     setError('')
     try {
       if (mode === 'member' && member !== undefined) {
+        if (member.manageable === false || member.bundleName !== undefined) {
+          setError(lang === 'zh' ? '这个条目是只读的，不能加入分组。' : 'This entry is read-only and cannot join a group.')
+          return
+        }
         const storedKind = member.mcp === true ? 'plugin' : member.kind
         for (const row of groups) {
           const wanted = selected.has(row.id)
@@ -120,19 +124,20 @@ export function GroupMembershipDialog(props: Props): React.ReactElement {
         return
       }
       if (mode === 'group' && group !== undefined) {
+        const target = groups.find(row => row.id === group.id) ?? group
         const wanted = allCandidates.filter(row => selected.has(row.key))
         const wantedKeys = new Set(wanted.map(row => row.key))
-        const current = new Set(group.members.filter(row => row.kind !== 'tool').map(row => keyOf(row.kind, row.id)))
+        const current = new Set(target.members.filter(row => row.kind !== 'tool').map(row => keyOf(row.kind, row.id)))
         const candidateKeys = new Set(allCandidates.map(row => row.key))
         const additions = wanted.filter(row => row.manageable && !current.has(row.key))
         const removals = [...current].filter(key => candidateKeys.has(key) && !wantedKeys.has(key))
         for (const row of additions) {
-          if (!await write(GROUP_OPS.add, { id: group.id, members: [{ kind: row.storageKind, id: row.id }] }, lang === 'zh' ? '加入 ' + row.label : 'Add ' + row.label)) return
+          if (!await write(GROUP_OPS.add, { id: target.id, members: [{ kind: row.storageKind, id: row.id }] }, lang === 'zh' ? '加入 ' + row.label : 'Add ' + row.label)) return
         }
         for (const key of removals) {
           const [kind, ...idParts] = key.split(':')
           const id = idParts.join(':')
-          if ((kind === 'plugin' || kind === 'skill') && !await write(GROUP_OPS.remove, { id: group.id, members: [{ kind, id }] }, lang === 'zh' ? '移出成员' : 'Remove member')) return
+          if ((kind === 'plugin' || kind === 'skill') && !await write(GROUP_OPS.remove, { id: target.id, members: [{ kind, id }] }, lang === 'zh' ? '移出成员' : 'Remove member')) return
         }
         onClose()
       }

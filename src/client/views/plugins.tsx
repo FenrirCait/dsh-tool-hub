@@ -293,7 +293,7 @@ export function PluginsView(props: ViewProps): React.ReactElement {
             {disabled ? <Badge tone="warn">{row.readOnlyReason ?? 'read-only'}</Badge> : null}
           </span>
         </div>
-        <Button variant="ghost" disabled={row.manageable === false} onClick={() => { setAssignMember({ kind: 'plugin', id: row.id, name: row.name, mcp: row.mcp === true }) }}>{zh ? '分组' : 'Groups'}</Button>
+        <Button variant="ghost" disabled={row.manageable === false || row.bundleName !== undefined} onClick={() => { setAssignMember({ kind: 'plugin', id: row.id, name: row.name, mcp: row.mcp === true, manageable: row.manageable !== false, ...(row.bundleName === undefined ? {} : { bundleName: row.bundleName }) }) }}>{zh ? '分组' : 'Groups'}</Button>
         <Switch
           checked={row.enabled}
           busy={rowBusy}

@@ -447,7 +447,7 @@ check('colour-tokens-only', () => {
 
 check('group-entry', () => {
   const viewSource = body
-  assert(viewSource.includes('GroupMembershipDialog'), 'the row view must mount the group picker')
+  assert(/<GroupMembershipDialog[\s\S]{0,220}open=/.test(viewSource), 'the row view must mount the group picker, not only import it')
   return 'group picker mounted'
 })
 
