@@ -32,6 +32,7 @@ interface TrashRow {
   rel: string | null
 }
 type Lang = ViewProps['lang']
+
 /**
  * Inline copy for labels no catalog key covers yet. i18n.ts is shared with every other view, so
  * this view does not extend it; a label added here is one the catalog can absorb later.
@@ -39,6 +40,7 @@ type Lang = ViewProps['lang']
 function pick(lang: Lang, zh: string, en: string): string {
   return lang === 'zh' ? zh : en
 }
+
 function trashRows(data: unknown): TrashRow[] {
   const record = data !== null && typeof data === 'object' ? (data as Record<string, unknown>) : {}
   const items = Array.isArray(record.items) ? record.items : []
@@ -58,15 +60,18 @@ function trashRows(data: unknown): TrashRow[] {
   }
   return rows
 }
+
 /** The shell keys a row op as `${op}:${id}` when the payload carries an id; mirror it here. */
 function busyKey(op: string, id: string): string {
   return op + ':' + id
 }
+
 /** The root a move defaults to: the first one that is not already where the row lives. */
 function firstOtherRoot(row: SkillRow, roots: SkillRootInfo[]): string {
   const hit = roots.find(item => item.id !== row.rootId)
   return hit === undefined ? '' : hit.id
 }
+
 /** Trash timestamps are ISO strings; an unparseable one shows nothing rather than NaN. */
 function when(at: string, lang: Lang): string {
   if (at === '') return ''
@@ -81,6 +86,7 @@ function when(at: string, lang: Lang): string {
     return ''
   }
 }
+
 export function SkillsView(props: ViewProps): React.ReactElement {
   const { snapshot, t, lang, busy, run } = props
   const [query, setQuery] = React.useState('')
@@ -98,6 +104,7 @@ export function SkillsView(props: ViewProps): React.ReactElement {
   const [trashLoading, setTrashLoading] = React.useState(false)
   const [trashTick, setTrashTick] = React.useState(0)
   const [assignMember, setAssignMember] = React.useState<GroupMemberRef | null>(null)
+
   const roots = snapshot.paths.skills ?? []
   const rootOptions = [
     { value: 'all', label: t('skills.allRoots') },
@@ -106,11 +113,13 @@ export function SkillsView(props: ViewProps): React.ReactElement {
   const importOptions = rootOptions.filter(option => option.value !== 'all')
   const targetRoot = importRoot !== '' ? importRoot : (roots[0] === undefined ? '' : roots[0].id)
   const term = query.trim().toLowerCase()
+
   // The root filter runs here and the search runs in the tree: a hit on a parent label keeps
   // every child, which a plain row filter would have thrown away.
   const scoped = snapshot.skills.filter(row => root === 'all' || row.rootId === root)
   const groups = skillTree(groupByPrefix(scoped, row => row.name, t('tree.ungrouped')), term, row => row.name + ' ' + row.id)
   const visible = groups.reduce((count, group) => count + group.rows.length, 0)
+
   // The one read the view performs itself: the snapshot never carries the trash, and restore
   // needs a trashPath the rows cannot supply on their own.
   React.useEffect(() => {
@@ -130,6 +139,7 @@ export function SkillsView(props: ViewProps): React.ReactElement {
       live = false
     }
   }, [trashTick])
+
   // One write per child, in order: a failure part-way stops the run instead of writing over the
   // error the shell already reported. The parent switch spins on the group key meanwhile.
   const bulkToggle = async (group: TreeGroup<SkillRow>, next: boolean): Promise<void> => {
@@ -144,16 +154,19 @@ export function SkillsView(props: ViewProps): React.ReactElement {
       setBulkKey(null)
     }
   }
+
   const openImport = (): void => {
     setImportPath('')
     setImportRoot(roots.length === 0 ? '' : (roots[0] === undefined ? '' : roots[0].id))
     setOverwrite(false)
     setImporting(true)
   }
+
   const restoreItem = async (item: TrashRow): Promise<void> => {
     const ok = await run(OPS.restore, { trashPath: item.trashPath })
     if (ok) setTrashTick(tick => tick + 1)
   }
+
   const confirmDelete = async (): Promise<void> => {
     const row = deleting
     if (row === null) return
@@ -161,12 +174,14 @@ export function SkillsView(props: ViewProps): React.ReactElement {
     if (ok) setTrashTick(tick => tick + 1)
     setDeleting(null)
   }
+
   const confirmMove = async (): Promise<void> => {
     const row = moving
     if (row === null || moveTarget === '') return
     const ok = await run(OPS.move, { id: row.id, targetId: moveTarget })
     if (ok) setMoving(null)
   }
+
   const submitImport = async (): Promise<void> => {
     const source = importPath.trim()
     if (source === '' || targetRoot === '') return
@@ -177,6 +192,7 @@ export function SkillsView(props: ViewProps): React.ReactElement {
       setOverwrite(false)
     }
   }
+
   const trashSection = (
     <div className="th-section">
       <div className="th-section-title">{pick(lang, '回收站', 'Trash')}</div>
@@ -223,6 +239,7 @@ export function SkillsView(props: ViewProps): React.ReactElement {
       )}
     </div>
   )
+
   return (
     <div>
       <Toolbar>
@@ -240,6 +257,7 @@ export function SkillsView(props: ViewProps): React.ReactElement {
           {pick(lang, '导入技能', 'Import a skill')}
         </Button>
       </Toolbar>
+
       {snapshot.skills.length === 0 ? (
         <Empty
           title={t('skills.empty')}
@@ -310,7 +328,9 @@ export function SkillsView(props: ViewProps): React.ReactElement {
           />
         </Card>
       )}
+
       {trashSection}
+
       <Dialog
         open={importing}
         title={pick(lang, '导入技能', 'Import a skill')}
@@ -357,6 +377,7 @@ export function SkillsView(props: ViewProps): React.ReactElement {
           </div>
         </div>
       </Dialog>
+
       <Dialog
         open={moving !== null}
         title={pick(lang, '移动到另一个根目录', 'Move to another root')}
@@ -395,6 +416,7 @@ export function SkillsView(props: ViewProps): React.ReactElement {
           </Field>
         </div>
       </Dialog>
+
       <Dialog
         open={deleting !== null}
         title={t('dialog.confirmTitle')}

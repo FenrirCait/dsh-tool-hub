@@ -220,7 +220,7 @@ export function McpView(props: ViewProps): React.ReactElement {
                         void run(OPS.toggle, { kind: 'plugin', id: row.id, enabled: next })
                       }}
                     />
-                    <Button variant="ghost" disabled={row.manageable === false} onClick={() => { setAssignMember({ kind: 'plugin', id: row.id, name: row.name, mcp: true }) }}>{copy(lang, '分组', 'Groups')}</Button>
+                    <Button variant="ghost" disabled={row.manageable === false || row.bundleName !== undefined} onClick={() => { setAssignMember({ kind: 'plugin', id: row.id, name: row.name, mcp: true }) }}>{copy(lang, '分组', 'Groups')}</Button>
                     <Button variant="ghost" onClick={() => { setOpenTools(current => ({ ...current, [serverKey]: !toolsOpen })) }}>
                       {copy(lang, `工具 (${serverTools.length})`, `Tools (${serverTools.length})`)}
                     </Button>
@@ -394,6 +394,7 @@ export function McpView(props: ViewProps): React.ReactElement {
         {pending === null ? null : `${t('action.delete')}: ${pending.name}`}
       </Dialog>
 
+      <GroupMembershipDialog open={assignMember !== null} mode="member" member={assignMember ?? undefined} groups={snapshot.groups} snapshot={snapshot} lang={lang} t={t} busy={busy} run={run} onClose={() => { setAssignMember(null) }} />
       <McpOauthDialog
         open={oauthRow !== null}
         row={oauthRow}

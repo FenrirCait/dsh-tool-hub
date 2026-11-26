@@ -28,6 +28,7 @@ const {
   autoRoleFor,
   buildAutoPlan,
   cleanMembers,
+  expandBundles,
   groupsDomain,
   normalizeGroups,
 } = await import(pathToFileURL(join(distRoot, 'domains', 'groups.js')).href)
@@ -158,6 +159,14 @@ check('batch: group.batch is declared write+audit and has a handler',
 check('auto: the 1.x group and collection ops are untouched',
   ['group.save', 'group.delete', 'group.toggle', 'group.reorder', 'group.move', 'group.clean',
     'group.add', 'group.remove', 'collection.save', 'collection.delete'].every(id => ops.has(id)))
+
+// ---- MCP expansion regression ---------------------------------------------
+const mcpRows = [
+  { kind: 'plugin', id: 'github', moduleName: '@deepseek-ai/dsh-mcp-client', root: '@deepseek-ai/dsh-mcp-client', enabled: true, manageable: true },
+  { kind: 'plugin', id: 'filesystem', moduleName: '@deepseek-ai/dsh-mcp-client', root: '@deepseek-ai/dsh-mcp-client', enabled: true, manageable: true },
+]
+const mcpAdd = expandBundles([{ kind: 'plugin', id: 'github' }], mcpRows)
+check('bundle: one MCP id does not expand to every MCP server', mcpAdd.length === 1 && mcpAdd[0].kind === 'plugin' && mcpAdd[0].id === 'github')
 
 // ---- 2. the pure plan -----------------------------------------------------
 

@@ -315,12 +315,14 @@ export function cleanMembers(value: unknown, known: ReadonlySet<string>, knownTo
  * Whoever a caller picks, the whole package comes along: a group never holds half of a tree.
  * Skills have no children, so they pass through untouched.
  */
+const MCP_MODULE = '@deepseek-ai/dsh-mcp-client'
+
 export function expandBundles(members: readonly Member[], rows: readonly CatalogRow[]): Member[] {
   const rootOf = new Map<string, string>()
   const tree = new Map<string, string[]>()
   for (const row of rows) {
     if (row.kind !== 'plugin') continue
-    const root = row.root ?? row.moduleName ?? row.id
+    const root = row.moduleName === MCP_MODULE ? 'mcp:' + row.id : (row.root ?? row.moduleName ?? row.id)
     rootOf.set(row.id, root)
     tree.set(root, [...(tree.get(root) ?? []), row.id])
   }
