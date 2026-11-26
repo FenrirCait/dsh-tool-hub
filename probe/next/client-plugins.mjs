@@ -56,6 +56,8 @@ function assert(condition, message) {
 }
 
 const source = readFileSync(VIEW, 'utf8')
+const OFFICIAL = join(ROOT, 'src', 'client', 'views', 'plugins-official.ts')
+const officialSource = readFileSync(OFFICIAL, 'utf8')
 const treeSource = readFileSync(TREE, 'utf8')
 const sharedSource = readFileSync(SHARED, 'utf8')
 const themeSource = readFileSync(THEME, 'utf8')
@@ -123,7 +125,9 @@ check('groups-come-from-the-snapshot', () => {
 })
 
 check('visible-rows-drive-the-toolbar', () => {
-  assert(/const visibleRows = groups\.flatMap\(group => group\.rows\)/.test(body),
+  assert(/officialView\(groups, showOfficial, term\)/.test(body),
+    'official groups must be resolved through the shared helper')
+  assert(/visibleGroups\.flatMap\(group => group\.rows\)/.test(officialSource),
     'visibleRows must be flattened from the filtered groups')
   assert(/t\('plugins\.count', \{ n: visibleRows\.length \}\)/.test(body),
     'the count badge must count the rows the tree shows, not a second filter')
@@ -138,7 +142,7 @@ check('visible-rows-drive-the-toolbar', () => {
 })
 
 check('tree-render-and-expansion', () => {
-  for (const needle of ['groups={groups}', 'lang={lang}', 'term={term}', 'busyKey={bulkGroup}', 'renderRow={renderRow}', 'onBulk={onGroupBulk}']) {
+  for (const needle of ['groups={visibleGroups}', 'lang={lang}', 'term={term}', 'busyKey={bulkGroup}', 'renderRow={renderRow}', 'onBulk={onGroupBulk}']) {
     assert(treeUse.includes(needle), '<PluginsTree must receive ' + needle)
   }
   assert(/const \[bulkGroup, setBulkGroup\] = React\.useState<string \| null>\(null\)/.test(body),
@@ -341,7 +345,7 @@ check('paging-does-not-narrow-the-group', () => {
   assert(/<Badge tone="neutral">\{group\.rows\.length\}<\/Badge>/.test(shared), 'the header badge keeps counting every row')
   assert(/\{group\.enabled\}\/\{group\.rows\.length\}/.test(shared), 'the enabled/total line keeps counting every row')
   assert(/const rows = group\.rows\.filter\(matches\)/.test(tree), 'membership is still the search filter, not the page')
-  assert(/const visibleRows = groups\.flatMap\(group => group\.rows\)/.test(body),
+  assert(/visibleRows: visibleGroups\.flatMap\(group => group\.rows\)/.test(officialSource),
     'the toolbar still sees every filtered row, so select-all is unchanged')
   return 'the cap is a render rule: switch, counts and select-all see every row'
 })

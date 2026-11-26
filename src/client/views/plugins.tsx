@@ -24,30 +24,26 @@ import type { PluginRow, ViewProps } from '../types.js'
 import type { TreeGroup } from './package-tree.js'
 import { pluginTreeGroups, PluginsTree } from './plugins-tree.js'
 import { GroupMembershipDialog, type GroupMemberRef } from './group-membership.js'
-
+import { officialView } from './plugins-official.js'
 // #region bulk-helpers
 /** The 1.x confirmation line: a batch larger than this asks before writing. */
 export const BULK_CONFIRM_ABOVE = 20
 /** src/domains/plugins.ts MAX_BULK: the fallback when a snapshot carries no limit. */
 export const BULK_CAP = 400
-
 /** The host's member shape for one plugin id; this view never batches skills. */
 export function bulkItems(ids: string[], rows: PluginRow[] = []): { kind: 'plugin'; id: string; bundleName?: string }[] {
   const bundles = new Map(rows.filter(row => row.bundleName !== undefined).map(row => [row.id, row.bundleName as string]))
   return ids.map(id => ({ kind: 'plugin', id, ...(bundles.has(id) ? { bundleName: bundles.get(id) } : {}) }))
 }
-
 /** Whether a batch needs the dialog. The host documents "confirms past 20", so strictly greater. */
 export function needsConfirm(count: number, threshold: number = BULK_CONFIRM_ABOVE): boolean {
   return count > threshold
 }
-
 /** Add or remove one id, keeping the order rows were picked in. */
 export function toggleSelected(current: string[], id: string, on: boolean): string[] {
   if (!on) return current.filter(item => item !== id)
   return current.includes(id) ? current : [...current, id]
 }
-
 /** Tick or untick every visible id; ids already picked keep their place and never repeat. */
 export function selectVisible(current: string[], visible: string[], on: boolean): string[] {
   if (!on) {
@@ -63,20 +59,16 @@ export function selectVisible(current: string[], visible: string[], on: boolean)
   }
   return next
 }
-
 /** A failed batch keeps its selection: the user needs it to retry. */
 export function selectionAfter(ok: boolean, current: string[]): string[] {
   return ok ? [] : current
 }
-
 /** Rows the host lets this panel write; a read-only row has no switch, so it has no checkbox. */
 export function selectableIds(rows: PluginRow[]): string[] {
   return rows.filter(row => row.manageable !== false).map(row => row.id)
 }
-
 /** The host's bulk answer: rows changed, bundled-UI entries skipped, and whether the cap cut it. */
 export type BulkResult = { changed: number; skipped: number; truncated: boolean }
-
 /** bulk's data made total: a host without counts still renders a report instead of a blank line. */
 export function normalizeBulk(raw: unknown): BulkResult | null {
   const record = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : null
@@ -85,18 +77,14 @@ export function normalizeBulk(raw: unknown): BulkResult | null {
   return { changed: count(record.changed), skipped: count(record.skippedBuiltin), truncated: record.truncated === true }
 }
 // #endregion bulk-helpers
-
 // #region third-helpers
 export type ThirdTarget = { kind: string; id: string; name: string; mcp: boolean }
 export type ThirdSnapshot = { file: string; at: string; plugins: string[]; skills: string[] }
 export type ThirdStatus = { targets: ThirdTarget[]; snapshot: ThirdSnapshot | null }
-
 /** Op ids this view adds beyond the shell's shared table: the third-party panic switch. */
 export const THIRD = { status: 'third.status', off: 'third.off', restore: 'third.restore' } as const
-
 const stringList = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
-
 /** third.status, made total: a host without the op still renders an empty dialog, not a crash. */
 export function normalizeThird(raw: unknown): ThirdStatus {
   const record = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {}
@@ -116,7 +104,6 @@ export function normalizeThird(raw: unknown): ThirdStatus {
     },
   }
 }
-
 /** The summary the dialog prints: enabled targets by kind, and 1 rollback point when one exists. */
 export function thirdCounts(status: ThirdStatus): { plugins: number; skills: number; snapshots: number } {
   return {
@@ -125,12 +112,10 @@ export function thirdCounts(status: ThirdStatus): { plugins: number; skills: num
     snapshots: status.snapshot === null ? 0 : 1,
   }
 }
-
 export function rollbackCount(snapshot: ThirdSnapshot | null): number {
   return snapshot === null ? 0 : snapshot.plugins.length + snapshot.skills.length
 }
 // #endregion third-helpers
-
 export function PluginsView(props: ViewProps): React.ReactElement {
   const { snapshot, lang, t, busy, run, runDetailed } = props
   const [query, setQuery] = React.useState('')
@@ -144,12 +129,12 @@ export function PluginsView(props: ViewProps): React.ReactElement {
   const [confirming, setConfirming] = React.useState<boolean | null>(null)
   const [third, setThird] = React.useState<ThirdStatus | null>(null)
   const [thirdOpen, setThirdOpen] = React.useState(false)
+  const [showOfficial, setShowOfficial] = React.useState(false)
   const [thirdConfirm, setThirdConfirm] = React.useState(false)
   const [thirdNotice, setThirdNotice] = React.useState('')
   const [thirdReading, setThirdReading] = React.useState(false)
   const [bulkReport, setBulkReport] = React.useState<BulkResult | null>(null)
   const [bulkGroup, setBulkGroup] = React.useState<string | null>(null)
-
   const term = query.trim().toLowerCase()
   const matches = (row: PluginRow): boolean =>
     term === '' || row.name.toLowerCase().includes(term) || row.id.toLowerCase().includes(term)
@@ -160,7 +145,14 @@ export function PluginsView(props: ViewProps): React.ReactElement {
     ungrouped: t('tree.ungrouped'),
     matches,
   })
-  const visibleRows = groups.flatMap(group => group.rows)
+  const official = officialView(groups, showOfficial, term)
+  const { officialRows, officialIds, visibleGroups, officialExpanded } = official
+  const visibleRows = official.visibleRows
+  const toggleOfficial = (): void => {
+    const next = !showOfficial
+    if (!next) setSelected(list => list.filter(id => !officialIds.has(id)))
+    setShowOfficial(next)
+  }
   const known = new Set(snapshot.plugins.map(row => row.id))
   const picked = selected.filter(id => known.has(id))
   const visibleIds = selectableIds(visibleRows)
@@ -172,7 +164,6 @@ export function PluginsView(props: ViewProps): React.ReactElement {
   const zh = lang === 'zh'
   const thirdTargets = third === null ? 0 : third.targets.length
   const thirdRollback = rollbackCount(third === null ? null : third.snapshot)
-
   const commit = React.useCallback(
     (enabled: boolean, ids: string[] = picked): void => {
       if (ids.length === 0 || ids.length > cap) return
@@ -187,7 +178,6 @@ export function PluginsView(props: ViewProps): React.ReactElement {
     },
     [picked, cap, runDetailed],
   )
-
   const ask = React.useCallback(
     (enabled: boolean): void => {
       if (picked.length === 0 || picked.length > cap) return
@@ -199,7 +189,6 @@ export function PluginsView(props: ViewProps): React.ReactElement {
     },
     [picked, cap, commit],
   )
-
   // A parent switch stages its own ids, so both entry points share the dialog and the cap: over the
   // threshold it opens the same confirm, below it the batch goes straight out. It only ever writes
   // the rows the search left visible — a folded row is still a visible one, a filtered row is not.
@@ -209,7 +198,6 @@ export function PluginsView(props: ViewProps): React.ReactElement {
     setConfirming(null)
     setBulkGroup(null)
   }
-
   const onGroupBulk = React.useCallback(
     (group: TreeGroup<PluginRow>, next: boolean): void => {
       if (anyBusy) return
@@ -229,7 +217,6 @@ export function PluginsView(props: ViewProps): React.ReactElement {
     },
     [anyBusy, cap, commit],
   )
-
   // The dialog opens on a read: targets and the rollback point are shown before anything is written.
   const readThird = async (): Promise<void> => {
     setThirdReading(true)
@@ -238,13 +225,11 @@ export function PluginsView(props: ViewProps): React.ReactElement {
     setThirdNotice(result.ok ? '' : result.message)
     setThirdReading(false)
   }
-
   const openThird = async (): Promise<void> => {
     setThirdConfirm(false)
     setThirdOpen(true)
     await readThird()
   }
-
   const disableThird = (): void => {
     const count = thirdTargets
     void run(THIRD.off, {}).then(ok => {
@@ -254,7 +239,6 @@ export function PluginsView(props: ViewProps): React.ReactElement {
       void readThird()
     })
   }
-
   const restoreThird = (): void => {
     const count = thirdRollback
     void run(THIRD.restore, {}).then(ok => {
@@ -263,11 +247,9 @@ export function PluginsView(props: ViewProps): React.ReactElement {
       void readThird()
     })
   }
-
   if (snapshot.plugins.length === 0) {
     return <Empty title={t('plugins.empty')} hint={t('app.subtitle')} />
   }
-
   const renderRow = (row: PluginRow): React.ReactNode => {
     const key = `${OPS.toggle}:${row.id}`
     const rowBusy = busy === key
@@ -315,7 +297,6 @@ export function PluginsView(props: ViewProps): React.ReactElement {
       </RowBoundary>
     )
   }
-
   const confirmText =
     confirming === null
       ? ''
@@ -326,12 +307,16 @@ export function PluginsView(props: ViewProps): React.ReactElement {
         : zh
           ? `将停用已选的 ${picked.length} 个插件；内建 UI 与只读条目会被跳过。`
           : `Disable the ${picked.length} selected plugins; bundled-UI and read-only entries are skipped.`
-
   return (
     <div>
       <div className="th-toolbar">
         <SearchBox value={query} onChange={setQuery} placeholder={t('plugins.search')} label={t('plugins.search')} onClear={() => { setQuery('') }} clearLabel={t('action.clear')} />
         <Badge tone="brand">{t('plugins.count', { n: visibleRows.length })}</Badge>
+        {officialRows.length === 0 ? null : (
+          <Button variant="ghost" disabled={term !== ''} onClick={toggleOfficial} title={term === '' ? undefined : (zh ? '搜索时自动展开官方插件' : 'Official plugins stay open while searching')}>
+            {officialExpanded ? (zh ? '收起官方插件' : 'Collapse official') : (zh ? `官方插件（${officialRows.length}）` : `Official (${officialRows.length})`)}
+          </Button>
+        )}
         <Button variant="ghost" label={t('third.title')} onClick={() => { void openThird() }}>
           {t('third.title')}
         </Button>
@@ -363,11 +348,11 @@ export function PluginsView(props: ViewProps): React.ReactElement {
         </div>
       )}
       {visibleRows.length === 0 ? (
-        <Empty title={t('plugins.emptyFiltered', { query })} />
+        <Empty title={officialRows.length > 0 && !officialExpanded ? t('plugins.officialCollapsed') : t('plugins.emptyFiltered', { query })} />
       ) : (
         <Card label={t('plugins.title')}>
           <PluginsTree
-            groups={groups}
+            groups={visibleGroups}
             lang={lang}
             term={term}
             busyKey={bulkGroup}
