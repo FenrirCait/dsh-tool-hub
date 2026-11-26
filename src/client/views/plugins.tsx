@@ -135,6 +135,11 @@ export function PluginsView(props: ViewProps): React.ReactElement {
   const { snapshot, lang, t, busy, run, runDetailed } = props
   const [query, setQuery] = React.useState('')
   const [assignMember, setAssignMember] = React.useState<GroupMemberRef | null>(null)
+  const bundleByRow = React.useMemo(() => {
+    const map = new Map<string, { name: string; rows: string[] }>()
+    for (const bundle of snapshot.bundles) for (const id of bundle.rows) if (!map.has(id)) map.set(id, { name: bundle.name, rows: bundle.rows })
+    return map
+  }, [snapshot.bundles])
   const [selected, setSelected] = React.useState<string[]>([])
   const [confirming, setConfirming] = React.useState<boolean | null>(null)
   const [third, setThird] = React.useState<ThirdStatus | null>(null)
@@ -293,7 +298,10 @@ export function PluginsView(props: ViewProps): React.ReactElement {
             {disabled ? <Badge tone="warn">{row.readOnlyReason ?? 'read-only'}</Badge> : null}
           </span>
         </div>
-        <Button variant="ghost" disabled={row.manageable === false || row.bundleName !== undefined} onClick={() => { setAssignMember({ kind: 'plugin', id: row.id, name: row.name, mcp: row.mcp === true, manageable: row.manageable !== false, ...(row.bundleName === undefined ? {} : { bundleName: row.bundleName }) }) }}>{zh ? '分组' : 'Groups'}</Button>
+        <Button variant="ghost" disabled={row.manageable === false || row.bundleName !== undefined} onClick={() => {
+          const bundle = bundleByRow.get(row.id)
+          setAssignMember({ kind: 'plugin', id: row.id, name: row.name, mcp: row.mcp === true, manageable: row.manageable !== false, ...(bundle === undefined ? {} : { bundleName: bundle.name, bundleRows: bundle.rows }) })
+        }}>{zh ? '分组' : 'Groups'}</Button>
         <Switch
           checked={row.enabled}
           busy={rowBusy}

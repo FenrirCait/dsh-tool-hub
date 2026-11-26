@@ -184,6 +184,7 @@ check('one-bulk-payload', () => {
 check('group-entry', () => {
   const viewSource = body
   assert(/<GroupMembershipDialog[\s\S]{0,220}open=/.test(viewSource), 'the row view must mount the group picker, not only import it')
+  assert(viewSource.includes('bundleByRow') && viewSource.includes('bundleRows'), 'a bundle child must add its whole package')
   return 'group picker mounted'
 })
 
