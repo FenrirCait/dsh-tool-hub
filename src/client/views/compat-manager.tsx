@@ -309,6 +309,8 @@ interface CompatProps {
   lang: ViewProps['lang']
   t: ViewProps['t']
   runDetailed: ViewProps['runDetailed']
+  /** Installed official pack ids, so the page can keep them out of the local extension list. */
+  onLoaded?: (ids: string[]) => void
 }
 
 interface CompatReport {
@@ -321,7 +323,7 @@ interface CompatReport {
  * way to get one, so there is no "no packs" early return.
  */
 export function CompatManager(props: CompatProps): React.ReactElement {
-  const { statePath, lang, t, runDetailed } = props
+  const { statePath, lang, t, runDetailed, onLoaded } = props
   const [index, setIndex] = React.useState<CompatIndex | null>(null)
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState('')
@@ -346,6 +348,7 @@ export function CompatManager(props: CompatProps): React.ReactElement {
         return
       }
       setIndex(next)
+      onLoaded?.(next.packs.filter(row => row.installedVersion !== '').map(row => row.id))
     })
   }
 
@@ -359,8 +362,7 @@ export function CompatManager(props: CompatProps): React.ReactElement {
   }, [])
 
   const packs = index === null ? [] : index.packs
-  const pending = pendingActions(packs)
-  const backupRoot = backupRootOf(statePath)
+  const pending = pendingActions(packs); const backupRoot = backupRootOf(statePath)
   const anyBusy = running || loading
 
   const runActions = (actions: CompatPending[]): void => {

@@ -62,6 +62,8 @@ export interface SwitchProps {
   label: string
   disabled?: boolean
   busy?: boolean
+  /** Render the mixed/partial state while keeping the next click boolean. */
+  mixed?: boolean
 }
 
 export function Switch(props: SwitchProps): React.ReactElement {
@@ -73,7 +75,7 @@ export function Switch(props: SwitchProps): React.ReactElement {
         type="button"
         role="switch"
         className="th-switch"
-      aria-checked={props.checked}
+      aria-checked={props.mixed === true ? 'mixed' : props.checked}
       aria-label={props.label}
       aria-busy={props.busy === true}
       disabled={disabled}

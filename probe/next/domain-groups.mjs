@@ -25,6 +25,7 @@ const {
   applyGroupOnDemand,
   applyGroupSave,
   applyGroupTools,
+  applyGroupTransfer,
   autoRoleFor,
   buildAutoPlan,
   cleanMembers,
@@ -288,6 +289,20 @@ check('auto: applyAutoPlan keeps hand-made groups and derives its own counts',
 const writtenEmpty = applyAutoPlan(manual, [], 1720000000000)
 check('auto: applyAutoPlan with no plan returns the hand-made list untouched',
   writtenEmpty.groups.length === 1 && writtenEmpty.created.length === 0 && writtenEmpty.members === 0)
+
+// ---- 6b. transfer ----------------------------------------------------------
+const transferCtx = { known: new Set(['plugin:p-a', 'plugin:p-b', 'skill:s-a']), rows: [], collections: [{ id: 'default', name: 'd', order: 0 }], now: 1720000000000 }
+const transferBase = normalizeGroups([
+  { id: 'g-a', name: 'A', members: [{ kind: 'plugin', id: 'p-a' }, { kind: 'skill', id: 's-a' }, { kind: 'tool', id: 't-1' }] },
+  { id: 'g-b', name: 'B', members: [{ kind: 'plugin', id: 'p-b' }] },
+])
+const transfer = applyGroupTransfer(transferBase, { from: 'g-a', to: 'g-b', members: [{ kind: 'plugin', id: 'p-a' }, { kind: 'skill', id: 's-a' }] }, transferCtx)
+check('group.transfer: moves live members to the target in one result',
+  transfer.moved === 2
+  && transfer.from.members.map(member => member.kind + ':' + member.id).join(',') === 'tool:t-1'
+  && transfer.to.members.map(member => member.kind + ':' + member.id).join(',') === 'plugin:p-b,plugin:p-a,skill:s-a')
+check('group.transfer: an unknown source member is refused instead of half-moving',
+  (() => { try { applyGroupTransfer(transferBase, { from: 'g-b', to: 'g-a', members: [{ kind: 'plugin', id: 'missing' }] }, transferCtx); return false } catch (error) { return error?.code === 'no-members' } })())
 
 // ---- 7. on-demand tool members (G10) --------------------------------------
 

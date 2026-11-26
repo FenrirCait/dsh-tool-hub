@@ -1,5 +1,7 @@
 import * as React from 'react'
-import { Badge, Switch } from '../components.js'
+import { Badge, Button, Switch } from '../components.js'
+import type { GroupMemberRef } from './group-membership.js'
+import { GroupTransferDialog } from './group-transfer.js'
 import type { GroupRow, ViewProps } from '../types.js'
 
 const MEMBER_TOGGLE = 'toggle'
@@ -37,6 +39,7 @@ export function memberViews(group: GroupRow, snapshot: ViewProps['snapshot']): M
 
 export interface GroupMembersProps {
   group: GroupRow
+  groups: GroupRow[]
   snapshot: ViewProps['snapshot']
   lang: 'zh' | 'en'
   t: ViewProps['t']
@@ -45,7 +48,8 @@ export interface GroupMembersProps {
 }
 
 export function GroupMembers(props: GroupMembersProps): React.ReactElement {
-  const { group, snapshot, lang, t, busy, run } = props
+  const { group, groups, snapshot, lang, t, busy, run } = props
+  const [transfer, setTransfer] = React.useState<GroupMemberRef | null>(null)
   return (
     <div className="th-group-members">
       {memberViews(group, snapshot).map(member => (
@@ -60,6 +64,8 @@ export function GroupMembers(props: GroupMembersProps): React.ReactElement {
             {member.tools === undefined ? null : <div className="th-group-tools">{member.tools.map(tool => <div className="th-row-meta" key={tool.name}><span className="th-row-name">{tool.name}</span><Badge tone={tool.enabled ? 'on' : 'off'}>{tool.enabled ? t('state.on') : t('state.off')}</Badge><Badge>{lang === 'zh' ? '只读' : 'read-only'}</Badge></div>)}</div>}
           </div>
           {member.kind === 'tool' || !member.manageable ? <Badge>{lang === 'zh' ? '只读' : 'read-only'}</Badge> : (
+            <>
+            <Button variant="ghost" onClick={() => { setTransfer({ kind: member.kind === 'skill' ? 'skill' : 'plugin', id: member.id, name: member.label, mcp: member.kind === 'mcp', manageable: true, ...(member.bundleName === undefined ? {} : { bundleName: member.bundleName }) }) }}>{lang === 'zh' ? '转移' : 'Move'}</Button>
             <Switch
               checked={member.enabled}
               busy={busy === 'toggle:' + member.id}
@@ -68,9 +74,11 @@ export function GroupMembers(props: GroupMembersProps): React.ReactElement {
                 void run(MEMBER_TOGGLE, { kind: member.actionKind, id: member.id, enabled: next, ...(member.bundleName === undefined ? {} : { bundleName: member.bundleName }) })
               }}
             />
+            </>
           )}
         </div>
       ))}
+      <GroupTransferDialog open={transfer !== null} source={group} groups={groups} member={transfer} lang={lang} t={t} busy={busy} run={run} onClose={() => { setTransfer(null) }} />
     </div>
   )
 }

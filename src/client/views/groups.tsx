@@ -13,7 +13,7 @@
 import * as React from 'react'
 import { Badge, Button, Card, Dialog, Empty, Field, SearchBox, Select, Switch, Toolbar } from '../components.js'
 import { runOp } from '../api.js'
-import { groupOnReader } from '../group-state.js'
+import { groupStatsReader } from '../group-state.js'
 import type { GroupMember, GroupRow, ViewProps } from '../types.js'
 import { GroupMembers } from './group-members.js'
 import { GroupMembershipDialog } from './group-membership.js'
@@ -105,7 +105,7 @@ export function GroupsView(props: ViewProps): React.ReactElement {
     return [...seen.entries()].map(([id, name]) => ({ id, name }))
   }, [groups, created, snapshot.collections])
   // A group has no stored on/off flag: read the live state of its members instead.
-  const isOn = React.useMemo(() => groupOnReader(snapshot), [snapshot])
+  const statsOf = React.useMemo(() => groupStatsReader(snapshot), [snapshot])
   const term = query.trim().toLowerCase()
   const rows = groups.filter(group => {
     const drawer = typeof group.collection === 'string' ? group.collection : ''
@@ -344,7 +344,9 @@ export function GroupsView(props: ViewProps): React.ReactElement {
           <div className="th-list">
             {rows.map(group => {
               const stale = group.stale ?? 0
-              const on = isOn(group)
+              const stats = statsOf(group)
+              const on = stats.state === 'on'
+              const partial = stats.state === 'partial'
               return (
                 <React.Fragment key={group.id}>
                 <div className="th-row">
@@ -355,7 +357,7 @@ export function GroupsView(props: ViewProps): React.ReactElement {
                       <Badge>{t('groups.members', { n: group.members.length })}</Badge>
                       <Badge tone="brand">{drawerLabel(group.collection)}</Badge>
                       {stale > 0 ? <Badge tone="warn">{t('groups.stale', { n: stale })}</Badge> : null}
-                      <Badge tone={on ? 'on' : 'off'}>{on ? t('state.on') : t('state.off')}</Badge>
+                      <Badge tone={partial ? 'warn' : on ? 'on' : 'off'}>{partial ? t('groups.partial') : on ? t('state.on') : t('state.off')}</Badge>
                     </span>
                   </div>
                   {stale > 0 ? (
@@ -395,7 +397,8 @@ export function GroupsView(props: ViewProps): React.ReactElement {
                     {t('groups.delete')}
                   </Button>
                   <Switch
-                    checked={on}
+                    checked={stats.enabled > 0}
+                    mixed={partial}
                     busy={busy === `${OPS.batch}:${group.id}`}
                     label={t('a11y.switch', { name: group.name })}
                     onChange={next => {
@@ -404,7 +407,7 @@ export function GroupsView(props: ViewProps): React.ReactElement {
                     }}
                   />
                 </div>
-                {expanded.has(group.id) ? <GroupMembers group={group} snapshot={snapshot} lang={lang} t={t} busy={busy} run={run} /> : null}
+                {expanded.has(group.id) ? <GroupMembers group={group} groups={groups} snapshot={snapshot} lang={lang} t={t} busy={busy} run={run} /> : null}
                 </React.Fragment>
               )
             })}

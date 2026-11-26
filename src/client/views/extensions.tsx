@@ -559,6 +559,8 @@ function ExtensionPanel(props: PanelProps): React.ReactElement {
 
 export function ExtensionsView(props: ViewProps): React.ReactElement {
   const { snapshot, lang, t, busy, run, runDetailed, reload } = props
+  const [officialIds, setOfficialIds] = React.useState<Set<string>>(new Set())
+  const localExtensions = snapshot.extensions.filter(entry => !officialIds.has(entry.id))
   // The catalog card is the way to get a first extension, so it renders before the empty state:
   // an installation with no local folder still sees what the official index offers.
   return (
@@ -568,13 +570,16 @@ export function ExtensionsView(props: ViewProps): React.ReactElement {
         lang={lang}
         t={t}
         runDetailed={runDetailed}
+        onLoaded={ids => { setOfficialIds(new Set(ids)) }}
       />
-      {snapshot.extensions.length === 0 ? (
+      {localExtensions.length === 0 && officialIds.size === 0 ? (
         <Empty title={t('extensions.empty')} hint={t('extensions.enableHint')} />
+      ) : localExtensions.length === 0 ? (
+        <p className="th-field-hint">{t('extensions.officialOnly')}</p>
       ) : (
         <div>
           <Toolbar>
-            <Badge tone="brand">{t('extensions.count', { n: snapshot.extensions.length })}</Badge>
+            <Badge tone="brand">{t('extensions.count', { n: localExtensions.length })}</Badge>
             <Button variant="ghost" onClick={() => { void reload() }}>
               {t('action.retry')}
             </Button>
@@ -582,7 +587,7 @@ export function ExtensionsView(props: ViewProps): React.ReactElement {
           <p className="th-field-hint" style={{ marginTop: 0 }}>{t('extensions.hot')}</p>
           <p className="th-field-hint" style={{ marginBottom: SP.lg }}>{t('extensions.local')}</p>
           <div className="th-list">
-            {snapshot.extensions.map(entry => (
+            {localExtensions.map(entry => (
               <ExtensionPanel
                 key={entry.id}
                 entry={entry}

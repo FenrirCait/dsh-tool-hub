@@ -203,6 +203,10 @@ check('membership-ui', () => {
   assert(dialog.includes("row.kind !== 'tool'"), 'tool members must stay out of the writable membership set')
   assert(dialog.includes("kind: 'bundle'") && dialog.includes('bundle.rows'), 'bundle children must collapse into a read-only parent package')
   assert(body.includes('GroupMembershipDialog'), 'group rows must mount the membership dialog')
+  const members = readFileSync(join(ROOT, 'src', 'client', 'views', 'group-members.tsx'), 'utf8')
+  const transfer = readFileSync(join(ROOT, 'src', 'client', 'views', 'group-transfer.tsx'), 'utf8')
+  assert(members.includes('GroupTransferDialog'), 'member rows must mount the transfer dialog')
+  assert(transfer.includes('group.transfer') && transfer.includes('from: source.id'), 'member rows must expose the atomic transfer action')
   return 'member picker + MCP + tool read-only'
 })
 
@@ -306,8 +310,9 @@ check('action-edit', () => {
 })
 
 check('action-toggle', () => {
-  assert(/const on = isOn\(group\)/.test(body) && /groupOnReader\(snapshot\)/.test(body), 'the switch must derive state from the live member rows')
-  assert(/checked=\{on\}/.test(body), 'the switch must be bound to that state')
+  assert(/const stats = statsOf\(group\)/.test(body) && /groupStatsReader\(snapshot\)/.test(body), 'the switch must derive state from the live member rows')
+  assert(/groups\.partial/.test(body) && /mixed=\{partial\}/.test(body), 'a partially enabled group needs its own label and mixed switch')
+  assert(/checked=\{stats\.enabled > 0\}/.test(body), 'the switch must be bound to the enabled count')
   assert(/<Switch/.test(body), 'the bulk switch must use the Switch component')
   return 'Switch -> group.batch, busy group.batch:id'
 })

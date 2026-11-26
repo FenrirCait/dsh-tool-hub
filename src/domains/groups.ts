@@ -471,6 +471,34 @@ export function applyGroupRemove(groups: readonly GroupRecord[], payload: Record
   return { groups: replace(groups, group), removed: before - group.members.length }
 }
 
+/** Move members from one group to another in one state write. */
+export function applyGroupTransfer(
+  groups: readonly GroupRecord[],
+  payload: Record<string, unknown>,
+  ctx: GroupContext,
+): { groups: GroupRecord[]; from: GroupRecord; to: GroupRecord; moved: number } {
+  const from = findGroup(groups, payload.from)
+  const to = findGroup(groups, payload.to)
+  if (from === undefined) throw fail('no-group', 'the source group no longer exists')
+  if (to === undefined) throw fail('no-group', 'the target group no longer exists')
+  if (from.id === to.id) throw fail('same-group', 'source and target are the same group')
+  const incoming = expandBundles(cleanMembers(payload.members, ctx.known), ctx.rows)
+  if (incoming.length === 0) throw fail('no-members', 'no live member matched the transfer')
+  const moveKeys = new Set(incoming.map(memberKey))
+  const moved = from.members.filter(member => moveKeys.has(memberKey(member)))
+  if (moved.length === 0) throw fail('no-members', 'none of those members are in the source group')
+  from.members = from.members.filter(member => !moveKeys.has(memberKey(member)))
+  const have = new Set(to.members.map(memberKey))
+  for (const member of incoming) {
+    const key = memberKey(member)
+    if (!have.has(key)) {
+      to.members.push(member)
+      have.add(key)
+    }
+  }
+  return { groups: replace(replace(groups, from), to), from, to, moved: moved.length }
+}
+
 export interface TogglePlan {
   group: GroupRecord
   members: Member[]
@@ -971,6 +999,15 @@ const groupRemove: OpHandler = async (payload, env) => {
   return { groups: groupList(result.groups), removed: result.removed, backup }
 }
 
+const groupTransfer: OpHandler = async (payload, env) => {
+  const catalog = await readCatalog(env)
+  const groups = normalizeGroups(env.state.groups)
+  const result = applyGroupTransfer(groups, asRecord(payload), { ...catalog, collections: normalizeCollections(env.state.collections), now: env.now() })
+  saveGroups(env, result.groups)
+  const backup = await env.save('group-transfer')
+  return { groups: groupList(result.groups), from: result.from, to: result.to, moved: result.moved, backup, degraded: catalog.degraded }
+}
+
 const groupToggle: OpHandler = async (payload, env) => {
   const body = asRecord(payload)
   const catalog = await readCatalog(env)
@@ -1202,6 +1239,7 @@ export function groupsDomain(): DomainRegistration {
         { id: 'group.move', write: true, audit: true, note: 'Moves a group into another drawer.' },
         { id: 'group.clean', write: true, audit: true, note: 'Drops group members that no longer resolve to a live plugin or skill.' },
         { id: 'group.add', write: true, audit: true, note: 'Appends members to a group, expanding whole packages.' },
+        { id: 'group.transfer', write: true, audit: true, note: 'Moves members from one group to another in one state write.' },
         { id: 'group.remove', write: true, audit: true, note: 'Removes members from a group.' },
         { id: 'auto.preview', write: false, audit: false, note: 'Builds the rule-based group plan without touching state.' },
         { id: 'auto.apply', write: true, audit: true, note: 'Replaces every automatic group with a fresh plan and stamps auto.appliedAt.' },
@@ -1221,6 +1259,7 @@ export function groupsDomain(): DomainRegistration {
       'group.clean': groupClean,
       'group.add': groupAdd,
       'group.remove': groupRemove,
+      'group.transfer': groupTransfer,
       'auto.preview': autoPreview,
       'auto.apply': autoApply,
       'collection.save': collectionSave,

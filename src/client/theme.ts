@@ -323,6 +323,7 @@ const CSS = `
   transition: background 120ms ease;
 }
 .th-switch[aria-checked='true'] { background: var(--dsw-alias-brand-primary, rgba(76, 111, 255, 1)); }
+.th-switch[aria-checked='mixed'] { background: var(--dsw-alias-state-warning-primary, rgba(245, 158, 11, 1)); }
 .th-switch:disabled { opacity: 0.55; cursor: default; }
 .th-switch:focus-visible {
   outline: 2px solid var(--dsw-alias-brand-primary, rgba(76, 111, 255, 1));
@@ -339,6 +340,7 @@ const CSS = `
   transition: transform 140ms ease;
 }
 .th-switch[aria-checked='true'] .th-knob { transform: translateX(16px); }
+.th-switch[aria-checked='mixed'] .th-knob { transform: translateX(8px); }
 .th-badge {
   display: inline-flex;
   align-items: center;
