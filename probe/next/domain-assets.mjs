@@ -592,6 +592,32 @@ async function main() {
     eq('plugins: managed mcp toggle code', toggle.code, 'read-only')
   })
 
+  await step('plugins: duplicate mcp rows use their own managed occurrence', async () => {
+    const duplicate = [
+      '# >>> dsh-skill-mcp-panel:mcp:begin',
+      '- insert:',
+      '  - id: dup-managed',
+      '    name: "@deepseek-ai/dsh-mcp-client"',
+      '    config:',
+      '      serverName: inside',
+      '# <<< dsh-skill-mcp-panel:mcp:end',
+      '- id: dup-managed',
+      '  name: "@deepseek-ai/dsh-mcp-client"',
+      '  config:',
+      '    serverName: outside',
+    ].join('\n') + '\n'
+    await writeFile(patchPath, duplicate, 'utf8')
+    const host = pluginManager([
+      { entryId: 'loader-inside', moduleName: '@deepseek-ai/dsh-mcp-client', patchId: 'dup-managed', name: 'inside', enabled: true, manageable: true },
+      { entryId: 'loader-outside', moduleName: '@deepseek-ai/dsh-mcp-client', patchId: 'dup-managed', name: 'outside', enabled: true, manageable: true },
+    ])
+    const env = makeEnv({ profileContext: { dir: profile }, pluginManager: host })
+    const inside = await call(pluginsDomain, 'toggle', { kind: 'plugin', id: 'loader-inside', enabled: true }, env)
+    eq('plugins: managed occurrence refused', inside.code, 'read-only')
+    const outside = await call(pluginsDomain, 'toggle', { kind: 'plugin', id: 'loader-outside', enabled: true }, env)
+    eq('plugins: sibling occurrence allowed', outside.ok, true)
+  })
+
   await step('mcp: empty state is an empty list', async () => {
     const missing = await call(mcpDomain, 'mcp.list', {}, makeEnv({ profileContext: { dir: join(work, 'no-profile') } }))
     eq('mcp: empty list ok', missing.ok, true)

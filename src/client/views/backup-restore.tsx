@@ -10,6 +10,7 @@
  */
 import * as React from 'react'
 import { runOp } from '../api.js'
+import { mcpRowKey, parseMcpRowKey } from '../identity.js'
 import { Badge, Button, Callout, Dialog, Empty, Field, Select } from '../components.js'
 import type { Lang, TFunction } from '../i18n.js'
 import { FONT, MONO, R, SP, T } from '../theme.js'
@@ -36,22 +37,15 @@ interface BackupEntry {
   rows: BackupRowRef[]
 }
 
-/** A JSON key keeps duplicate ids apart in the picker without relying on a reserved separator. */
+/** The shared tuple key keeps duplicate ids apart in the picker. */
 function rowKeyOf(row: BackupRowRef): string {
-  return JSON.stringify([row.id, row.occurrence])
+  return mcpRowKey(row.id, row.occurrence)
 }
 
 function rowRefOf(key: string): BackupRowRef {
-  try {
-    const parsed = JSON.parse(key) as unknown
-    if (Array.isArray(parsed) && typeof parsed[0] === 'string') {
-      const occurrence = Number(parsed[1])
-      return { id: parsed[0], occurrence: Number.isInteger(occurrence) && occurrence >= 0 ? occurrence : 0, name: '' }
-    }
-  }
-  catch {
-    /* a hand-typed id is not JSON */
-  }
+  const parsed = parseMcpRowKey(key)
+  if (parsed !== null) return { ...parsed, name: '' }
+  // A hand-typed id, not a picker value.
   return { id: key, occurrence: 0, name: key }
 }
 
@@ -217,7 +211,7 @@ export function BackupRestoreDialog(props: BackupRestoreProps): React.ReactEleme
   const entry = entries.find(item => item.name === backup) ?? null
   const rows = entry === null ? [] : entry.rows
   const canRestore = diff !== null && confirmed && backup !== '' && row !== ''
-  const restoreBusy = RESTORE_OPS.restore + ':' + row
+  const restoreBusy = RESTORE_OPS.restore + ':' + (row === '' ? '' : rowRefOf(row).id)
   /** A pair cannot be swapped mid-write: the payload already sent names the old backup and row. */
   const writing = busy !== null && busy.startsWith(RESTORE_OPS.restore)
 

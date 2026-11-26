@@ -15,7 +15,7 @@
  */
 import type { DomainRegistration, HostEnv, OpHandler } from '../shared/contract.js'
 import type { OpDefinition } from '../shared/types.js'
-import { parseMcpRows, patchPathFor, readPatchText } from './mcp.js'
+import { pairMcpRows, parseMcpRows, patchPathFor, readPatchText } from './mcp.js'
 import { setSkillEnabled } from './skills.js'
 
 /** This plugin's own module name: the one entry a panel must not switch off (it is the panel). */
@@ -262,13 +262,20 @@ async function isSelfEntry(env: HostEnv, id: string): Promise<boolean> {
 }
 
 /** The owner of a managed block containing this loader row, or null when it is ours. */
-async function managedMcpOwner(env: HostEnv, row: PluginRow): Promise<string | null> {
+async function managedMcpOwner(env: HostEnv, row: PluginRow, listed: PluginRow[]): Promise<string | null> {
   if (row.mcp !== true || row.patchId === null) return null
   const patch = patchPathFor(env)
   if (patch === null) return null
   try {
-    const managed = parseMcpRows(await readPatchText(patch)).find(candidate => candidate.id === row.patchId && candidate.managedBy !== null)
-    return managed?.managedBy ?? null
+    const patchRows = parseMcpRows(await readPatchText(patch))
+    // The same pairing mergeMcpRows() uses: a duplicate patch id is resolved by loader order,
+    // not by id alone, so an outside row is not rejected because its sibling is managed.
+    const loaderRows = listed
+      .filter(item => item.mcp === true && typeof item.patchId === 'string')
+      .map(item => ({ id: item.id, moduleName: item.moduleName, patchId: item.patchId, enabled: item.enabled, manageable: item.manageable }))
+    const pair = pairMcpRows(patchRows, loaderRows).pairs.find(item => item.loader?.id === row.id)
+    const target = pair?.row ?? patchRows.find(candidate => candidate.id === row.patchId && candidate.managedBy !== null)
+    return target?.managedBy ?? null
   }
   catch {
     return null
@@ -288,7 +295,7 @@ export async function setPluginEnabled(
   const listed = await listPluginRows(env, true).catch(() => [] as PluginRow[])
   const listedRow = listed.find(item => item.id === id)
   if (listedRow !== undefined && listedRow.mcp) {
-    const owner = await managedMcpOwner(env, listedRow)
+    const owner = await managedMcpOwner(env, listedRow, listed)
     if (owner !== null) fail('read-only', 'mcp row "' + id + '" is inside ' + owner + "'s managed block")
   }
   if (!enabled) {

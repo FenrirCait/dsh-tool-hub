@@ -553,21 +553,40 @@ export async function backupPatch(patch: string, text: string): Promise<string> 
   return file
 }
 
-/** Join patch rows with the loader's view, so a row keeps its entry id (needed for the switch). */
-export function mergeMcpRows(patchRows: McpRow[], loaderRows: LoaderRow[]): McpServerRow[] {
-  // Duplicate patch ids are legal in a hand-written file. Keep the loader rows in order and
-  // consume one per patch row; a Map of one value would attach both rows to the same loader entry.
+/**
+ * Pair patch rows with loader rows in file/loader order. Duplicate patch ids are legal in a
+ * hand-written file, so a Map of one loader row would attach both patch rows to one entry. Every
+ * caller that needs a row occurrence (merge, snapshot, plugin toggle) must use this same pairing.
+ */
+export function pairMcpRows(patchRows: McpRow[], loaderRows: LoaderRow[]): {
+  pairs: Array<{ loader: LoaderRow | null; row: McpRow }>
+  leftovers: LoaderRow[]
+} {
   const byPatchId = new Map<string, LoaderRow[]>()
   for (const row of loaderRows) {
     if (row.moduleName !== MCP_MODULE) continue
-    if (typeof row.patchId === 'string') {
-      const list = byPatchId.get(row.patchId) ?? []
-      list.push(row)
-      byPatchId.set(row.patchId, list)
-    }
+    if (typeof row.patchId !== 'string') continue
+    const list = byPatchId.get(row.patchId) ?? []
+    list.push(row)
+    byPatchId.set(row.patchId, list)
   }
-  const merged: McpServerRow[] = patchRows.map((row) => {
-    const loader = byPatchId.get(row.id)?.shift()
+  const used = new Set<string>()
+  const pairs = patchRows.map((row) => {
+    const loader = byPatchId.get(row.id)?.shift() ?? null
+    if (loader !== null) used.add(loader.id)
+    return { loader, row }
+  })
+  const leftovers: LoaderRow[] = []
+  for (const list of byPatchId.values()) {
+    for (const loader of list) if (!used.has(loader.id)) leftovers.push(loader)
+  }
+  return { pairs, leftovers }
+}
+
+/** Join patch rows with the loader's view, so a row keeps its entry id (needed for the switch). */
+export function mergeMcpRows(patchRows: McpRow[], loaderRows: LoaderRow[]): McpServerRow[] {
+  const { pairs, leftovers } = pairMcpRows(patchRows, loaderRows)
+  const merged: McpServerRow[] = pairs.map(({ loader, row }) => {
     const config = row.config
     const name = typeof config.serverName === 'string' ? config.serverName : row.id
     const transport = typeof config.transport === 'string' ? config.transport : 'stdio'
@@ -594,27 +613,25 @@ export function mergeMcpRows(patchRows: McpRow[], loaderRows: LoaderRow[]): McpS
       disabled: row.disabled,
     }
   })
-  for (const leftovers of byPatchId.values()) {
-    for (const leftover of leftovers) {
-      merged.push({
-        id: leftover.id,
-        patchId: null,
-        entryId: leftover.id,
-        occurrence: 0,
-        managedBy: null,
-        readOnlyReason: 'no patch row',
-        name: leftover.id,
-        transport: 'stdio',
-        command: '',
-        url: '',
-        enabled: leftover.enabled === true,
-        manageable: leftover.manageable,
-        editable: false,
-        config: null,
-        secretKeys: { env: [], headers: [] },
-        disabled: false,
-      })
-    }
+  for (const leftover of leftovers) {
+    merged.push({
+      id: leftover.id,
+      patchId: null,
+      entryId: leftover.id,
+      occurrence: 0,
+      managedBy: null,
+      readOnlyReason: 'no patch row',
+      name: leftover.id,
+      transport: 'stdio',
+      command: '',
+      url: '',
+      enabled: leftover.enabled === true,
+      manageable: leftover.manageable,
+      editable: false,
+      config: null,
+      secretKeys: { env: [], headers: [] },
+      disabled: false,
+    })
   }
   return merged
 }

@@ -153,7 +153,7 @@ check('restore-write', () => {
 })
 
 check('busy-key', () => {
-  assert(has(source, "const restoreBusy = RESTORE_OPS.restore + ':' + row"), 'the busy key must be the op plus the row id, like the shell builds it')
+  assert(has(source, "const restoreBusy = RESTORE_OPS.restore + ':' + (row === '' ? '' : rowRefOf(row).id)"), 'the busy key must use the decoded row id, like the shell builds it')
   assert(has(source, 'busy={busy === restoreBusy}'), 'the confirm button must show the shell busy state')
   assert(has(source, 'busy={diffLoading}'), 'reading a diff must show that it is loading')
   return 'busy = backup.restoreRow:<row>'
@@ -256,7 +256,7 @@ check('i18n-keys', () => {
 })
 
 check('imports', () => {
-  const allowed = new Set(['../api.js', '../components.js', '../types.js', '../theme.js', '../i18n.js'])
+  const allowed = new Set(['../api.js', '../components.js', '../types.js', '../theme.js', '../i18n.js', '../identity.js'])
   for (const line of source.split('\n')) {
     if (!line.startsWith('import ')) continue
     const at = line.indexOf("'")

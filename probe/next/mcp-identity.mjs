@@ -121,6 +121,31 @@ check('CRLF managed blocks keep their owner', () => {
   ])
 })
 
+check('pairMcpRows resolves duplicate loader rows by occurrence', () => {
+  const duplicate = [
+    '# >>> dsh-skill-mcp-panel:mcp:begin',
+    '- insert:',
+    '  - id: dup-managed',
+    '    name: "@deepseek-ai/dsh-mcp-client"',
+    '    config:',
+    '      serverName: inside',
+    '# <<< dsh-skill-mcp-panel:mcp:end',
+    '- id: dup-managed',
+    '  name: "@deepseek-ai/dsh-mcp-client"',
+    '  config:',
+    '    serverName: outside',
+  ].join('\n') + '\n'
+  const rows = mcp.parseMcpRows(duplicate)
+  const paired = mcp.pairMcpRows(rows, [
+    { id: 'loader-inside', moduleName: '@deepseek-ai/dsh-mcp-client', patchId: 'dup-managed', enabled: true, manageable: true },
+    { id: 'loader-outside', moduleName: '@deepseek-ai/dsh-mcp-client', patchId: 'dup-managed', enabled: true, manageable: true },
+  ])
+  equal(paired.pairs.map(pair => [pair.loader?.id, pair.row.occurrence, pair.row.managedBy]), [
+    ['loader-inside', 0, 'dsh-skill-mcp-panel:mcp'],
+    ['loader-outside', 1, null],
+  ])
+})
+
 check('mergeMcpRows carries occurrence and read-only owner', () => {
   const rows = mcp.mergeMcpRows(mcp.parseMcpRows(managed), [
     { id: 'loader-x', moduleName: '@deepseek-ai/dsh-mcp-client', patchId: 'panel-mcp-x', enabled: true, manageable: true },
