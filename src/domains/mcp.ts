@@ -583,6 +583,11 @@ export function pairMcpRows(patchRows: McpRow[], loaderRows: LoaderRow[]): {
   return { pairs, leftovers }
 }
 
+/** Index only rows that have a real loader entry; a patch-only display id must not shadow one. */
+export function mcpRowsByEntryId(rows: McpServerRow[]): Map<string, McpServerRow> {
+  return new Map(rows.filter(row => row.entryId !== null).map(row => [row.id, row]))
+}
+
 /** Join patch rows with the loader's view, so a row keeps its entry id (needed for the switch). */
 export function mergeMcpRows(patchRows: McpRow[], loaderRows: LoaderRow[]): McpServerRow[] {
   const { pairs, leftovers } = pairMcpRows(patchRows, loaderRows)

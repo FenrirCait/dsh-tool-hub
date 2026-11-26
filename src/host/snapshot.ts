@@ -9,7 +9,7 @@ import { normalizeGroups } from '../domains/groups.js'
 import { normalizePresets } from '../domains/presets.js'
 import { listBundles, listPluginRows } from '../domains/plugins.js'
 import { listSkills, skillRoots } from '../domains/skills.js'
-import { MCP_MODULE, mergeMcpRows, parseMcpRows, patchPathFor } from '../domains/mcp.js'
+import { MCP_MODULE, mcpRowsByEntryId, mergeMcpRows, parseMcpRows, patchPathFor } from '../domains/mcp.js'
 import { scanPatchBlocks } from '../core/patch-blocks.js'
 import { readMode } from '../domains/scenes.js'
 import { readLazy, serverOf, toolDenyReasons, type PresetDenySource, type ToolDenyReason } from '../domains/tool-surface.js'
@@ -260,7 +260,7 @@ export async function buildSnapshot(deps: SnapshotDeps): Promise<Record<string, 
     manageable: row.manageable,
   }))
   const mcpRows = patchText === null ? [] : mergeMcpRows(parseMcpRows(patchText), loaderRows)
-  const mcpById = new Map(mcpRows.map(row => [row.id, row]))
+  const mcpById = mcpRowsByEntryId(mcpRows)
   const plugins = basePlugins.map(row => {
     if (row.mcp !== true) return row
     const merged = mcpById.get(row.id)

@@ -265,7 +265,7 @@ async function isSelfEntry(env: HostEnv, id: string): Promise<boolean> {
 async function managedMcpOwner(env: HostEnv, row: PluginRow, listed: PluginRow[]): Promise<string | null> {
   if (row.mcp !== true || row.patchId === null) return null
   const patch = patchPathFor(env)
-  if (patch === null) return null
+  if (patch === null) fail('mcp-read-failed', 'no patch path is available to check managed ownership')
   try {
     const patchRows = parseMcpRows(await readPatchText(patch))
     // The same pairing mergeMcpRows() uses: a duplicate patch id is resolved by loader order,

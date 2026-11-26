@@ -146,6 +146,16 @@ check('pairMcpRows resolves duplicate loader rows by occurrence', () => {
   ])
 })
 
+check('mcpRowsByEntryId never lets a patch-only display id shadow a loader entry', () => {
+  const rows = [
+    { id: 'patch:x', entryId: 'patch:x', patchId: 'x', occurrence: 0 },
+    { id: 'patch:x', entryId: null, patchId: 'x', occurrence: 1 },
+  ]
+  const indexed = mcp.mcpRowsByEntryId(rows)
+  equal(indexed.size, 1)
+  equal(indexed.get('patch:x').entryId, 'patch:x')
+})
+
 check('mergeMcpRows carries occurrence and read-only owner', () => {
   const rows = mcp.mergeMcpRows(mcp.parseMcpRows(managed), [
     { id: 'loader-x', moduleName: '@deepseek-ai/dsh-mcp-client', patchId: 'panel-mcp-x', enabled: true, manageable: true },

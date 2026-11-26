@@ -781,6 +781,13 @@ async function main() {
     eq('plugins: unreadable patch never writes', host.calls, [])
   })
 
+  await step('plugins: a missing patch path refuses mcp toggles', async () => {
+    const host = pluginManager([{ entryId: 'p-no-path', moduleName: '@deepseek-ai/dsh-mcp-client', patchId: 'p-no-path', name: 'no-path', enabled: true }])
+    const res = await call(pluginsDomain, 'toggle', { kind: 'plugin', id: 'p-no-path', enabled: true }, makeEnv({ pluginManager: host }))
+    eq('plugins: no patch path code', res.code, 'mcp-read-failed')
+    eq('plugins: no patch path never writes', host.calls, [])
+  })
+
   await rm(work, { recursive: true, force: true })
 
   console.log('')
