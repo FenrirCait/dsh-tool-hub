@@ -145,6 +145,7 @@ check('visible-rows-drive-the-toolbar', () => {
   assert(/selectableIds\(visibleRows\)/.test(body), 'select-all must use the visible rows')
   assert(/visibleRows\.length === 0 \?/.test(body), 'the filtered-empty state must key off the visible rows')
   assert(/totalRows = groups\.flatMap\(group => group\.rows\)/.test(body), 'the toolbar count must include folded official rows')
+  assert(/known\.has\(id\) && \(officialExpanded \|\| !officialIds\.has\(id\)\)/.test(body), 'hidden official ids must not be pickable')
   assert(/t\('plugins\.emptyFiltered', \{ query \}\)/.test(body), 'the filtered-empty state stays')
   assert(/title=\{t\('plugins\.empty'\)\}/.test(body), 'the no-plugins empty state stays')
   assert(!/const rows = /.test(body), 'the old row-local filter must not come back beside the tree')
