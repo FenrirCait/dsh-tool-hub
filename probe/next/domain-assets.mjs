@@ -616,6 +616,13 @@ async function main() {
     eq('plugins: managed occurrence refused', inside.code, 'read-only')
     const outside = await call(pluginsDomain, 'toggle', { kind: 'plugin', id: 'loader-outside', enabled: true }, env)
     eq('plugins: sibling occurrence allowed', outside.ok, true)
+    const extraHost = pluginManager([
+      { entryId: 'loader-inside', moduleName: '@deepseek-ai/dsh-mcp-client', patchId: 'dup-managed', name: 'inside', enabled: true, manageable: true },
+      { entryId: 'loader-outside', moduleName: '@deepseek-ai/dsh-mcp-client', patchId: 'dup-managed', name: 'outside', enabled: true, manageable: true },
+      { entryId: 'loader-extra', moduleName: '@deepseek-ai/dsh-mcp-client', patchId: 'dup-managed', name: 'extra', enabled: true, manageable: true },
+    ])
+    const extra = await call(pluginsDomain, 'toggle', { kind: 'plugin', id: 'loader-extra', enabled: true }, makeEnv({ profileContext: { dir: profile }, pluginManager: extraHost }))
+    eq('plugins: unmatched loader row is unowned', extra.ok, true)
   })
 
   await step('mcp: empty state is an empty list', async () => {

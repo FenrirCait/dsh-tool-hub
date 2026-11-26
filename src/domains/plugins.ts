@@ -274,8 +274,8 @@ async function managedMcpOwner(env: HostEnv, row: PluginRow, listed: PluginRow[]
       .filter(item => item.mcp === true && typeof item.patchId === 'string')
       .map(item => ({ id: item.id, moduleName: item.moduleName, patchId: item.patchId, enabled: item.enabled, manageable: item.manageable }))
     const pair = pairMcpRows(patchRows, loaderRows).pairs.find(item => item.loader?.id === row.id)
-    const target = pair?.row ?? patchRows.find(candidate => candidate.id === row.patchId && candidate.managedBy !== null)
-    return target?.managedBy ?? null
+    // An unmatched loader-only row has no patch occurrence and therefore no owner to borrow.
+    return pair?.row.managedBy ?? null
   }
   catch {
     return null
