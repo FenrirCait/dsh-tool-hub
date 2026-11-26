@@ -15,6 +15,7 @@
  */
 import type { DomainRegistration, HostEnv, OpHandler } from '../shared/contract.js'
 import type { OpDefinition } from '../shared/types.js'
+import { pairMcpRows, parseMcpRows, patchPathFor, readPatchText } from './mcp.js'
 import { setSkillEnabled } from './skills.js'
 
 /** This plugin's own module name: the one entry a panel must not switch off (it is the panel). */
@@ -39,6 +40,17 @@ export interface PluginRow {
   readOnlyReason: string | null
   manageable: boolean
   mcp: boolean
+  /** Present for MCP rows: patch config + occurrence + managed-block owner, joined by snapshot. */
+  mcpPatchId?: string | null
+  mcpOccurrence?: number
+  mcpEditable?: boolean
+  mcpManagedBy?: string | null
+  mcpReadOnlyReason?: string | null
+  config?: Record<string, unknown> | null
+  secretKeys?: { env: string[]; headers: string[] }
+  transport?: string | null
+  command?: string | null
+  url?: string | null
   self: boolean
   official: boolean
   /** A UI plugin that ships inside the client bundle: no profile row, so the loader cannot flip it. */
@@ -249,6 +261,28 @@ async function isSelfEntry(env: HostEnv, id: string): Promise<boolean> {
   }
 }
 
+/** The owner of a managed block containing this loader row, or null when it is ours. */
+async function managedMcpOwner(env: HostEnv, row: PluginRow, listed: PluginRow[]): Promise<string | null> {
+  if (row.mcp !== true || row.patchId === null) return null
+  const patch = patchPathFor(env)
+  if (patch === null) fail('mcp-read-failed', 'no patch path is available to check managed ownership')
+  try {
+    const patchRows = parseMcpRows(await readPatchText(patch))
+    // The same pairing mergeMcpRows() uses: a duplicate patch id is resolved by loader order,
+    // not by id alone, so an outside row is not rejected because its sibling is managed.
+    const loaderRows = listed
+      .filter(item => item.mcp === true && typeof item.patchId === 'string')
+      .map(item => ({ id: item.id, moduleName: item.moduleName, patchId: item.patchId, enabled: item.enabled, manageable: item.manageable }))
+    const pair = pairMcpRows(patchRows, loaderRows).pairs.find(item => item.loader?.id === row.id)
+    // An unmatched loader-only row has no patch occurrence and therefore no owner to borrow.
+    return pair?.row.managedBy ?? null
+  }
+  catch (error) {
+    // A patch we cannot read cannot prove the row is ours.
+    fail('mcp-read-failed', 'cannot check managed ownership: ' + (error as Error).message)
+  }
+}
+
 /** Flip one loader entry through the host's own manager, with the guards 1.x had. */
 export async function setPluginEnabled(
   env: HostEnv,
@@ -259,9 +293,21 @@ export async function setPluginEnabled(
   if (typeof manager.setPluginEnabled !== 'function') {
     fail('no-plugin-manager', 'pluginManager has no setPluginEnabled()')
   }
+  let listed: PluginRow[]
+  try {
+    listed = await listPluginRows(env, true)
+  }
+  catch (error) {
+    // A failed list means ownership cannot be checked; never turn that into "no managed rows".
+    fail('list-failed', 'cannot list plugins before toggling: ' + (error as Error).message)
+  }
+  const listedRow = listed.find(item => item.id === id)
+  if (listedRow !== undefined && listedRow.mcp) {
+    const owner = await managedMcpOwner(env, listedRow, listed)
+    if (owner !== null) fail('read-only', 'mcp row "' + id + '" is inside ' + owner + "'s managed block")
+  }
   if (!enabled) {
-    const rows = await listPluginRows(env, true).catch(() => [] as PluginRow[])
-    const row = rows.find(item => item.id === id)
+    const row = listedRow
     if (row === undefined) fail('unknown-plugin', 'no plugin entry answers to ' + id)
     if (row.readOnlyReason !== null) fail('read-only', row.readOnlyReason)
     if (row.builtinUi) {

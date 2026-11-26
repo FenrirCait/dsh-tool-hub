@@ -19,7 +19,7 @@
  */
 import * as React from 'react'
 import { OPS, runOp } from '../api.js'
-import { Badge, Button, Card, Dialog, Empty, SearchBox, Switch } from '../components.js'
+import { Badge, Button, Card, Dialog, Empty, RowBoundary, SearchBox, Switch } from '../components.js'
 import type { PluginRow, ViewProps } from '../types.js'
 import type { TreeGroup } from './package-tree.js'
 import { pluginTreeGroups, PluginsTree } from './plugins-tree.js'
@@ -266,7 +266,8 @@ export function PluginsView(props: ViewProps): React.ReactElement {
     const disabled = row.manageable === false
     const checked = picked.includes(row.id)
     return (
-      <div className="th-row" key={row.id}>
+      <RowBoundary key={row.id} label={zh ? `插件行「${row.name}」渲染失败` : `Plugin row "${row.name}" failed to render`} retry={t('action.retry')}>
+      <div className="th-row">
         <input
           type="checkbox"
           checked={checked}
@@ -299,6 +300,7 @@ export function PluginsView(props: ViewProps): React.ReactElement {
           }}
         />
       </div>
+      </RowBoundary>
     )
   }
 

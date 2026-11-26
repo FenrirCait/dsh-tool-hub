@@ -38,6 +38,8 @@ export interface PatchScan {
   blocks: PatchBlock[]
   /** Blocks whose begin marker has no end marker; writes must stay out of them. */
   unclosed: string[]
+  /** Begin-line ranges for the unclosed blocks, so readers can mark rows inside them. */
+  unclosedBlocks: Array<{ name: string; beginLine: number }>
   foreignTotal: number
 }
 
@@ -62,7 +64,11 @@ export function scanPatchBlocks(text: string, owners: Readonly<Record<string, st
     open.delete(name)
     blocks.push({ name, beginLine, endLine: index, rows: [], foreign: [], known: owners[name] !== undefined })
   }
-  for (const name of open.keys()) unclosed.push(name)
+  const unclosedBlocks: Array<{ name: string; beginLine: number }> = []
+  for (const [name, beginLine] of open) {
+    unclosed.push(name)
+    unclosedBlocks.push({ name, beginLine })
+  }
 
   let rows = 0
   try {
@@ -81,7 +87,7 @@ export function scanPatchBlocks(text: string, owners: Readonly<Record<string, st
     // A row the 1.x parser cannot read is left out of the layout, not treated as absent.
   }
   const foreignTotal = blocks.reduce((sum, block) => sum + block.foreign.length, 0)
-  return { rows, blocks, unclosed, foreignTotal }
+  return { rows, blocks, unclosed, unclosedBlocks, foreignTotal }
 }
 
 /**

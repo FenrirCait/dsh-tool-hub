@@ -455,6 +455,32 @@ html[data-ds-dark-theme] .th-help-dialog, body[data-ds-dark-theme] .th-help-dial
   white-space: nowrap;
   border: 0;
 }
+@media (max-width: 820px) {
+  .th-root { flex-direction: column; padding: 8px; gap: 8px; }
+  .th-side {
+    width: auto;
+    flex: 0 0 auto;
+    max-height: 150px;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    padding: 8px 10px;
+    overflow: auto;
+  }
+  .th-side-brand { flex: 1 0 100%; }
+  .th-navitem { flex: 0 1 auto; width: auto; }
+  .th-main { min-height: 0; }
+  .th-top { top: 8px; left: 8px; right: 8px; }
+  .th-content { padding-top: 72px !important; }
+}
+@media (max-width: 560px) {
+  .th-side-brand { display: none; }
+  .th-top-sub { display: none; }
+  .th-top { padding: 10px 12px; }
+  .th-content { padding-top: 64px !important; }
+}
 `
 
 /** Inject the stylesheet once; safe to call from every mounted slot. */

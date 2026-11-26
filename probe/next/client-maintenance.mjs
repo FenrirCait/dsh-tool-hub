@@ -125,12 +125,12 @@ check('index-read', () => {
   assert(has(source, 'void runOp(RESTORE_OPS.index, {})'), 'backup.mcpIndex is a read: it must go through runOp with an empty payload')
   assert(has(source, 'function indexOf(value: unknown): BackupEntry[]'), 'the index answer needs one normaliser')
   assert(has(source, "const rows = asRecord(value).backups"), 'the index reads backups[] off the answer')
-  assert(has(source, 'ids: asStrings(item.ids)'), 'each backup entry keeps its row ids')
+  assert(has(source, 'rows: Array.isArray(item.rows)'), 'each backup entry keeps occurrence-aware row refs')
   return 'runOp(backup.mcpIndex, {})'
 })
 
 check('diff-read', () => {
-  assert(has(source, 'void runOp(RESTORE_OPS.diff, { backup, id: row })'), 'backup.diff must send { backup, id }')
+  assert(has(source, 'void runOp(RESTORE_OPS.diff, { backup, id: target.id, occurrence: target.occurrence })'), 'backup.diff must decode the row key and send occurrence')
   assert(!has(source, 'run(RESTORE_OPS.diff'), 'backup.diff is a read: run() only reports success, so it cannot carry the lines')
   assert(has(source, 'setDiff(diffOf(result.data))'), 'the diff must come from the op answer')
   assert(has(source, "kind: DIFF_KINDS.has(item.kind as DiffKind)"), 'diff kinds are narrowed to same/add/del')
@@ -140,7 +140,7 @@ check('diff-read', () => {
 check('restore-write', () => {
   const handlerAt = source.indexOf('const restore = (): void => {')
   assert(handlerAt !== -1, 'the dialog must own a restore() handler')
-  const callAt = source.indexOf('void run(RESTORE_OPS.restore, { backup, id: row })')
+  const callAt = source.indexOf('void run(RESTORE_OPS.restore, { backup, id: target.id, occurrence: target.occurrence })')
   assert(callAt !== -1, 'the view never sends backup.restoreRow')
   assert(count(source, 'run(RESTORE_OPS.restore') === 1, 'backup.restoreRow must be sent from exactly one place')
   assert(callAt > handlerAt, 'the write must be sent from restore(), never from a render path')
@@ -153,7 +153,7 @@ check('restore-write', () => {
 })
 
 check('busy-key', () => {
-  assert(has(source, "const restoreBusy = RESTORE_OPS.restore + ':' + row"), 'the busy key must be the op plus the row id, like the shell builds it')
+  assert(has(source, "const restoreBusy = RESTORE_OPS.restore + ':' + (row === '' ? '' : rowRefOf(row).id)"), 'the busy key must use the decoded row id, like the shell builds it')
   assert(has(source, 'busy={busy === restoreBusy}'), 'the confirm button must show the shell busy state')
   assert(has(source, 'busy={diffLoading}'), 'reading a diff must show that it is loading')
   return 'busy = backup.restoreRow:<row>'
@@ -256,7 +256,7 @@ check('i18n-keys', () => {
 })
 
 check('imports', () => {
-  const allowed = new Set(['../api.js', '../components.js', '../types.js', '../theme.js', '../i18n.js'])
+  const allowed = new Set(['../api.js', '../components.js', '../types.js', '../theme.js', '../i18n.js', '../identity.js'])
   for (const line of source.split('\n')) {
     if (!line.startsWith('import ')) continue
     const at = line.indexOf("'")

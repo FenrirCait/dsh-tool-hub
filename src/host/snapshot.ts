@@ -9,7 +9,7 @@ import { normalizeGroups } from '../domains/groups.js'
 import { normalizePresets } from '../domains/presets.js'
 import { listBundles, listPluginRows } from '../domains/plugins.js'
 import { listSkills, skillRoots } from '../domains/skills.js'
-import { patchPathFor } from '../domains/mcp.js'
+import { MCP_MODULE, mcpRowsByEntryId, mergeMcpRows, parseMcpRows, patchPathFor } from '../domains/mcp.js'
 import { scanPatchBlocks } from '../core/patch-blocks.js'
 import { readMode } from '../domains/scenes.js'
 import { readLazy, serverOf, toolDenyReasons, type PresetDenySource, type ToolDenyReason } from '../domains/tool-surface.js'
@@ -224,7 +224,7 @@ function toolRows(
 export async function buildSnapshot(deps: SnapshotDeps): Promise<Record<string, unknown>> {
   const { env, registry } = deps
   const fresh = deps.fresh === true
-  const [plugins, bundles, skills] = await Promise.all([
+  const [basePlugins, bundles, skills] = await Promise.all([
     listPluginRows(env, fresh),
     listBundles(env, fresh),
     listSkills(env),
@@ -234,10 +234,54 @@ export async function buildSnapshot(deps: SnapshotDeps): Promise<Record<string, 
   const mode = readMode(env.state)
   const roots = skillRoots(env)
   const patch = patchPathFor(env)
+  let patchText: string | null = null
+  let patchError: string | null = null
+  if (patch !== null) {
+    try {
+      patchText = await readFile(patch, 'utf8')
+    }
+    catch (error) {
+      // A profile without a patch file is a valid empty MCP config; mcp.create can initialize it.
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') patchText = ''
+      else patchError = (error as Error).message
+    }
+  }
   // Managed blocks belong to other panels; the client shows their foreign rows without touching them.
   const patchInfo = patch === null
     ? { path: null, rows: 0, blocks: [], unclosed: [], foreignTotal: 0 }
-    : await readFile(patch, 'utf8').then(text => ({ path: patch, ...scanPatchBlocks(text) })).catch(() => ({ path: patch, rows: 0, blocks: [], unclosed: [], error: 'unreadable' }))
+    : patchText === null
+      ? { path: patch, rows: 0, blocks: [], unclosed: [], error: patchError ?? 'unreadable' }
+      : { path: patch, ...scanPatchBlocks(patchText.replace(/\r\n?/g, '\n')) }
+  const loaderRows = basePlugins.filter(row => row.mcp === true).map(row => ({
+    id: row.id,
+    moduleName: row.moduleName === '' ? MCP_MODULE : row.moduleName,
+    patchId: row.patchId,
+    enabled: row.enabled,
+    manageable: row.manageable,
+  }))
+  const mcpRows = patchText === null ? [] : mergeMcpRows(parseMcpRows(patchText), loaderRows)
+  const mcpById = mcpRowsByEntryId(mcpRows)
+  const plugins = basePlugins.map(row => {
+    if (row.mcp !== true) return row
+    const merged = mcpById.get(row.id)
+    if (merged === undefined) return row
+    return {
+      ...row,
+      name: merged.name,
+      mcpPatchId: merged.patchId,
+      mcpOccurrence: merged.occurrence,
+      mcpEditable: merged.editable,
+      mcpManagedBy: merged.managedBy,
+      manageable: row.manageable && merged.managedBy === null,
+      readOnlyReason: merged.managedBy === null ? row.readOnlyReason : (row.readOnlyReason ?? 'managed-block:' + merged.managedBy),
+      mcpReadOnlyReason: merged.readOnlyReason,
+      config: merged.config,
+      secretKeys: merged.secretKeys,
+      transport: merged.transport,
+      command: merged.command,
+      url: merged.url,
+    }
+  })
   const home = process.env.DSH_HOME?.trim() || dirname(dirname(stateFile())) || homedir()
   // The tool rows and the groups view read the same normalized lists, so normalize once per read.
   const groups = normalizeGroups(env.state.groups)
@@ -276,7 +320,7 @@ export async function buildSnapshot(deps: SnapshotDeps): Promise<Record<string, 
       skills: roots.map(root => ({ id: root.id, label: root.label, dir: root.dir, scope: root.scope, workspace: root.workspace ?? null })),
     },
     limits: { bulk: 100 },
-    mcpError: null,
+    mcpError: patchError,
     history: deps.history === undefined ? [] : await deps.history(),
     extensions: deps.extensions ?? [],
     patchInfo,

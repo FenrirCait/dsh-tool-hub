@@ -360,6 +360,35 @@ export function Callout(props: CalloutProps): React.ReactElement {
   )
 }
 
+/**
+ * A row-level boundary: one malformed row renders a local failure card instead of taking the
+ * whole view down. The retry remounts just this row.
+ */
+export class RowBoundary extends React.Component<{ label: string; retry: string; children: React.ReactNode }, { failed: boolean }> {
+  state = { failed: false }
+
+  static getDerivedStateFromError(): { failed: boolean } {
+    return { failed: true }
+  }
+
+  componentDidCatch(error: unknown): void {
+    console.error('[tool-hub] row render failed', error)
+  }
+
+  render(): React.ReactNode {
+    if (!this.state.failed) return this.props.children
+    return (
+      <Callout
+        action={
+          <Button onClick={() => { this.setState({ failed: false }) }}>{this.props.retry}</Button>
+        }
+      >
+        {this.props.label}
+      </Callout>
+    )
+  }
+}
+
 export interface ToolbarProps {
   children: React.ReactNode
 }

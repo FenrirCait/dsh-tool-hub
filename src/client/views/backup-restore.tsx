@@ -10,6 +10,7 @@
  */
 import * as React from 'react'
 import { runOp } from '../api.js'
+import { mcpRowKey, parseMcpRowKey } from '../identity.js'
 import { Badge, Button, Callout, Dialog, Empty, Field, Select } from '../components.js'
 import type { Lang, TFunction } from '../i18n.js'
 import { FONT, MONO, R, SP, T } from '../theme.js'
@@ -22,12 +23,30 @@ const RESTORE_OPS = {
   restore: 'backup.restoreRow',
 } as const
 
+interface BackupRowRef {
+  id: string
+  occurrence: number
+  name: string
+}
+
 interface BackupEntry {
   name: string
   kind: string
   bytes: number
   modifiedAt: number
-  ids: string[]
+  rows: BackupRowRef[]
+}
+
+/** The shared tuple key keeps duplicate ids apart in the picker. */
+function rowKeyOf(row: BackupRowRef): string {
+  return mcpRowKey(row.id, row.occurrence)
+}
+
+function rowRefOf(key: string): BackupRowRef {
+  const parsed = parseMcpRowKey(key)
+  if (parsed !== null) return { ...parsed, name: '' }
+  // A hand-typed id, not a picker value.
+  return { id: key, occurrence: 0, name: key }
 }
 
 type DiffKind = 'same' | 'add' | 'del'
@@ -63,7 +82,13 @@ function indexOf(value: unknown): BackupEntry[] {
     kind: typeof item.kind === 'string' ? item.kind : '',
     bytes: typeof item.bytes === 'number' ? item.bytes : 0,
     modifiedAt: typeof item.modifiedAt === 'number' ? item.modifiedAt : 0,
-    ids: asStrings(item.ids),
+    rows: Array.isArray(item.rows)
+      ? item.rows.map(ref => asRecord(ref)).filter(ref => typeof ref.id === 'string').map(ref => ({
+          id: String(ref.id),
+          occurrence: typeof ref.occurrence === 'number' && Number.isInteger(ref.occurrence) && ref.occurrence >= 0 ? ref.occurrence : 0,
+          name: typeof ref.name === 'string' ? ref.name : String(ref.id),
+        }))
+      : asStrings(item.ids).map(id => ({ id, occurrence: 0, name: id })),
   }))
 }
 
@@ -175,7 +200,7 @@ export function BackupRestoreDialog(props: BackupRestoreProps): React.ReactEleme
       const first = next[0]
       setEntries(next)
       setBackup(first === undefined ? '' : first.name)
-      setRow(first === undefined ? '' : first.ids[0] ?? '')
+      setRow(first === undefined || first.rows[0] === undefined ? '' : rowKeyOf(first.rows[0]))
     })
   }, [])
 
@@ -184,9 +209,9 @@ export function BackupRestoreDialog(props: BackupRestoreProps): React.ReactEleme
   }, [open, load])
 
   const entry = entries.find(item => item.name === backup) ?? null
-  const ids = entry === null ? [] : entry.ids
+  const rows = entry === null ? [] : entry.rows
   const canRestore = diff !== null && confirmed && backup !== '' && row !== ''
-  const restoreBusy = RESTORE_OPS.restore + ':' + row
+  const restoreBusy = RESTORE_OPS.restore + ':' + (row === '' ? '' : rowRefOf(row).id)
   /** A pair cannot be swapped mid-write: the payload already sent names the old backup and row. */
   const writing = busy !== null && busy.startsWith(RESTORE_OPS.restore)
 
@@ -201,7 +226,7 @@ export function BackupRestoreDialog(props: BackupRestoreProps): React.ReactEleme
   const pickBackup = (name: string): void => {
     const next = entries.find(item => item.name === name) ?? null
     setBackup(name)
-    setRow(next === null ? '' : next.ids[0] ?? '')
+    setRow(next === null || next.rows[0] === undefined ? '' : rowKeyOf(next.rows[0]))
     resetDiff()
   }
 
@@ -212,11 +237,12 @@ export function BackupRestoreDialog(props: BackupRestoreProps): React.ReactEleme
 
   const readDiff = (): void => {
     if (backup === '' || row === '') return
+    const target = rowRefOf(row)
     setDiffLoading(true)
     setDiffError('')
     setConfirmed(false)
     setRestored(false)
-    void runOp(RESTORE_OPS.diff, { backup, id: row }).then(result => {
+    void runOp(RESTORE_OPS.diff, { backup, id: target.id, occurrence: target.occurrence }).then(result => {
       setDiffLoading(false)
       if (!result.ok) {
         setDiff(null)
@@ -230,7 +256,8 @@ export function BackupRestoreDialog(props: BackupRestoreProps): React.ReactEleme
   /** The only write in this dialog: it cannot run without a diff on screen and a ticked box. */
   const restore = (): void => {
     if (!canRestore || writing) return
-    void run(RESTORE_OPS.restore, { backup, id: row }).then(async ok => {
+    const target = rowRefOf(row)
+    void run(RESTORE_OPS.restore, { backup, id: target.id, occurrence: target.occurrence }).then(async ok => {
       if (!ok) return
       await reload()
       setConfirmed(false)
@@ -257,7 +284,7 @@ export function BackupRestoreDialog(props: BackupRestoreProps): React.ReactEleme
         label={copy(lang, '行 id', 'Row id')}
         hint={copy(lang, '这份备份里记录的 MCP 行。', 'An MCP row this backup holds.')}
       >
-        {ids.length === 0 ? (
+        {rows.length === 0 ? (
           <input
             id="th-restore-row"
             className="th-input"
@@ -275,7 +302,7 @@ export function BackupRestoreDialog(props: BackupRestoreProps): React.ReactEleme
           <Select
             id="th-restore-row"
             value={row}
-            options={ids.map(id => ({ value: id, label: id }))}
+            options={rows.map(ref => ({ value: rowKeyOf(ref), label: ref.name + (ref.occurrence === 0 ? '' : ' (' + String(ref.occurrence + 1) + ')') }))}
             label={copy(lang, '行 id', 'Row id')}
             disabled={writing}
             onChange={pickRow}

@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url'
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const VIEW = 'src/client/views/mcp.tsx'
 const CATALOG = 'src/client/i18n.ts'
+const HELPER = 'src/client/views/mcp-helpers.ts'
 const MAX_LINES = 450
 const MAX_BYTES = 40 * 1024
 
@@ -35,6 +36,7 @@ function assert(condition, message) {
 }
 
 const source = readFileSync(join(ROOT, VIEW), 'utf8')
+const helper = readFileSync(join(ROOT, HELPER), 'utf8')
 const bytes = statSync(join(ROOT, VIEW)).size
 const lines = source.split('\n')
 const body = source.endsWith('\n') ? lines.slice(0, -1) : lines
@@ -90,27 +92,36 @@ check('action-create', () => {
 })
 
 check('action-save', () => {
-  assert(has('run(MCP_OPS.save, { id: draft.id, config })'), 'save must send { id, config }')
+  assert(has('run(MCP_OPS.save, { id: draft.id, occurrence: draft.occurrence, config })'), 'save must send { id, occurrence, config }')
   assert(has(busyKey('MCP_OPS.save', 'draft.id')), 'the save busy key must be the op plus the patch row id')
   return '{ id, config }'
 })
 
+check('row-boundary', () => {
+  assert(has('<RowBoundary'), 'each MCP row must be wrapped in its own error boundary')
+  assert(has('mcpReadOnlyReason'), 'a managed block row must carry its read-only reason')
+  assert(has("mcpRowKey(id, occurrence)"), 'duplicate rows need the shared collision-free identity key')
+  assert(has("id === '' ? 'loader:' + row.id"), 'orphan rows need a loader-id key, not :0')
+  assert(helper.includes('mcpPatchId === null'), 'an explicit null patch id must not fall back to a stale loader patch id')
+  return 'per-row fallback + read-only reason'
+})
+
 check('action-edit-prefill', () => {
   assert(has('setDraft(draftOf(row))'), 'the edit button must prefill the draft from the row')
-  assert(has('function draftOf(row: PluginRow): Draft'), 'draftOf must turn a row into an editable draft')
-  assert(has('function emptyDraft(): Draft'), 'a new row needs the empty draft')
+  assert(helper.includes('export function draftOf(row: PluginRow): Draft'), 'draftOf must turn a row into an editable draft')
+  assert(helper.includes('export function emptyDraft(): Draft'), 'a new row needs the empty draft')
   return 'draftOf / emptyDraft'
 })
 
 check('action-raw-read', () => {
-  assert(has('runOp(MCP_OPS.raw, { id })'), 'the raw editor must load the row through mcp.raw with { id }')
+  assert(has('runOp(MCP_OPS.raw, { id, occurrence })'), 'the raw editor must load the row through mcp.raw with { id, occurrence }')
   assert(!has('run(MCP_OPS.raw,'), 'mcp.raw is a read: run() only reports success, so it cannot carry the text')
   assert(has('result.data'), 'the raw editor must read the text out of the op result')
   return 'runOp(mcp.raw, { id })'
 })
 
 check('action-raw-save', () => {
-  assert(has('run(MCP_OPS.rawSave, { id: raw.id, text: raw.text })'), 'rawSave must send { id, text }')
+  assert(has('run(MCP_OPS.rawSave, { id: raw.id, occurrence: raw.occurrence, text: raw.text })'), 'rawSave must send { id, occurrence, text }')
   assert(has(busyKey('MCP_OPS.rawSave', 'raw.id')), 'the rawSave busy key must be the op plus the row id')
   assert(has("raw.text.trim() === ''"), 'an empty raw buffer must not be submittable')
   return '{ id, text }'
@@ -233,8 +244,8 @@ check('i18n-keys', () => {
 })
 
 check('bilingual-one-offs', () => {
-  assert(has("lang === 'zh'"), 'a caption that is not an mcp.* key must be bilingual from lang')
-  assert(has('function copy(lang: ViewProps'), 'the bilingual one-off helper must take the view lang')
+  assert(helper.includes("lang === 'zh'"), 'a caption that is not an mcp.* key must be bilingual from lang')
+  assert(helper.includes('export function copy(lang: ViewProps'), 'the bilingual one-off helper must take the view lang')
   return 'copy(lang, zh, en)'
 })
 
@@ -254,7 +265,7 @@ check('oauth-surface', () => {
 })
 
 check('imports', () => {
-  const allowed = new Set(['../api.js', '../components.js', '../types.js', './mcp-oauth.js'])
+  const allowed = new Set(['../api.js', '../components.js', '../types.js', '../identity.js', './mcp-oauth.js', './mcp-helpers.js'])
   for (const line of source.split('\n')) {
     if (!line.startsWith('import ')) continue
     const at = line.indexOf("'")

@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- MCP rows now carry their patch config, file-order occurrence and managed-block owner into the
+  snapshot, so duplicate patch ids can be edited one at a time.
+- Rows inside another panel's managed block are read-only in the MCP view and rejected by the host.
+- A malformed plugin/MCP row is contained by a row-level error boundary instead of replacing the
+  whole view.
+- Panels narrower than 820px switch to a stacked sidebar layout; below 560px the brand/status line
+  is reduced further.
+
 ## 2.1.0
 
 Stable 2.1 release. The manager keeps its 2.0 direction: official packs are a separate catalog, and

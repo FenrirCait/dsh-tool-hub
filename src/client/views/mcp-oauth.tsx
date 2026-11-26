@@ -28,6 +28,7 @@ export interface McpOauthDialogProps {
   open: boolean
   row: PluginRow | null
   id: string
+  occurrence: number
   t: ViewProps['t']
   busy: string | null
   run: ViewProps['run']
@@ -35,7 +36,7 @@ export interface McpOauthDialogProps {
 }
 
 export function McpOauthDialog(props: McpOauthDialogProps): React.ReactElement {
-  const { open, row, id, t, busy, run, onClose } = props
+  const { open, row, id, occurrence, t, busy, run, onClose } = props
   const [oauth, setOauth] = React.useState<OauthState | null>(null)
 
   React.useEffect(() => {
@@ -46,7 +47,7 @@ export function McpOauthDialog(props: McpOauthDialogProps): React.ReactElement {
     setOauth({ authorizeUrl: '', state: '', input: '', loading: true, error: '' })
     let live = true
     // Discovery and dynamic registration are network reads; give them more than the default 15s.
-    void runOp(OPS.start, { id }, 60000).then(result => {
+    void runOp(OPS.start, { id, occurrence }, 60000).then(result => {
       if (!live) return
       if (!result.ok) {
         setOauth(current => (current === null ? current : { ...current, loading: false, error: result.message }))
@@ -61,7 +62,7 @@ export function McpOauthDialog(props: McpOauthDialogProps): React.ReactElement {
       }))
     })
     return () => { live = false }
-  }, [open, row, id])
+  }, [open, row, id, occurrence])
 
   const close = (): void => {
     const state = oauth?.state ?? ''

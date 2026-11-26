@@ -457,6 +457,174 @@ async function main() {
     eq('mcp: missing profile code', noPatch.code, 'no-patch')
   })
 
+  await step('mcp: duplicate ids write the requested occurrence only', async () => {
+    const duplicate = [
+      '- insert:',
+      '  - id: dup-mcp',
+      '    name: "@deepseek-ai/dsh-mcp-client"',
+      '    config:',
+      '      serverName: first',
+      '  - id: dup-mcp',
+      '    name: "@deepseek-ai/dsh-mcp-client"',
+      '    config:',
+      '      serverName: second',
+    ].join('\n') + '\n'
+    await writeFile(patchPath, duplicate, 'utf8')
+    const res = await call(mcpDomain, 'mcp.save', { id: 'dup-mcp', occurrence: 1, config: { serverName: 'second-changed' } }, mcpEnv())
+    eq('mcp: duplicate save ok', res.ok, true)
+    const rows = mcp.parseMcpRows(await readFile(patchPath, 'utf8'))
+    eq('mcp: duplicate first untouched', rows[0].config.serverName, 'first')
+    eq('mcp: duplicate second changed', rows[1].config.serverName, 'second-changed')
+  })
+
+  await step('mcp: host verification selects the requested duplicate occurrence', async () => {
+    const duplicate = [
+      '- insert:',
+      '  - id: dup-mcp',
+      '    name: "@deepseek-ai/dsh-mcp-client"',
+      '    config:',
+      '      serverName: first',
+      '  - id: dup-mcp',
+      '    name: "@deepseek-ai/dsh-mcp-client"',
+      '    config:',
+      '      serverName: second',
+    ].join('\n') + '\n'
+    await writeFile(patchPath, duplicate, 'utf8')
+    const host = pluginManager([
+      { entryId: 'loader-first', patchId: 'dup-mcp', name: 'first', moduleName: '@deepseek-ai/dsh-mcp-client', enabled: true },
+      { entryId: 'loader-second', patchId: 'dup-mcp', name: 'second-changed', moduleName: '@deepseek-ai/dsh-mcp-client', enabled: true },
+    ])
+    const res = await call(mcpDomain, 'mcp.save', { id: 'dup-mcp', occurrence: 1, config: { serverName: 'second-changed' } }, makeEnv({ profileContext: { dir: profile }, pluginManager: host }))
+    eq('mcp: host duplicate save ok', res.ok, true)
+    const rows = mcp.parseMcpRows(await readFile(patchPath, 'utf8'))
+    eq('mcp: host duplicate first untouched', rows[0].config.serverName, 'first')
+    eq('mcp: host duplicate second changed', rows[1].config.serverName, 'second-changed')
+  })
+
+  await step('mcp: ambiguous duplicate names use the occurrence on the host path', async () => {
+    const duplicate = [
+      '- insert:',
+      '  - id: dup-name',
+      '    name: "@deepseek-ai/dsh-mcp-client"',
+      '    config:',
+      '      serverName: same-name',
+      '  - id: dup-name',
+      '    name: "@deepseek-ai/dsh-mcp-client"',
+      '    config:',
+      '      serverName: same-name',
+    ].join('\n') + '\n'
+    await writeFile(patchPath, duplicate, 'utf8')
+    const host = pluginManager([
+      { entryId: 'loader-one', patchId: 'dup-name', name: 'same-name', moduleName: '@deepseek-ai/dsh-mcp-client', enabled: true },
+      { entryId: 'loader-two', patchId: 'dup-name', name: 'same-name', moduleName: '@deepseek-ai/dsh-mcp-client', enabled: true },
+    ])
+    const res = await call(mcpDomain, 'mcp.save', { id: 'dup-name', occurrence: 1, config: { serverName: 'same-name', url: 'http://second/mcp' } }, makeEnv({ profileContext: { dir: profile }, pluginManager: host }))
+    eq('mcp: ambiguous host save ok', res.ok, true)
+    const rows = mcp.parseMcpRows(await readFile(patchPath, 'utf8'))
+    eq('mcp: ambiguous host second row changed', rows[1].config.url, 'http://second/mcp')
+  })
+
+  await step('mcp: a stale duplicate is not rescued by a sibling name', async () => {
+    const duplicate = [
+      '- insert:',
+      '  - id: dup-stale',
+      '    name: "@deepseek-ai/dsh-mcp-client"',
+      '    config:',
+      '      serverName: target-name',
+      '  - id: dup-stale',
+      '    name: "@deepseek-ai/dsh-mcp-client"',
+      '    config:',
+      '      serverName: other-name',
+    ].join('\n') + '\n'
+    await writeFile(patchPath, duplicate, 'utf8')
+    // Only the first sibling is live under the requested name; occurrence 1 was not reloaded.
+    const host = pluginManager([
+      { entryId: 'loader-one', patchId: 'dup-stale', name: 'target-name', moduleName: '@deepseek-ai/dsh-mcp-client', enabled: true },
+    ])
+    const before = await readFile(patchPath, 'utf8')
+    const res = await call(mcpDomain, 'mcp.save', { id: 'dup-stale', occurrence: 1, config: { serverName: 'target-name' } }, makeEnv({ profileContext: { dir: profile }, pluginManager: host }))
+    eq('mcp: stale duplicate is refused', res.ok, false)
+    eq('mcp: stale duplicate rolled back', await readFile(patchPath, 'utf8'), before)
+  })
+
+  await step('mcp: a missing earlier duplicate cannot be verified by a later sibling', async () => {
+    const duplicate = [
+      '- insert:',
+      '  - id: dup-reverse',
+      '    name: "@deepseek-ai/dsh-mcp-client"',
+      '    config:',
+      '      serverName: first',
+      '  - id: dup-reverse',
+      '    name: "@deepseek-ai/dsh-mcp-client"',
+      '    config:',
+      '      serverName: second',
+    ].join('\n') + '\n'
+    await writeFile(patchPath, duplicate, 'utf8')
+    const host = pluginManager([
+      { entryId: 'loader-second', patchId: 'dup-reverse', name: 'second', moduleName: '@deepseek-ai/dsh-mcp-client', enabled: true },
+    ])
+    const before = await readFile(patchPath, 'utf8')
+    const res = await call(mcpDomain, 'mcp.save', { id: 'dup-reverse', occurrence: 0, config: { serverName: 'first' } }, makeEnv({ profileContext: { dir: profile }, pluginManager: host }))
+    eq('mcp: missing earlier duplicate refused', res.ok, false)
+    eq('mcp: missing earlier duplicate rolled back', await readFile(patchPath, 'utf8'), before)
+  })
+
+  await step('mcp: a managed-block row is read-only for host writes', async () => {
+    const managed = [
+      '# >>> dsh-skill-mcp-panel:mcp:begin',
+      '- insert:',
+      '  - id: panel-mcp-owned',
+      '    name: "@deepseek-ai/dsh-mcp-client"',
+      '    config:',
+      '      serverName: owned',
+      '# <<< dsh-skill-mcp-panel:mcp:end',
+    ].join('\n') + '\n'
+    await writeFile(patchPath, managed, 'utf8')
+    const res = await call(mcpDomain, 'mcp.save', { id: 'panel-mcp-owned', config: { serverName: 'changed' } }, mcpEnv())
+    eq('mcp: managed save refused', res.ok, false)
+    eq('mcp: managed save code', res.code, 'read-only')
+    const listed = await call(mcpDomain, 'mcp.list', {}, mcpEnv())
+    eq('mcp: managed owner visible', listed.rows[0].managedBy, 'dsh-skill-mcp-panel:mcp')
+    eq('mcp: managed not editable', listed.rows[0].editable, false)
+    const host = pluginManager([{ entryId: 'p-managed', moduleName: '@deepseek-ai/dsh-mcp-client', patchId: 'panel-mcp-owned', name: 'owned', enabled: true }])
+    const toggle = await call(pluginsDomain, 'toggle', { kind: 'plugin', id: 'p-managed', enabled: true }, makeEnv({ profileContext: { dir: profile }, pluginManager: host }))
+    eq('plugins: managed mcp toggle refused', toggle.ok, false)
+    eq('plugins: managed mcp toggle code', toggle.code, 'read-only')
+  })
+
+  await step('plugins: duplicate mcp rows use their own managed occurrence', async () => {
+    const duplicate = [
+      '# >>> dsh-skill-mcp-panel:mcp:begin',
+      '- insert:',
+      '  - id: dup-managed',
+      '    name: "@deepseek-ai/dsh-mcp-client"',
+      '    config:',
+      '      serverName: inside',
+      '# <<< dsh-skill-mcp-panel:mcp:end',
+      '- id: dup-managed',
+      '  name: "@deepseek-ai/dsh-mcp-client"',
+      '  config:',
+      '    serverName: outside',
+    ].join('\n') + '\n'
+    await writeFile(patchPath, duplicate, 'utf8')
+    const host = pluginManager([
+      { entryId: 'loader-inside', moduleName: '@deepseek-ai/dsh-mcp-client', patchId: 'dup-managed', name: 'inside', enabled: true, manageable: true },
+      { entryId: 'loader-outside', moduleName: '@deepseek-ai/dsh-mcp-client', patchId: 'dup-managed', name: 'outside', enabled: true, manageable: true },
+    ])
+    const env = makeEnv({ profileContext: { dir: profile }, pluginManager: host })
+    const inside = await call(pluginsDomain, 'toggle', { kind: 'plugin', id: 'loader-inside', enabled: true }, env)
+    eq('plugins: managed occurrence refused', inside.code, 'read-only')
+    const outside = await call(pluginsDomain, 'toggle', { kind: 'plugin', id: 'loader-outside', enabled: true }, env)
+    eq('plugins: sibling occurrence allowed', outside.ok, true)
+    const extraHost = pluginManager([
+      { entryId: 'loader-inside', moduleName: '@deepseek-ai/dsh-mcp-client', patchId: 'dup-managed', name: 'inside', enabled: true, manageable: true },
+      { entryId: 'loader-outside', moduleName: '@deepseek-ai/dsh-mcp-client', patchId: 'dup-managed', name: 'outside', enabled: true, manageable: true },
+      { entryId: 'loader-extra', moduleName: '@deepseek-ai/dsh-mcp-client', patchId: 'dup-managed', name: 'extra', enabled: true, manageable: true },
+    ])
+    const extra = await call(pluginsDomain, 'toggle', { kind: 'plugin', id: 'loader-extra', enabled: true }, makeEnv({ profileContext: { dir: profile }, pluginManager: extraHost }))
+    eq('plugins: unmatched loader row is unowned', extra.ok, true)
+  })
+
   await step('mcp: empty state is an empty list', async () => {
     const missing = await call(mcpDomain, 'mcp.list', {}, makeEnv({ profileContext: { dir: join(work, 'no-profile') } }))
     eq('mcp: empty list ok', missing.ok, true)
@@ -594,6 +762,30 @@ async function main() {
     eq('plugins: bundles ok', bundles.ok, true)
     eq('plugins: bundles rows empty', bundles.rows, [])
     eq('plugins: bundles error named', bundles.error, 'this host has no pluginManager.listBundles')
+  })
+
+  await step('plugins: a failed list refuses the toggle', async () => {
+    const calls = []
+    const broken = { listPlugins: async () => { throw new Error('transient host list') }, setPluginEnabled: async (id, enabled) => { calls.push([id, enabled]); return { application: 'applied' } } }
+    const res = await call(pluginsDomain, 'toggle', { kind: 'plugin', id: 'p-normal', enabled: true }, makeEnv({ pluginManager: broken }))
+    eq('plugins: list failure code', res.code, 'list-failed')
+    eq('plugins: list failure never writes', calls, [])
+  })
+
+  await step('plugins: an unreadable patch refuses the toggle', async () => {
+    const brokenProfile = join(work, 'broken-profile')
+    await mkdir(join(brokenProfile, 'cordis.patch.yml'), { recursive: true })
+    const host = pluginManager([{ entryId: 'p-read-fail', moduleName: '@deepseek-ai/dsh-mcp-client', patchId: 'p-read-fail', name: 'broken', enabled: true }])
+    const res = await call(pluginsDomain, 'toggle', { kind: 'plugin', id: 'p-read-fail', enabled: true }, makeEnv({ profileContext: { dir: brokenProfile }, pluginManager: host }))
+    eq('plugins: unreadable patch code', res.code, 'mcp-read-failed')
+    eq('plugins: unreadable patch never writes', host.calls, [])
+  })
+
+  await step('plugins: a missing patch path refuses mcp toggles', async () => {
+    const host = pluginManager([{ entryId: 'p-no-path', moduleName: '@deepseek-ai/dsh-mcp-client', patchId: 'p-no-path', name: 'no-path', enabled: true }])
+    const res = await call(pluginsDomain, 'toggle', { kind: 'plugin', id: 'p-no-path', enabled: true }, makeEnv({ pluginManager: host }))
+    eq('plugins: no patch path code', res.code, 'mcp-read-failed')
+    eq('plugins: no patch path never writes', host.calls, [])
   })
 
   await rm(work, { recursive: true, force: true })
