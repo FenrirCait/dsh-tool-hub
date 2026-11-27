@@ -15,6 +15,7 @@ import { readMode } from '../domains/scenes.js'
 import { readLazy, serverOf, toolDenyReasons, type PresetDenySource, type ToolDenyReason } from '../domains/tool-surface.js'
 import type { GroupRecord } from '../domains/groups.js'
 import type { ExtensionStatus } from './extensions.js'
+import type { SkillVisibilityRegistry } from './skill-visibility.js'
 
 export interface SnapshotDeps {
   env: HostEnv
@@ -23,6 +24,8 @@ export interface SnapshotDeps {
   history?: () => Promise<unknown[]>
   /** The build's extension rows; the client renders them in the Extensions view. */
   extensions?: ExtensionStatus[]
+  /** Optional external skill-visibility provider; null/absent means the feature is off. */
+  skillVisibility?: SkillVisibilityRegistry
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -365,6 +368,9 @@ export async function buildSnapshot(deps: SnapshotDeps): Promise<Record<string, 
     mcpError: patchError,
     history: deps.history === undefined ? [] : await deps.history(),
     extensions: deps.extensions ?? [],
+    skillVisibility: deps.skillVisibility === undefined
+      ? { provider: null, available: false, canSet: false, rows: [], error: null }
+      : await deps.skillVisibility.snapshot(),
     patchInfo,
     mask: maskInfo(env),
     // What this host is, not what it manages: the version it was built from and the runtime under it.

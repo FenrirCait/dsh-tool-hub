@@ -15,6 +15,7 @@ import { installApi } from './routes.js'
 import { installEntryPoints, type EntryPointCtx } from './entrypoints.js'
 import { PORTABILITY_OPS, portabilityHandlers } from './portability.js'
 import { buildSnapshot } from './snapshot.js'
+import { SKILL_VISIBILITY_SERVICE, SkillVisibilityRegistry } from './skill-visibility.js'
 import { ExtensionManager, extensionRoots, type ExtensionStatus } from './extensions.js'
 import {
   CompatCatalog,
@@ -85,12 +86,13 @@ export class Runtime {
   private lazyTimer: ReturnType<typeof setInterval> | null = null
   private chain: Promise<void> = Promise.resolve()
   private readonly manager: ExtensionManager
+  private readonly visibility = new SkillVisibilityRegistry()
   private readonly catalog = new CompatCatalog()
 
   private constructor(private readonly ctx: HubContext, private readonly state: StateV2) {
     this.manager = new ExtensionManager({
       roots: extensionRoots(),
-      services: { get: service => ctx.get(service) },
+      services: { get: service => service === SKILL_VISIBILITY_SERVICE ? this.visibility : ctx.get(service) },
       log: logTo(ctx),
       ctx,
     })
@@ -429,6 +431,7 @@ export class Runtime {
         fresh: (payload as { fresh?: unknown } | undefined)?.fresh === true,
         history: async () => (holder.dispatcher === null ? [] : await holder.dispatcher.history()),
         extensions: holder.statuses,
+        skillVisibility: this.visibility,
       }),
       doctor: async () => runDoctor({ ctx: this.ctx, stateDir: stateDir(), expectedInjects: HEARTBEAT_INJECTS }),
       clearLock: async (payload) => clearStalePanelLock({

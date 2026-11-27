@@ -45,7 +45,7 @@ Requires a DSH host that can install a GitHub plugin bundle.
 Pinned release, recommended:
 
 ```bash
-dsh plugin --profile <profile> add github:FenrirCait/dsh-tool-hub#v2.4.4
+dsh plugin --profile <profile> add github:FenrirCait/dsh-tool-hub#v2.5.0
 ```
 
 From a local checkout:

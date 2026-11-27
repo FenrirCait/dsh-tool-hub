@@ -5,7 +5,8 @@
  * value ({ ok: false, code, message }), never as a rejection, so a view can render an error
  * banner instead of relying on a catch somewhere up the tree.
  */
-import type { CollectionRow, ExtensionStatus, ExtensionViewRow, GroupRow, HistoryEntry, HostMeta, HubSnapshot, MaskInfo, PatchInfo, PluginRow, PresetRow, SceneState, SecretKeys, SkillRootInfo, SkillRow, ToolRow } from './types.js'
+import type {
+  SkillVisibilitySnapshot, CollectionRow, ExtensionStatus, ExtensionViewRow, GroupRow, HistoryEntry, HostMeta, HubSnapshot, MaskInfo, PatchInfo, PluginRow, PresetRow, SceneState, SecretKeys, SkillRootInfo, SkillRow, ToolRow } from './types.js'
 import type { SettingsField } from '../shared/types.js'
 
 /** Op ids the panel sends. Kept in one table: a host rename is a one-line change here. */
@@ -287,6 +288,26 @@ function groupOf(row: Record<string, unknown>): GroupRow | null {
   }
 }
 
+function skillVisibilityOf(value: unknown): SkillVisibilitySnapshot | undefined {
+  if (value === undefined || value === null) return undefined
+  const row = asRecord(value)
+  return {
+    provider: asStringOrNull(row.provider),
+    available: asBoolean(row.available),
+    canSet: asBoolean(row.canSet),
+    rows: Array.isArray(row.rows)
+      ? row.rows.map(item => asRecord(item)).filter(item => asString(item.name) !== '').map(item => ({
+          name: asString(item.name),
+          hidden: asBoolean(item.hidden),
+          modelInvocable: item.modelInvocable === undefined ? true : asBoolean(item.modelInvocable),
+          ...(typeof item.source === 'string' && item.source !== '' ? { source: item.source } : {}),
+          ...(typeof item.provider === 'string' && item.provider !== '' ? { provider: item.provider } : {}),
+        }))
+      : [],
+    error: asStringOrNull(row.error),
+  }
+}
+
 function maskInfoOf(row: Record<string, unknown>): MaskInfo {
   return {
     available: row.available === true,
@@ -508,6 +529,7 @@ export function normalizeSnapshot(raw: unknown): HubSnapshot {
     settings: asRecord(record.settings) as Record<string, unknown>,
     history: asRows(record.history, historyOf),
     extensions: asRows(record.extensions, extensionOf),
+    ...(record.skillVisibility === undefined ? {} : { skillVisibility: skillVisibilityOf(record.skillVisibility) }),
     patchInfo: patchInfoOf(asRecord(record.patchInfo)),
     mask: maskInfoOf(asRecord(record.mask)),
     meta: metaOf(record.meta),

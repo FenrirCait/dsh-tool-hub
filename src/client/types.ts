@@ -59,6 +59,23 @@ export interface PluginRow {
 }
 
 /** One skill folder the host found under a configured root. */
+export interface SkillVisibilityRow {
+  name: string
+  hidden: boolean
+  modelInvocable: boolean
+  source?: string
+  provider?: string
+}
+
+/** Optional external model-visibility layer; absent on a host without a provider. */
+export interface SkillVisibilitySnapshot {
+  provider: string | null
+  available: boolean
+  canSet: boolean
+  rows: SkillVisibilityRow[]
+  error: string | null
+}
+
 export interface SkillRow {
   id: string
   name: string
@@ -272,6 +289,8 @@ export interface HubSnapshot {
   history: HistoryEntry[]
   /** Local extensions the host discovered, with load state and declared views. */
   extensions: ExtensionStatus[]
+  /** Deep PTC or another external skill-visibility layer; absent on an older host. */
+  skillVisibility?: SkillVisibilitySnapshot
   /** Managed blocks in the profile patch file, and the rows their owners do not own. */
   patchInfo: PatchInfo
   /** The per-agent tool mask: mounted agents, deny list and problems. */

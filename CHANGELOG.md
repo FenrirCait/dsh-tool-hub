@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.5.0
+
+- Add the optional `toolHub.skillVisibility` provider service and carry its rows in the snapshot; hosts without a provider are unchanged.
+- Skills rows show a read-only “Deep PTC hidden” badge when the compat provider reports it; grouped installation toggles stay independent.
+- Add the `deep-ptc-skill-compat` pack, which reads Deep PTC's public `/deep-ptc/skills/list` route and never touches its private skills store.
+
 ## 2.4.4
 
 - Transferred members now land beside an existing member of the same package/series instead of always appending at the end; when the target has no matching series they still append, and existing member order is otherwise preserved.
