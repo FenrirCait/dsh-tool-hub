@@ -26,6 +26,7 @@ const {
   applyGroupSave,
   applyGroupTools,
   applyGroupTransfer,
+  insertMembersByFamily,
   autoRoleFor,
   buildAutoPlan,
   cleanMembers,
@@ -301,6 +302,22 @@ check('group.transfer: moves live members to the target in one result',
   transfer.moved === 2
   && transfer.from.members.map(member => member.kind + ':' + member.id).join(',') === 'tool:t-1'
   && transfer.to.members.map(member => member.kind + ':' + member.id).join(',') === 'plugin:p-b,plugin:p-a,skill:s-a')
+const familyRows = [
+  { kind: 'plugin', id: 'p-base', moduleName: '@q/dsh-imagegen-video', root: 'bundle:@q/dsh-imagegen-video', enabled: true, manageable: true },
+  { kind: 'plugin', id: 'p-extra', moduleName: '@q/dsh-imagegen-video', root: 'bundle:@q/dsh-imagegen-video', enabled: true, manageable: true },
+  { kind: 'plugin', id: 'p-other', moduleName: 'other-plugin', root: 'bundle:other-plugin', enabled: true, manageable: true },
+]
+const familyCtx = { known: new Set(['plugin:p-base', 'plugin:p-extra', 'plugin:p-other']), rows: familyRows, collections: [{ id: 'default', name: 'd', order: 0 }], now: 1720000000000 }
+const familyBase = normalizeGroups([
+  { id: 'family-a', name: 'A', members: [{ kind: 'plugin', id: 'p-base' }, { kind: 'plugin', id: 'p-other' }] },
+  { id: 'family-b', name: 'B', members: [{ kind: 'plugin', id: 'p-extra' }] },
+])
+const familyMove = applyGroupTransfer(familyBase, { from: 'family-b', to: 'family-a', members: [{ kind: 'plugin', id: 'p-extra' }] }, familyCtx)
+check('group.transfer: a transferred package lands beside its same-family member',
+  familyMove.to.members.map(member => member.id).join(',') === 'p-base,p-extra,p-other')
+check('insertMembersByFamily: no anchor appends in incoming order',
+  insertMembersByFamily([{ kind: 'plugin', id: 'p-other' }], [{ kind: 'plugin', id: 'p-base' }, { kind: 'plugin', id: 'p-extra' }], familyRows).map(member => member.id).join(',') === 'p-other,p-base,p-extra')
+
 check('group.transfer: an unknown source member is refused instead of half-moving',
   (() => { try { applyGroupTransfer(transferBase, { from: 'g-b', to: 'g-a', members: [{ kind: 'plugin', id: 'missing' }] }, transferCtx); return false } catch (error) { return error?.code === 'no-members' } })())
 

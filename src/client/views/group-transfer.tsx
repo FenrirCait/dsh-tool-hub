@@ -58,6 +58,7 @@ export function GroupTransferDialog(props: Props): React.ReactElement {
         <Select id="group-transfer-target" value={to} options={targets.map(group => ({ value: group.id, label: group.name }))} onChange={setTo} label={lang === 'zh' ? '目标分组' : 'Target group'} />
       )}
       {target === undefined ? null : <p className="th-field-hint">{lang === 'zh' ? '目标：' + target.name : 'Target: ' + target.name}</p>}
+      <p className="th-field-hint">{lang === 'zh' ? '有同系列成员时会放在它旁边；没有则追加到末尾。' : 'Moves beside a same-series member when one exists; otherwise appends.'}</p>
       {error === '' ? null : <div className="th-field-error" role="alert">{error}</div>}
     </Dialog>
   )

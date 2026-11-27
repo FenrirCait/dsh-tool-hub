@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.4.4
+
+- Transferred members now land beside an existing member of the same package/series instead of always appending at the end; when the target has no matching series they still append, and existing member order is otherwise preserved.
+- The transfer dialog states the placement rule so the result is predictable.
+
 ## 2.4.3
 
 - Collapse official DSH plugin groups behind one control by default; third-party plugins stay visible and a search temporarily opens the official set.

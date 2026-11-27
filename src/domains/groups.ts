@@ -458,7 +458,7 @@ export function applyGroupAdd(
   const incoming = expandBundles(cleanMembers(payload.members, ctx.known), ctx.rows)
   const have = new Set(group.members.map(memberKey))
   const added = incoming.filter(member => !have.has(memberKey(member)))
-  group.members = [...group.members, ...added]
+  group.members = insertMembersByFamily(group.members, added, ctx.rows)
   return { groups: replace(groups, group), group, added: added.length }
 }
 
@@ -469,6 +469,65 @@ export function applyGroupRemove(groups: readonly GroupRecord[], payload: Record
   const before = group.members.length
   group.members = group.members.filter(member => !drop.has(memberKey(member)))
   return { groups: replace(groups, group), removed: before - group.members.length }
+}
+
+/**
+ * The stable family a member belongs to. A plugin uses its package root (the live catalog maps
+ * every bundle entry to `bundle:<name>`); a skill uses its hyphenated prefix. Tools have no
+ * family and therefore keep the old append behaviour.
+ */
+export function memberFamily(member: Member, rows: readonly CatalogRow[]): string | null {
+  if (member.kind === 'tool') return null
+  if (member.kind === 'skill') {
+    const cut = member.id.lastIndexOf('-')
+    return cut > 0 ? member.id.slice(0, cut) : member.id
+  }
+  const row = rows.find(candidate => candidate.kind === 'plugin' && candidate.id === member.id)
+  return row?.root ?? row?.moduleName ?? null
+}
+
+/**
+ * Insert new members beside an existing member of the same family, otherwise append. Existing
+ * rows keep their relative order; only the incoming block moves. This is what makes a transfer
+ * land next to its package/series instead of at the bottom of a long group.
+ */
+export function insertMembersByFamily(
+  existing: readonly Member[],
+  incoming: readonly Member[],
+  rows: readonly CatalogRow[],
+): Member[] {
+  const next = [...existing]
+  const blocks = new Map<string, { index: number; members: Member[] }>()
+  const loose: Array<{ index: number; member: Member }> = []
+  for (const [index, member] of incoming.entries()) {
+    const family = memberFamily(member, rows)
+    if (family === null) {
+      loose.push({ index, member })
+      continue
+    }
+    const block = blocks.get(family) ?? { index, members: [] }
+    block.members.push(member)
+    blocks.set(family, block)
+  }
+  const tail = [...loose]
+  const ordered = [...blocks.entries()].sort((left, right) => left[1].index - right[1].index)
+  for (const [family, block] of ordered) {
+    let anchor = -1
+    for (let index = next.length - 1; index >= 0; index -= 1) {
+      const candidate = next[index]
+      if (candidate !== undefined && memberFamily(candidate, rows) === family) {
+        anchor = index
+        break
+      }
+    }
+    if (anchor === -1) {
+      for (const member of block.members) tail.push({ index: block.index, member })
+    }
+    else next.splice(anchor + 1, 0, ...block.members)
+  }
+  tail.sort((left, right) => left.index - right.index)
+  next.push(...tail.map(entry => entry.member))
+  return next
 }
 
 /** Move members from one group to another in one state write. */
@@ -489,13 +548,8 @@ export function applyGroupTransfer(
   if (moved.length === 0) throw fail('no-members', 'none of those members are in the source group')
   from.members = from.members.filter(member => !moveKeys.has(memberKey(member)))
   const have = new Set(to.members.map(memberKey))
-  for (const member of incoming) {
-    const key = memberKey(member)
-    if (!have.has(key)) {
-      to.members.push(member)
-      have.add(key)
-    }
-  }
+  const added = incoming.filter(member => !have.has(memberKey(member)))
+  to.members = insertMembersByFamily(to.members, added, ctx.rows)
   return { groups: replace(replace(groups, from), to), from, to, moved: moved.length }
 }
 
